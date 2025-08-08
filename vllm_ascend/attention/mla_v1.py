@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, Optional, Tuple, Type, TypeVar
 
 import numpy as np
 import torch
+import torch.distributed as dist
+import torch.nn.functional as F
 import torch_npu
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionLayer,
                                               AttentionMetadata,
@@ -13,6 +15,9 @@ from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.model_executor.layers.linear import (LinearBase,
                                                UnquantizedLinearMethod)
 from vllm.utils import cdiv, round_down
+from vllm.distributed import (get_tensor_model_parallel_world_size,
+                              get_tensor_model_parallel_rank,
+                              get_tp_group)
 
 from vllm_ascend import envs
 from vllm_ascend.ascend_config import get_ascend_config
@@ -613,8 +618,10 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.q_proj = kwargs['q_proj']
         self.kv_b_proj = kwargs['kv_b_proj']
         self.o_proj = kwargs['o_proj']
+        self.kv_b_proj_full = kwargs['kv_b_proj_full']
         self.kv_a_proj_with_mqa = kwargs.get('kv_a_proj_with_mqa', None)
         self.kv_a_layernorm = kwargs.get('kv_a_layernorm', None)
+        self.enable_sp = kwargs.get('enable_sp', False)
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         self.tp_size = get_tensor_model_parallel_world_size()
 
@@ -627,6 +634,10 @@ class AscendMLAImpl(MLAAttentionImpl):
         if speculative_config is not None:
             self.spec_token_num = speculative_config.num_speculative_tokens
             assert self.spec_token_num > 0
+
+        self.sp_size = get_tensor_model_parallel_world_size()
+        self.sp_rank = get_tensor_model_parallel_rank()
+        self.sp_group = get_tp_group().device_group
 
     def _v_up_proj_and_o_proj(self, x, enable_multistream_mla: bool = False):
         # Convert from (B, N, L) to (N, B, L)
@@ -1084,6 +1095,9 @@ class AscendMLAImpl(MLAAttentionImpl):
                     mla_vheadsize=self.kv_lora_rank,
                     out=attn_output)
         current_ms_metadata = get_multistream_comm_context()
+        # attn_output: [seq, num_heads(16/tp), kv_lora_rank(512)]
+        # v_up: [seq, num_heads(16/tp), v_head_dim(128)]
+        # o_proj: [seq, hidden_size(2048)]
         if current_ms_metadata is None:
             return self._v_up_proj_and_o_proj(attn_output,
                                               enable_multistream_mla)
@@ -1092,6 +1106,164 @@ class AscendMLAImpl(MLAAttentionImpl):
             with torch.npu.stream(current_ms_metadata.comm_stream):
                 current_ms_metadata.before_comm_event.wait()
                 return self._v_up_proj_and_o_proj(attn_output)
+
+    def _forward_decode_sp(
+        self,
+        # q_nope: torch.Tensor,
+        # q_pe: torch.Tensor,
+        # k_nope: torch.Tensor,
+        # k_pe: torch.Tensor,
+        q_wo_k_up: torch.Tensor,
+        kv_c_and_k_pe_cache: Tuple[torch.Tensor],
+        attn_metadata: AscendMLAMetadata,
+        # enable_multistream_mla: bool = False,
+    ) -> torch.Tensor:
+        """
+        Since new page_attn op with softmax_lse return is not ready yet,
+        use npu_ring_mla instead, temporarily.
+        Get kv_cache manually by npu_paged_cache_load, other process is same to prefill.
+        TODO After new op is ready we should abandon this and use the same process as _forward_decode
+        TODO Delete redundant comments before pr
+        """
+        decode_meta = attn_metadata.decode
+        assert decode_meta is not None
+        num_tokens = q_wo_k_up.size(0)
+
+        def split_m_to_n_piece(m, n):
+            Neach_section, extras = divmod(m, n)
+            section_sizes = (extras * [Neach_section+1] + (n-extras) * [Neach_section])
+            return section_sizes
+
+        def split_m_to_n_piece_block_align(m, n, block_size=128):
+            num_full_blocks = m // block_size
+            remain_tokens_num = m - num_full_blocks * block_size
+            block_nums = split_m_to_n_piece(num_full_blocks, n)
+            if sum(block_nums) == (block_nums[0] * n):
+                first_unfull_block_index = 0
+            else:
+                first_unfull_block_index = [block_num < block_nums[0] for block_num in block_nums].index(True)
+            tokens = [block_num * block_size for block_num in block_nums]
+            tokens[first_unfull_block_index] += remain_tokens_num
+            return tokens
+
+        q_pe = q_wo_k_up[..., self.qk_nope_head_dim:]
+        q_nope = q_wo_k_up[..., :self.qk_nope_head_dim]
+        decode_metadata = attn_metadata.decode
+
+        seq_len = decode_metadata.seq_lens.numpy()
+        if self.sp_size > 1:
+            # split seq_len, for example, [10, 7] -> [5, 4] for sp0, [5, 3] for sp1
+            seq_len_for_sps = np.array([split_m_to_n_piece_block_align(s, self.sp_size) for s in seq_len])
+            # mask [i, j] shows whether sp_rank j has stored kv_cache of request i so needs to do update_out_and_lse
+            seq_mask = torch.where(torch.tensor(seq_len_for_sps) == 0, 0, 1).to(torch.uint8).to(q_pe.device)
+            seq_len = seq_len_for_sps[:, self.sp_rank]
+        seq_len = torch.tensor(seq_len, dtype=torch.int32)
+        batch_size = seq_len.size(0)
+
+        if torch.sum(seq_len).item() == 0:
+            # Case that no kv_cache has been stored on this rank, no need to do following computation.
+            attn_output = torch.zeros([batch_size, self.num_heads * self.sp_size, self.v_head_dim], dtype=q_pe.dtype, device=q_pe.device)
+            softmax_lse = torch.zeros([self.num_heads * self.sp_size, batch_size], dtype=torch.float32, device=q_pe.device)
+        else:
+            # Normal case.
+            cache_kv_c = kv_c_and_k_pe_cache[0]
+            cache_k_pe = kv_c_and_k_pe_cache[1]
+
+            kv_c_normed, k_pe = torch_npu.atb.npu_paged_cache_load(
+                cache_kv_c,
+                cache_k_pe,
+                decode_metadata.block_table,
+                seq_len.to(q_nope.device),
+                seq_starts=torch.zeros([batch_size], dtype=torch.int32).to(q_nope.device),
+            )
+            # kv_c_normed: [seq, 1, kv_lora_rank(512)], k_pe: [seq, 1, qk_rope_head_dim(64)]
+
+            kv_c_normed = kv_c_normed.squeeze() # [seq, kv_lora_rank(512)]
+            kv_nope = self.kv_b_proj_full(kv_c_normed)[0].view( \
+                -1, self.num_heads * self.sp_size, self.qk_nope_head_dim + self.v_head_dim)
+            # [seq, kv_lora_rank(512)] -> [seq, num_heads_full * (qk_nope_head_dim + v_head_dim)] -> view to [seq, num_heads_full(16), qk_nope_head_dim + v_head_dim (256)]
+
+            k_nope, v = kv_nope\
+                .split([self.qk_nope_head_dim, self.v_head_dim], dim=-1)
+            # k_nope: [seq, num_heads_full(16), qk_nope_head_dim(128)], v: [seq, num_heads_full(16), v_head_dim(128)]
+            k_pe = k_pe.expand((*k_nope.shape[:-1], -1))
+            mask = torch.triu(
+                torch.ones(512, 512, device=q_nope.device, dtype=q_nope.dtype),
+                1)
+            seq_len_q = torch.ones([batch_size], dtype=torch.int32)
+            seq_len_kv = seq_len
+            seq_len_all = torch.stack([seq_len_q, seq_len_kv])
+
+            attn_output, softmax_lse = torch_npu.atb.npu_ring_mla(
+                q_nope=q_nope,          # [batch_size, num_heads_full(16), qk_nope_head_dim(128)]
+                q_rope=q_pe,            # [batch_size, num_heads_full(16), qk_rope_head_dim(64)]
+                k_nope=k_nope,          # [kv_seq_len, num_heads_full(16), qk_nope_head_dim(128)]
+                k_rope=k_pe,            # [kv_seq_len, num_heads_full(16), qk_rope_head_dim(64)]
+                value=v,                # [kv_seq_len, num_heads_full(16), v_head_dim(128)]
+                mask=mask,
+                seqlen=seq_len_all,     # seq_q + seq_kv, for example: [[1, 1, 1, 1], [9, 7, 7, 7]]
+                head_num=self.num_heads * self.sp_size,
+                kv_head_num=self.num_heads * self.sp_size,
+                qk_scale=self.scale,
+                kernel_type="kernel_type_high_precision",
+                mask_type="no_mask",
+                input_layout="type_bsnd",
+                calc_type="calc_type_first_ring",
+            )
+        # attn_output: [bs, num_heads_full(16), v_head_dim(128)], softmax_lse: [num_heads_full(16), bs]
+        if self.sp_size > 1:
+            attn_output = attn_output.permute([1, 2, 0]).contiguous() # [self.num_heads * self.sp_size, self.v_head_dim, bs]
+            softmax_lse = softmax_lse.contiguous() # [self.num_heads * self.sp_size, bs]
+            attn_output_all2all = torch.empty_like(attn_output) # [self.num_heads * self.sp_size, self.v_head_dim, bs]
+            softmax_lse_all2all = torch.empty_like(softmax_lse) # [self.num_heads * self.sp_size, bs]
+            # all2all: gather in sequence dimension, and split in hidden dimension (for following tp)
+            dist.all_to_all_single(attn_output_all2all, attn_output, group=self.sp_group) # [self.num_heads * self.sp_size, self.v_head_dim, bs]
+            dist.all_to_all_single(softmax_lse_all2all, softmax_lse, group=self.sp_group) # [self.num_heads * self.sp_size, bs]
+            attn_output_all2all = attn_output_all2all.permute([2, 0, 1]).contiguous() # [bs, self.num_heads * self.sp_size, self.v_head_dim]
+            softmax_lse_all2all = softmax_lse_all2all.permute([1, 0]).contiguous().unsqueeze(dim=-1) # [bs, self.num_heads * self.sp_size, 1]
+
+            # attn_output, splited in hidden dimension and complete in sequence dimension, gather sequence parts by following update
+            attn_output_split_on_seq = list(torch.chunk(attn_output_all2all, self.sp_size, dim=1))
+            softmax_lse_split_on_seq = list(torch.chunk(softmax_lse_all2all, self.sp_size, dim=1))
+
+            # TODO use update op to replace this
+            def _update_out_and_lse(
+                out: torch.Tensor,
+                lse: torch.Tensor,
+                block_out: torch.Tensor,
+                block_lse: torch.Tensor,
+                mask: torch.Tensor=None,
+            ):
+                if out is None:
+                    out = block_out.to(torch.float32)
+                    lse = block_lse
+                else:
+                    out_mask = mask[:, None, None].expand_as(block_out)
+                    lse_mask = mask[:, None, None].expand_as(block_lse)
+                    block_out = block_out.to(torch.float32)
+                    out_without_update = out.clone()
+                    lse_without_update = lse.clone()
+
+                    # new_lse = lse + torch.log(1 + torch.exp(block_lse - lse))
+                    # out = torch.exp(lse - new_lse) * out + torch.exp(block_lse - new_lse) * block_out
+                    # lse = new_lse
+
+                    # is equal to above
+                    out = out - F.sigmoid(block_lse - lse) * (out - block_out)
+                    lse = lse - F.logsigmoid(lse - block_lse)
+
+                    # mask
+                    out = torch.where(out_mask, out, out_without_update)
+                    lse = torch.where(lse_mask, lse, lse_without_update)
+                return out, lse
+
+            attn_output = None
+            softmax_lse = None
+            for i in range(self.sp_size):
+                attn_output, softmax_lse = _update_out_and_lse(attn_output, softmax_lse, attn_output_split_on_seq[i], softmax_lse_split_on_seq[i], seq_mask[:, i])
+        attn_output = attn_output.reshape([num_tokens, self.num_heads * self.v_head_dim]).to(torch.bfloat16)
+        out = self.o_proj(attn_output, is_prefill=False)[0]
+        return out
 
     def forward(
         self,
@@ -1173,8 +1345,22 @@ class AscendMLAImpl(MLAAttentionImpl):
                                 decode_kv,
                                 enabled=enable_multistream_mla)
 
-            decode_ql_nope, decode_q_pe = \
-                self._q_proj_and_k_up_proj(decode_hs_or_q_c)
+            if self.enable_sp:
+                decode_q_wo_k_up = self.q_proj(decode_hs_or_q_c)[0]\
+                    .view(-1, self.num_heads, self.qk_head_dim)
+                # decode_hs_or_q_c: [seq, q_lora_rank/hidden_size(2048)],
+                # decode_q_wo_k_up: [seq, num_heads(16/tp), qk_nope_head_dim(128) + qk_rope_head_dim(64)]
+            else:
+                decode_ql_nope, decode_q_pe = \
+                    self._q_proj_and_k_up_proj(decode_hs_or_q_c)
+                # decode_hs_or_q_c: [seq, q_lora_rank/hidden_size(2048)],
+                # decode_ql_nope: [seq, num_heads(16/tp), kv_lora_rank(512)], decode_q_pe: [seq, num_heads(16/tp), qk_rope_head_dim(64)]
+            if self.enable_sp and self.sp_size > 1:
+                decode_q_wo_k_up = decode_q_wo_k_up.contiguous()
+                
+                chunk_decode_q_wo_k_up = [torch.empty_like(decode_q_wo_k_up) for _ in range(self.sp_size)]
+                dist.all_gather(chunk_decode_q_wo_k_up, decode_q_wo_k_up, self.sp_group)
+                decode_q_wo_k_up = torch.cat(chunk_decode_q_wo_k_up, dim=1)
             if self.running_in_graph:
                 with npu_stream_switch("mla_secondary",
                                        0,
@@ -1184,11 +1370,20 @@ class AscendMLAImpl(MLAAttentionImpl):
                                     enabled=enable_multistream_mla)
                     decode_q_pe = self.rope_single(decode_q_pe, cos, sin)
             else:
-                decode_q_pe[...], decode_k_pe[...] = self.rotary_emb(
-                    attn_metadata.decode.input_positions,
-                    decode_q_pe.contiguous(),
-                    decode_k_pe,
-                    max_seq_len=attn_metadata.decode.max_seq_lens)
+                if self.enable_sp:
+                    decode_q_wo_k_up_pe = decode_q_wo_k_up[..., self.qk_nope_head_dim:] # [seq, num_heads_full(16), qk_rope_head_dim(64)]
+                    # decode_q_wo_k_up_nope = decode_q_wo_k_up[..., :self.qk_nope_head_dim] # [seq, num_heads_full(16), qk_nope_head_dim(128)]
+                    decode_q_wo_k_up_pe[...], decode_k_pe[...] = self.rotary_emb(
+                        attn_metadata.decode.input_positions,
+                        decode_q_wo_k_up_pe.contiguous(),
+                        decode_k_pe,
+                        max_seq_len=attn_metadata.decode.max_seq_lens)
+                else:
+                    decode_q_pe[...], decode_k_pe[...] = self.rotary_emb(
+                        attn_metadata.decode.input_positions,
+                        decode_q_pe.contiguous(),
+                        decode_k_pe,
+                        max_seq_len=attn_metadata.decode.max_seq_lens)
         if has_prefill:
             assert attn_metadata.prefill is not None
             prefill_q = self.q_proj(prefill_hs_or_q_c)[0]\
@@ -1263,11 +1458,16 @@ class AscendMLAImpl(MLAAttentionImpl):
                                             kv_cache, attn_metadata,
                                             enable_multistream_mla)
             else:
-                output_decode = self._forward_decode(decode_ql_nope,
-                                                     decode_q_pe,
-                                                     decode_k_nope,
-                                                     decode_k_pe, kv_cache,
-                                                     attn_metadata)
+                if self.enable_sp:
+                    output_decode = self._forward_decode_sp(decode_q_wo_k_up,
+                                                            kv_cache,
+                                                            attn_metadata)
+                else:
+                    output_decode = self._forward_decode(decode_ql_nope,
+                                                        decode_q_pe,
+                                                        decode_k_nope,
+                                                        decode_k_pe, kv_cache,
+                                                        attn_metadata)
             current_ms_metadata = get_multistream_comm_context()
             if current_ms_metadata is not None:
                 with torch.npu.stream(current_ms_metadata.comm_stream):
