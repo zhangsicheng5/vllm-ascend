@@ -37,12 +37,13 @@ import torch.nn as nn
 from vllm.attention import AttentionType, get_attn_backend
 from vllm.attention.layer import Attention
 from vllm.config import CompilationLevel, VllmConfig
-from vllm.distributed import get_tensor_model_parallel_world_size
+from vllm.distributed import get_tensor_model_parallel_world_size, get_tensor_model_parallel_rank
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
 from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
                                              get_tp_group)
+from vllm.distributed.parallel_state import get_context_model_parallel_world_size, get_context_model_parallel_rank
 from vllm.forward_context import DPMetadata, get_forward_context
 from vllm.logger import logger
 from vllm.model_executor.layers.fused_moe import FusedMoE
@@ -165,10 +166,15 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         self.block_size = vllm_config.cache_config.block_size
         self.max_num_blocks_per_req = cdiv(self.model_config.max_model_len,
                                            self.block_size)
-        self.max_num_tokens = self.scheduler_config.max_num_batched_tokens
+        self.max_num_tokens = self.scheduler_config.max_num_batched_tokens # * cp_size ?
         self.max_num_reqs = self.scheduler_config.max_num_seqs
         self.dp_size = vllm_config.parallel_config.data_parallel_size
         self.dp_rank = vllm_config.parallel_config.data_parallel_rank
+        self.cp_size = get_context_model_parallel_world_size()
+        self.cp_rank = get_context_model_parallel_rank()
+        self.enable_sp = self.parallel_config.enable_sequence_parallel
+        self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
+        self.sp_rank = get_tensor_model_parallel_rank() if self.enable_sp else 0
         self.device = device
         self.dtype = self.model_config.dtype
         if envs_ascend.VLLM_ASCEND_ENABLE_TOPK_TOPP_OPTIMIZATION:
@@ -265,10 +271,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 self.rejection_sampler = AscendRejectionSampler()
 
         # Persistent batch.
-        self.input_ids = torch.zeros(self.max_num_tokens,
+        self.input_ids = torch.zeros(self.max_num_tokens * self.sp_size,
                                      dtype=torch.int32,
                                      device=self.device)
-        self.positions = torch.zeros(self.max_num_tokens,
+        self.positions = torch.zeros(self.max_num_tokens * self.sp_size,
                                      dtype=torch.int64,
                                      device=self.device)
         self.query_start_loc = torch.zeros(self.max_num_reqs + 1,
@@ -304,22 +310,23 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         # OPTIMIZATION: Cache the tensors rather than creating them every step.
         self.arange_np: npt.NDArray[np.int32] = np.arange(max(
             self.max_num_reqs + 1, self.model_config.max_model_len,
-            self.max_num_tokens),
+            self.max_num_tokens) * self.cp_size * self.sp_size + self.cp_size * self.sp_size * self.max_num_reqs,
                                                           dtype=np.int32)
+        self.position_cp = np.zeros(self.max_num_tokens * self.sp_size, dtype=np.int32)
         # NOTE(woosuk): These tensors are "stateless", i.e., they are literally
         # a faster version of creating a new tensor every time. Thus, we should
         # not make any assumptions about the values in these tensors.
-        self.input_ids_cpu = torch.zeros(self.max_num_tokens,
+        self.input_ids_cpu = torch.zeros(self.max_num_tokens * self.sp_size,
                                          dtype=torch.int32,
                                          device="cpu",
                                          pin_memory=True)
-        self.positions_cpu = torch.zeros(self.max_num_tokens,
+        self.positions_cpu = torch.zeros(self.max_num_tokens * self.sp_size,
                                          dtype=torch.int64,
                                          device="cpu",
                                          pin_memory=True)
         self.positions_np = self.positions_cpu.numpy()
 
-        self.slot_mapping_cpu = torch.zeros(self.max_num_tokens,
+        self.slot_mapping_cpu = torch.zeros(self.max_num_tokens * self.cp_size * self.sp_size + self.cp_size * self.sp_size * self.max_num_reqs,
                                             dtype=torch.int32,
                                             device="cpu",
                                             pin_memory=True)
@@ -479,7 +486,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             self.requests[req_id] = CachedRequestState(
                 req_id=req_id,
                 prompt_token_ids=new_req_data.prompt_token_ids,
-                mm_inputs=new_req_data.mm_inputs,
+                mm_inputs=None, # Maybe because vllm version mismatch, not related to current model, comment it temporarily
                 mm_positions=new_req_data.mm_positions,
                 sampling_params=sampling_params,
                 pooling_params=new_req_data.pooling_params,
@@ -488,6 +495,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 num_computed_tokens=new_req_data.num_computed_tokens,
                 output_token_ids=[],
                 lora_request=new_req_data.lora_request,
+                num_computed_tokens_of_cp_sp=new_req_data.num_computed_tokens_of_cp_sp,
             )
 
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
@@ -534,6 +542,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         is_last_rank = get_pp_group().is_last_rank
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
+            #cp param
+            req_state.kv_rank = req_data.kv_rank[i]
+            req_state.num_computed_tokens_of_cp_sp = req_data.num_computed_tokens_of_cp_sp[i]
+
             num_computed_tokens = req_data.num_computed_tokens[i]
             new_block_ids = req_data.new_block_ids[i]
             resumed_from_preemption = req_data.resumed_from_preemption[i]
@@ -569,6 +581,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 # scheduled in the previous step and needs to be added again.
                 req_ids_to_add.append(req_id)
                 continue
+
+            #cp param
+            self.input_batch.kv_rank[req_index] = req_state.kv_rank
+            self.input_batch.num_computed_tokens_of_cp_sp[req_index] = req_state.num_computed_tokens_of_cp_sp
 
             # Update the persistent batch.
             self.input_batch.num_computed_tokens_cpu[req_index] = (
@@ -1040,6 +1056,75 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                                                 dtype=torch.int32)
         return max_tokens_across_dp_cpu - num_tokens, num_tokens_after_padding
 
+    def _num_scheduled_tokens_prefill_cp(
+        self,
+        num_tokens,
+        num_comnputed_tokens,
+    ):
+        num_scheduled_tokens = num_tokens - num_comnputed_tokens 
+        num_cp_padded_scheduled_tokens = cdiv(num_scheduled_tokens, 2 * self.cp_size) * (2 * self.cp_size) # pad to 2*cp_size
+        cp_pad = num_cp_padded_scheduled_tokens - num_scheduled_tokens   # 给sample用
+        full_indices = list(range(self.max_num_tokens * self.cp_size * self.sp_size + self.cp_size * self.sp_size * self.max_num_reqs))
+        chunk_size = num_cp_padded_scheduled_tokens // (2 * self.cp_size)
+
+        # split position_ids (and use splited postion_ids to split input_ids afterwards)
+        req_position_cp = []
+        req_position_cp.extend(full_indices[self.cp_rank * chunk_size: (self.cp_rank + 1) * chunk_size])
+        req_position_cp.extend(full_indices[num_cp_padded_scheduled_tokens - (self.cp_rank + 1) * chunk_size: num_cp_padded_scheduled_tokens - self.cp_rank * chunk_size])
+
+        # used to recover kv order in cp prefill (after all-gather kv and before storing kv_cache)
+        num_added_recover_tokens = len(self.cp_kv_recover_idx[0]) * self.cp_size
+        for rank in range(self.cp_size):
+            self.cp_kv_recover_idx[rank].extend(full_indices[rank * chunk_size + num_added_recover_tokens: (rank + 1) * chunk_size + num_added_recover_tokens])
+            self.cp_kv_recover_idx[rank].extend(full_indices[num_cp_padded_scheduled_tokens - (rank + 1) * chunk_size + num_added_recover_tokens:
+             num_cp_padded_scheduled_tokens - rank * chunk_size + num_added_recover_tokens])
+
+        return req_position_cp, num_cp_padded_scheduled_tokens, cp_pad
+
+    def _slot_mapping_prefill_cp(
+        self,
+        num_scheduled_tokens_for_slot,
+    ):
+        block_table_cpu = self.input_batch.block_table[0].get_cpu_tensor()
+        num_computed_and_new_tokens_batch = np.array(self.input_batch.num_computed_tokens_of_cp_sp[:self.input_batch.num_reqs])
+        start_index = 0
+        for i in range(self.input_batch.num_reqs):
+            block_table_req = block_table_cpu[i]
+            block_table_indices = np.repeat(block_table_req, self.block_size)
+            num_save_tokens_rank = num_computed_and_new_tokens_batch[i][self.cp_rank][self.sp_rank]
+
+            positions_for_slot = self.arange_np[:num_save_tokens_rank]
+            block_offsets = positions_for_slot % self.block_size
+            slot_mapping = (block_table_indices * self.block_size)[:num_save_tokens_rank] + block_offsets
+
+            num_cp_padded_scheduled_tokens = num_scheduled_tokens_for_slot[i]
+            kv_save_start = np.sum(num_computed_and_new_tokens_batch[i][:self.cp_rank]) + np.sum(num_computed_and_new_tokens_batch[i][self.cp_rank][:self.sp_rank])
+
+            self.slot_mapping_np[start_index+kv_save_start:start_index+kv_save_start+num_save_tokens_rank] = slot_mapping
+
+            start_index += num_cp_padded_scheduled_tokens
+
+    def _slot_mapping_decode_cp(
+        self, 
+        num_scheduled_tokens,
+    ):
+        block_table_cpu = self.input_batch.block_table[0].get_cpu_tensor()
+        num_computed_and_new_tokens_batch = self.input_batch.num_computed_tokens_of_cp_sp
+        start_index = 0
+        for i in range(self.input_batch.num_reqs):
+            num_scheduled_tokens_req = num_scheduled_tokens[i]
+            if self.input_batch.kv_rank[i] == (self.cp_rank, self.sp_rank):
+                block_table_req = block_table_cpu[i]
+                block_table_indices = np.repeat(block_table_req, self.block_size)
+                num_save_tokens_rank = num_computed_and_new_tokens_batch[i][self.cp_rank][self.sp_rank]
+
+                positions_for_slot = self.arange_np[:num_save_tokens_rank]
+                block_offsets = positions_for_slot % self.block_size
+                slot_mapping = (block_table_indices * self.block_size)[:num_save_tokens_rank] + block_offsets
+
+                self.slot_mapping_np[start_index:start_index+num_scheduled_tokens_req] = slot_mapping[-num_scheduled_tokens_req:]
+            start_index += num_scheduled_tokens_req
+
     def _process_reqs(
         self,
         scheduler_output: "SchedulerOutput",
@@ -1080,14 +1165,33 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         # TODO: The Python loop can be slow. Optimize.
         num_scheduled_tokens = np.empty(num_reqs, dtype=np.int32)
         num_valid_tokens = np.empty(num_reqs, dtype=np.int32)
+        num_cp_pads = np.empty(num_reqs, dtype=np.int32)
         max_num_scheduled_tokens = 0
+        start_index = 0
+        num_scheduled_tokens_for_slot = np.empty(num_reqs, dtype=np.int32)
+        self.cp_kv_recover_idx = [[]] * self.cp_size
+        for rank in range(self.cp_size):
+            self.cp_kv_recover_idx[rank] = [] #保证各个rank的list独立
         for i, req_id in enumerate(self.input_batch.req_ids):
             num_tokens = scheduler_output.num_scheduled_tokens[req_id]
+            if self.cp_size > 1 and num_tokens > 1:
+                # when cp > 1 & prefill, need to pad & split sequence here
+                req_position_cp, num_cp_padded_scheduled_tokens, num_cp_pads[i] = self._num_scheduled_tokens_prefill_cp(num_tokens, self.input_batch.num_computed_tokens_cpu[i])
+                num_tokens = len(req_position_cp)
+                self.position_cp[start_index:start_index+num_tokens] = req_position_cp
+                start_index += num_tokens
+                num_scheduled_tokens_for_slot[i] = num_cp_padded_scheduled_tokens
+            else:
+                num_scheduled_tokens_for_slot[i] = num_tokens
             num_scheduled_tokens[i] = num_tokens
             num_valid_tokens[i] = num_tokens - \
                 len(scheduler_output.scheduled_spec_decode_tokens.get(req_id, []))
             max_num_scheduled_tokens = max(max_num_scheduled_tokens,
                                            num_tokens)
+
+        # update total_num_scheduled_tokens
+        total_num_scheduled_tokens = sum(num_scheduled_tokens[:num_reqs])
+        num_input_tokens = total_num_scheduled_tokens   #未考虑图模式pad
 
         # Hot-Swap lora model
         if self.lora_config:
@@ -1099,15 +1203,25 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         cu_num_tokens = np.cumsum(num_scheduled_tokens)
         cumsums_offsets = np.repeat(cu_num_tokens - num_scheduled_tokens,
                                     num_scheduled_tokens)
-        logits_indices = cu_num_tokens - 1
+        # sample id
+        if self.cp_size > 1 and self.attn_metadata_builder._num_prefills > 0:
+            # logits_indices = cu_num_tokens - num_cp_pads[:num_reqs] - 1 # if without all-gather and onlly sample on cp0
+            logits_indices = cu_num_tokens * self.cp_size - num_cp_pads[:num_reqs] - 1
+        else:
+            logits_indices = cu_num_tokens - 1
         logits_indices = torch.from_numpy(logits_indices).to(self.device,
                                                              non_blocking=True)
         arange = self.arange_np[:total_num_scheduled_tokens] - cumsums_offsets
 
         positions_np = self.positions_np[:total_num_scheduled_tokens]
-        np.add(self.input_batch.num_computed_tokens_cpu[req_indices],
-               arange,
-               out=positions_np)
+        if self.cp_size > 1 and self.attn_metadata_builder._num_prefills > 0:
+            np.add(self.input_batch.num_computed_tokens_cpu[req_indices],
+                self.position_cp[:total_num_scheduled_tokens],
+                out=positions_np)
+        else:
+            np.add(self.input_batch.num_computed_tokens_cpu[req_indices],
+                arange,
+                out=positions_np)
 
         # Calculate M-RoPE positions.
         # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
@@ -1131,15 +1245,26 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             num_scheduled_tokens)
         seq_lens = self.seq_lens_cpu[:num_reqs]
 
-        block_table_indices = (req_indices * self.max_num_blocks_per_req +
-                               positions_np // self.block_size)
+        if self.cp_size * self.sp_size > 1:
+            if self.attn_metadata_builder._num_prefills > 0:
+                self.slot_mapping_np.fill(-1)
 
+                self._slot_mapping_prefill_cp(num_scheduled_tokens_for_slot)
+            elif self.attn_metadata_builder._num_decodes > 0:
+                self.slot_mapping_np.fill(-1)
+                self._slot_mapping_decode_cp(num_scheduled_tokens)
+        else:
+            block_table_indices = (req_indices * self.max_num_blocks_per_req +
+                                positions_np // self.block_size)
+
+            block_table_cpu = self.input_batch.block_table[0].get_cpu_tensor()
+            block_numbers = block_table_cpu.flatten()[block_table_indices].numpy()
+            block_offsets = positions_np % self.block_size
+            np.add(block_numbers * self.block_size,
+                block_offsets,
+                out=self.slot_mapping_np[:total_num_scheduled_tokens])
         block_table_cpu = self.input_batch.block_table[0].get_cpu_tensor()
-        block_numbers = block_table_cpu.flatten()[block_table_indices].numpy()
-        block_offsets = positions_np % self.block_size
-        np.add(block_numbers * self.block_size,
-               block_offsets,
-               out=self.slot_mapping_np[:total_num_scheduled_tokens])
+        # logger.info(f'>>>>> runner, cp_rank={self.cp_rank}, sp_rank={self.sp_rank}, block_table={block_table_cpu[:5]}, slot_mapping={self.slot_mapping_np[:10]}')
 
         ascend_config = get_ascend_config()
         use_spec_decode = len(
@@ -1173,6 +1298,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         self.attn_state = attn_state  # type: ignore
 
         extra_builder_kwargs = {}
+        extra_builder_kwargs['cp_kv_recover_idx'] = np.array(self.cp_kv_recover_idx).flatten().tolist()
+        extra_builder_kwargs['num_actual_tokens_cp_full'] = total_num_scheduled_tokens * (self.cp_size if self.attn_metadata_builder._num_prefills > 0 else 1)
+        extra_builder_kwargs['num_computed_tokens_of_cp_sp'] = self.input_batch.num_computed_tokens_of_cp_sp[:self.input_batch.num_reqs]
 
         self.query_start_loc_np[0] = 0
         self.query_start_loc_np[1:num_reqs + 1] = cu_num_tokens
@@ -1229,6 +1357,13 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 max_query_len=max_num_scheduled_tokens,
                 **extra_builder_kwargs,
             )
+
+        # token id pad
+        if self.cp_size > 1:
+            for i in range(num_reqs):
+                if num_scheduled_tokens[i] > 1: # prefill
+                    num_padded_tokens = num_scheduled_tokens_for_slot[i]+self.input_batch.num_computed_tokens_cpu[i]
+                    self.input_batch.token_ids_cpu[i][num_padded_tokens-num_cp_pads[i]: num_padded_tokens] = 0
 
         # Prepare input_ids
         token_indices = (positions_np +
