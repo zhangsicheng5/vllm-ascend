@@ -474,6 +474,7 @@ class DecodeMLAPreprocessResult(NamedTuple):
     q_pe: Optional[torch.Tensor] = None
     k_nope: Optional[torch.Tensor] = None
     k_pe: Optional[torch.Tensor] = None
+    decode_q_wo_k_up: Optional[torch.Tensor] = None
 
 
 class PrefillMLAPreprocessResult(NamedTuple):
@@ -815,7 +816,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         kv_c_and_k_pe_cache: Tuple[torch.Tensor],
         attn_metadata: AscendMLAMetadata,
     ) -> torch.Tensor:
-        num_tokens = query.size(0)
+        num_tokens = q_nope.size(0)
         # Use precomputed indices from the metadata (already converted to tensors and on device)
         q_head_idx = attn_metadata.prefill.q_head_idx
         q_tail_idx = attn_metadata.prefill.q_tail_idx
@@ -1114,19 +1115,32 @@ class AscendMLAImpl(MLAAttentionImpl):
         decode_preprocess_res = None
         prefill_preprocess_res = None
         # Preprocess for decode tokens
+        # TODO decode代码后期需要重新适配，新版本的代码
         if has_decode:
             decode_q_c = q_c[:num_decode_tokens]
             cos = attn_metadata.decode.cos
             sin = attn_metadata.decode.sin
-            decode_ql_nope, decode_q_pe = \
-                self._q_proj_and_k_up_proj(decode_q_c)
-            decode_q_pe = self.rope_single(decode_q_pe, cos, sin)
+            if self.cp_size * self.sp_size > 1:
+                decode_q_wo_k_up = self.q_proj(decode_q_c)[0] \
+                    .view(-1, self.num_heads, self.qk_head_dim)
+            else:
+                decode_ql_nope, decode_q_pe = \
+                    self._q_proj_and_k_up_proj(decode_q_c)
+            if self.sp_size > 1:
+                decode_q_wo_k_up = decode_q_wo_k_up.contiguous()
+                decode_q_wo_k_up = get_tp_group().all_gather(decode_q_wo_k_up, 1)
+            if self.cp_size * self.sp_size > 1:
+                decode_q_wo_k_up_pe = decode_q_wo_k_up[..., self.qk_nope_head_dim:]
+                decode_q_wo_k_up_pe = self.rope_single(decode_q_wo_k_up_pe, cos, sin)
+            else:
+            # TODO sp_cp的decode的适配这里还不完整，待思考位置编码的处理
+                decode_q_pe = self.rope_single(decode_q_pe, cos, sin)
             decode_slots = attn_metadata.slot_mapping[:num_decode_tokens]
             decode_kv_no_split = kv_no_split[:num_decode_tokens]
             decode_k_pe, decode_k_nope = self.exec_kv_decode(
                 decode_kv_no_split, cos, sin, kv_cache, decode_slots)
             decode_preprocess_res = DecodeMLAPreprocessResult(
-                decode_ql_nope, decode_q_pe, decode_k_nope, decode_k_pe)
+                decode_ql_nope, decode_q_pe, decode_k_nope, decode_k_pe, decode_q_wo_k_up)
         # Preprocess for prefill tokens
         if has_prefill:
             prefill_kv_no_split = kv_no_split[
@@ -1140,7 +1154,11 @@ class AscendMLAImpl(MLAAttentionImpl):
             sin = attn_metadata.prefill.sin
             prefill_slots = attn_metadata.slot_mapping[
                 num_decode_tokens:num_actual_tokens]
+            # TODO 待确认这里的位置编码是否会影响到kv cathe的存储
             prefill_q_pe = self.rope_single(prefill_q_pe, cos, sin)
+            if self.cp_size > 1:
+                prefill_kv_no_split = get_cp_group().all_gather(prefill_kv_no_split, 0)
+                prefill_kv_no_split = torch.index_select(prefill_kv_no_split, 0, attn_metadata.prefill.cp_kv_recover_idx)
             prefill_k_pe, prefill_k_c_normed = self.exec_kv_prefill(
                 prefill_kv_no_split, cos, sin, kv_cache, prefill_slots)
             prefill_k_pe = prefill_k_pe.view(prefill_q_c.shape[0],
@@ -1358,11 +1376,8 @@ class AscendMLAImpl(MLAAttentionImpl):
         if decode_preprocess_res is not None:
             # MLA Preprocess for decoding
             if self.cp_size * self.sp_size > 1:
-                output_decode = self._forward_decode_sp(decode_preprocess_res.ql_nope,
-                                                        decode_preprocess_res.q_pe,
-                                                        decode_preprocess_res.k_nope,
-                                                        decode_preprocess_res.k_pe,
-                                                        kv_cache[0].shape[1],
+                output_decode = self._forward_decode_sp(decode_preprocess_res.decode_q_wo_k_up,
+                                                        kv_cache,
                                                         attn_metadata)
             else:
                 output_decode = self._forward_decode(decode_preprocess_res.ql_nope,
