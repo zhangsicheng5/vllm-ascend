@@ -39,7 +39,6 @@ from vllm.config import (CacheConfig, ModelConfig, VllmConfig,
 from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               get_tp_group, split_tensor_along_last_dim,
-                              tensor_model_parallel_all_gather,
                               tensor_model_parallel_all_reduce,
                               tensor_model_parallel_reduce_scatter,
                               get_context_model_parallel_world_size,
@@ -78,7 +77,7 @@ from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ops.fused_moe import AscendFusedMoE
 from vllm_ascend.quantization.quant_config import AscendLinearMethod
 from vllm_ascend.quantization.w8a8_dynamic import AscendW8A8DynamicLinearMethod
-from vllm_ascend.utils import dispose_tensor, npu_prefetch
+from vllm_ascend.utils import dispose_tensor
 
 
 class CustomDeepseekV2SiluAndMul(SiluAndMul):
@@ -291,8 +290,7 @@ class CustomDeepseekV2MLP(nn.Module):
         reduce_results: bool = True,
         force_replicate: bool = False,
         prefix: str = "",
-        enable_sp: bool = False,
-        is_shared_expert: bool = False,
+        enable_sp: bool = False
     ) -> None:
         super().__init__()
         self.enable_sp = enable_sp
@@ -435,8 +433,7 @@ class CustomDeepseekV2MoE(nn.Module):
                 force_replicate=self.enable_multistream_moe
                 or enable_shared_expert_dp,
                 prefix=f"{prefix}.shared_experts",
-                enable_sp = self.enable_sp,
-                is_shared_expert = True,
+                enable_sp = self.enable_sp
             )
         else:
             self.shared_experts = None  # type: ignore
@@ -550,9 +547,6 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         self.sp_group = get_tp_group().device_group
 
         ascend_config = get_ascend_config()
-        self.torchair_graph_enabled = ascend_config.torchair_graph_config.enabled
-        self.enable_multistream_mla = \
-            ascend_config.torchair_graph_config.enable_multistream_mla
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
 
         if self.q_lora_rank is not None:
@@ -594,18 +588,18 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         # Since new page_attn op with softmax_lse return is not ready yet,
         # need a kv_b_proj without tp while decode + sp,
         # refer to log in mla_v1.py _forward_decode_sp
-        # self.kv_b_proj_full = ReplicatedLinear(
-        #     self.kv_lora_rank,
-        #     self.num_heads * (self.qk_nope_head_dim + self.v_head_dim),
-        #     bias=False,
-        #     quant_config=quant_config,
-        #     prefix=f"{prefix}.kv_b_proj")
-        self.kv_b_proj_full = None
+        # TODO remove self.kv_b_proj_full later
+        self.kv_b_proj_full = ReplicatedLinear(
+            self.kv_lora_rank,
+            self.num_heads * (self.qk_nope_head_dim + self.v_head_dim),
+            bias=False,
+            quant_config=quant_config,
+            prefix=f"{prefix}.kv_b_proj")
+        # self.kv_b_proj_full = None
         if (config.n_routed_experts is not None
                 and self.debug_layer_idx >= config.first_k_dense_replace
                 and self.debug_layer_idx % config.moe_layer_freq == 0
-                and (ascend_config.torchair_graph_config.enable_multistream_moe
-                     or self.enable_shared_expert_dp)):
+                and self.enable_shared_expert_dp):
             self.o_proj = CustomDeepseekV2RowParallelLinearReplaceAllreduce(
                 self.num_heads * self.v_head_dim,
                 self.hidden_size,
@@ -658,6 +652,9 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             qk_head_dim=self.qk_head_dim,
             v_head_dim=self.v_head_dim,
             rotary_emb=self.rotary_emb,
+            q_a_proj=self.q_a_proj if self.q_lora_rank is not None else None,
+            q_a_layernorm=self.q_a_layernorm
+            if self.q_lora_rank is not None else None,
             q_proj=self.q_proj if self.q_lora_rank is None else self.q_b_proj,
             kv_a_proj_with_mqa=self.kv_a_proj_with_mqa,
             kv_a_layernorm=self.kv_a_layernorm,
@@ -675,65 +672,34 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             kv_cache: Optional[torch.Tensor] = None,
             attn_metadata: Optional[AttentionMetadata] = None) -> torch.Tensor:
         forward_context = get_forward_context()
-        enable_multistream_mla = (self.enable_multistream_mla
-                                  and attn_metadata is not None
-                                  and not forward_context.with_prefill
-                                  and attn_metadata.num_decodes > 0)
-        forward_kwargs = {"enable_multistream_mla": enable_multistream_mla}
-        is_prefill = 0
+        if kv_cache is None:
+            kv_cache = self.mla_attn.kv_cache[forward_context.virtual_engine]
+        num_tokens = hidden_states.shape[0]
+        need_gather_q_kv = False
+        if self.enable_shared_expert_dp and self.debug_layer_idx > self.first_k_dense_replace and self.debug_layer_idx < self.layers:
+            # Simulate all gather to calculate output shape
+            num_tokens = num_tokens * self.tp_size
+            need_gather_q_kv = True
+        is_prefill = False
         if forward_context.attn_metadata:
             is_prefill = forward_context.attn_metadata.num_prefills
-        if self.q_lora_rank is not None:
-            npu_prefetch(self.q_a_proj.weight,
-                         hidden_states,
-                         enabled=enable_multistream_mla)
-            ckq = self.q_a_proj(hidden_states)[0]
-            hidden_states_or_q_c = self.q_a_layernorm(ckq)
-            forward_kwargs['ckq'] = ckq
-        else:
-            hidden_states_or_q_c = hidden_states
-        if self.torchair_graph_enabled:
+        if self.enable_sp and is_prefill:
+            need_gather_q_kv =True
+        if not self.enable_shared_expert_dp or self.debug_layer_idx < self.first_k_dense_replace:
             output_shape = hidden_states.shape
-            output = torch.empty(output_shape,
-                                 dtype=hidden_states_or_q_c.dtype,
-                                 device=hidden_states_or_q_c.device)
-            forward_kwargs['output'] = output
-            output = self.mla_attn.impl.forward(self.mla_attn,
-                                                hidden_states_or_q_c,
-                                                hidden_states, None, kv_cache,
-                                                attn_metadata,
-                                                **forward_kwargs)
-            output = output.view(-1, output_shape[-1])
-            return output
         else:
-            kv_no_split = self.kv_a_proj_with_mqa(hidden_states)[0]
-            if self.enable_shared_expert_dp and self.debug_layer_idx > self.first_k_dense_replace and self.debug_layer_idx < self.layers:
-                hidden_states_or_q_c = get_tp_group().all_gather(
-                    hidden_states_or_q_c, 0)
-                kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
-
-            if self.enable_sp and is_prefill:
-                kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
-                kv_no_split = kv_no_split[:original_len]
-
-                hidden_states_or_q_c = get_tp_group().all_gather(hidden_states_or_q_c, 0)
-                hidden_states_or_q_c = hidden_states_or_q_c[:original_len]
-
-            kv_c, k_pe = kv_no_split.split(
-                [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
-            kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
-            if not self.enable_shared_expert_dp or self.debug_layer_idx < self.first_k_dense_replace:
-                output_shape = hidden_states.shape
-            else:
-                num_tokens = hidden_states_or_q_c.shape[0]
-                rows = num_tokens // self.tp_size
-                if num_tokens % self.tp_size:
-                    rows += 1
-                output_shape = (rows, hidden_states.shape[1])
-            return self.mla_attn(hidden_states_or_q_c,
-                                 kv_c_normed,
-                                 k_pe,
-                                 output_shape=output_shape)
+            rows = num_tokens // self.tp_size
+            if num_tokens % self.tp_size:
+                rows += 1
+            output_shape = (rows, hidden_states.shape[1])
+        output = torch.empty(output_shape,
+                             dtype=hidden_states.dtype,
+                             device=hidden_states.device)
+        output = self.mla_attn.impl.forward(hidden_states, kv_cache,
+                                            forward_context.attn_metadata,
+                                            need_gather_q_kv, output)
+        output = output.view(-1, output_shape[-1])
+        return output
 
 
 class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
@@ -795,8 +761,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
                 prefix=f"{prefix}.mlp",
                 enable_sp = self.enable_sp,
             )
-            self.mla_moe_communication = ascend_config.torchair_graph_config.enable_multistream_moe \
-                and model_config.use_mla and self.tp_size > 1
         else:
             self.mlp = CustomDeepseekV2MLP(
                 hidden_size=config.hidden_size,
@@ -804,10 +768,8 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
                 prefix=f"{prefix}.mlp",
-                enable_sp = self.enable_sp,
-                is_shared_expert = False,
+                enable_sp = self.enable_sp
             )
-            self.mla_moe_communication = False
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
         self.post_attention_layernorm = RMSNorm(config.hidden_size,
@@ -828,10 +790,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         replace_allreduce: bool = False,
     ) -> torch.Tensor:
         # Self Attention
-        if attn_metadata is not None and attn_metadata.num_decodes > 0:
-            mla_moe_communication = self.mla_moe_communication and replace_allreduce
-        else:
-            mla_moe_communication = False
         if residual is None:
             residual = hidden_states
             hidden_states = self.input_layernorm(hidden_states)
@@ -843,9 +801,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             # to save npu memory because they're no longer used.
             dispose_tensor(previous_hidden_states)
             dispose_tensor(previous_residual)
-        if mla_moe_communication and self.layer_idx > self.first_k_dense_replace:
-            hidden_states = tensor_model_parallel_all_gather(hidden_states,
-                                                             dim=0)
 
         hidden_states = self.self_attn(
             original_len=original_len,
@@ -854,13 +809,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             kv_cache=kv_cache,
             attn_metadata=attn_metadata,
         )
-
-        if mla_moe_communication and residual.shape[0] != hidden_states.shape[
-                0]:
-            chunk_hidden_states = torch.tensor_split(residual,
-                                                     self.tp_size,
-                                                     dim=0)
-            residual = chunk_hidden_states[self.tp_rank]
 
         if hidden_states.dtype == torch.float16:
             # Fix FP16 overflow
@@ -889,9 +837,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             hidden_states, residual)
 
         if isinstance(self.mlp, CustomDeepseekV2MoE):
-            hidden_states = self.mlp(hidden_states,
-                                     attn_metadata,
-                                     replace_allreduce=mla_moe_communication)
+            hidden_states = self.mlp(hidden_states, attn_metadata)
         else:
             hidden_states = self.mlp(hidden_states)
 
@@ -904,10 +850,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             # The scaling of DeepseekV2MOE output would be done in the forward
             # of DeepseekV2MOE
             hidden_states *= 1. / self.routed_scaling_factor
-        if mla_moe_communication and self.layer_idx == self.layers - 1:
-            hidden_states = tensor_model_parallel_all_gather(hidden_states,
-                                                             dim=0)
-            residual = tensor_model_parallel_all_gather(residual, dim=0)
 
         # for last layer of main model and mtp layer.
         if self.enable_shared_expert_dp and self.layer_idx >= (
@@ -1019,8 +961,7 @@ class CustomDeepseekV2Model(nn.Module):
                 positions,
                 hidden_states,
                 residual,
-                kv_caches[i -
-                          self.start_layer] if kv_caches is not None else None,
+                kv_caches[i - self.start_layer] if kv_caches is not None else None,
                 attn_metadata,
                 replace_allreduce=replace_allreduce)
 
@@ -1164,15 +1105,15 @@ class CustomDeepseekV2ForCausalLM(DeepseekV2ForCausalLM):
                                             default_weight_loader)
                     weight_loader(param, loaded_weight)
                     # also load kv_b_proj weights to kv_b_proj_full, for forward_decode_sp
-                    # name_split = name.split('.')
-                    # if name_split[-2] == 'kv_b_proj':
-                    #     name_split[-2] = name_split[-2] + '_full'
-                    #     new_name = '.'.join(name_split)
-                    #     param = params_dict[new_name]
-                    #     weight_loader = getattr(param, "weight_loader",
-                    #                             default_weight_loader)
-                    #     weight_loader(param, loaded_weight)
-                    #     loaded_params.add(new_name)
+                    name_split = name.split('.')
+                    if name_split[-2] == 'kv_b_proj':
+                        name_split[-2] = name_split[-2] + '_full'
+                        new_name = '.'.join(name_split)
+                        param = params_dict[new_name]
+                        weight_loader = getattr(param, "weight_loader",
+                                                default_weight_loader)
+                        weight_loader(param, loaded_weight)
+                        loaded_params.add(new_name)
             loaded_params.add(name)
         return loaded_params
 

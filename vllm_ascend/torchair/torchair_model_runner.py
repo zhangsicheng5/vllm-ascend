@@ -15,7 +15,7 @@
 # limitations under the License.
 # This file is a part of the vllm-ascend project.
 # Adapted from vllm-project/vllm/vllm/worker/gpu_model_runner.py
-#
+# isort: skip_file
 
 import types
 from typing import Optional
@@ -34,12 +34,12 @@ from vllm.logger import logger
 import vllm_ascend.envs as envs_ascend
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.platform import NPUPlatform
-from vllm_ascend.torchair.utils import (TorchairCommonAttentionMetadata,
-                                        check_torchair_cache_exist,
-                                        register_torchair_model,
-                                        write_kv_cache_bytes_to_file)
+from vllm_ascend.torchair.utils import (
+    TorchairCommonAttentionMetadata, check_torchair_cache_exist,
+    converting_weight_acl_format, register_torchair_model, torchair_ops_patch,
+    torchair_quant_method_register, write_kv_cache_bytes_to_file)
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
-                               is_310p, maybe_converting_weight_acl_format)
+                               is_310p)
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
 
 
@@ -66,8 +66,10 @@ class NPUTorchairModelRunner(NPUModelRunner):
 
         self._check_batch_sizes_consistency()
         register_torchair_model()
+        torchair_ops_patch()
+        torchair_quant_method_register()
 
-    def _get_forward_metadata_across_dp_and_pad(
+    def _sync_metadata_across_dp(
             self, num_tokens: int, with_prefill: bool, enable_dbo: bool
     ) -> tuple[int, Optional[torch.Tensor], bool, bool]:
         """Override from NPUModelRunner to pad num_tokens"""
@@ -78,8 +80,17 @@ class NPUTorchairModelRunner(NPUModelRunner):
                 return maybe_padded_num_tokens, None, with_prefill, enable_dbo
             return num_tokens, None, with_prefill, enable_dbo
 
-        num_tokens_across_dp, with_prefill, enable_dbo = self._get_forward_metadata_across_dp(
-            num_tokens, with_prefill, enable_dbo)
+        num_tokens_across_dp = torch.zeros(self.dp_size + 2,
+                                           dtype=torch.int32,
+                                           device="npu")
+        num_tokens_across_dp[self.dp_rank] = num_tokens
+        num_tokens_across_dp[-2] = int(with_prefill)
+        num_tokens_across_dp[-1] = int(not enable_dbo)
+        dist.all_reduce(num_tokens_across_dp,
+                        group=get_dp_group().device_group)
+        with_prefill = bool(num_tokens_across_dp[-2])
+        enable_dbo = not bool(num_tokens_across_dp[-1])
+        num_tokens_across_dp = num_tokens_across_dp[:-2]
 
         if not with_prefill:
             max_num_token = num_tokens_across_dp.max().item()
@@ -88,7 +99,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
             num_tokens_across_dp = torch.full((self.dp_size, ),
                                               maybe_padded_num_tokens,
                                               dtype=torch.int32,
-                                              device="cpu")
+                                              device="npu")
         else:
             maybe_padded_num_tokens = num_tokens
 
@@ -136,9 +147,8 @@ class NPUTorchairModelRunner(NPUModelRunner):
                     assert isinstance(kv, tuple), "kv_cache must be a tuple"
                     torch._dynamo.mark_static(kv[0])
                     torch._dynamo.mark_static(kv[1])
-
-            maybe_converting_weight_acl_format(self.model,
-                                               ACL_FORMAT_FRACTAL_NZ)
+            if is_310p():
+                converting_weight_acl_format(self.model, ACL_FORMAT_FRACTAL_NZ)
 
             compiled_model = self._get_torchair_lazy_compiled_model(num_tokens)
             model_kwargs = {}
@@ -152,6 +162,8 @@ class NPUTorchairModelRunner(NPUModelRunner):
                 **model_kwargs,
             )
         else:
+            if is_310p():
+                converting_weight_acl_format(self.model, ACL_FORMAT_FRACTAL_ND)
             hidden_states = super()._generate_dummy_run_hidden_states(
                 with_prefill, is_torchair_compile, input_ids, positions,
                 attn_metadata, num_tokens, intermediate_tensors, inputs_embeds)
@@ -261,9 +273,8 @@ class NPUTorchairModelRunner(NPUModelRunner):
             "attn_metadata": attn_metadata
         }
         if not with_prefill:
-            maybe_converting_weight_acl_format(self.model,
-                                               ACL_FORMAT_FRACTAL_NZ)
-
+            if is_310p():
+                converting_weight_acl_format(self.model, ACL_FORMAT_FRACTAL_NZ)
             compiled_model = self._get_torchair_lazy_compiled_model(
                 padded_num_tokens_across_dp)
             hidden_states = compiled_model(
@@ -275,8 +286,8 @@ class NPUTorchairModelRunner(NPUModelRunner):
             )
         else:
             assert self.model is not None
-            maybe_converting_weight_acl_format(self.model,
-                                               ACL_FORMAT_FRACTAL_ND)
+            if is_310p():
+                converting_weight_acl_format(self.model, ACL_FORMAT_FRACTAL_ND)
 
             hidden_states = self.model(
                 input_ids=input_ids,
@@ -418,3 +429,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
 
     def _build_drafter_prepare_inputs_torchair_param(self):
         return True
+
+    def get_dp_padding(self, num_tokens):
+        """Override from NPUModelRunner to get dp padding"""
+        return 0, None
