@@ -67,10 +67,10 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_kv_cache_shape(
-            num_blocks: int,
-            block_size: int,
-            num_kv_heads: int,
-            head_size: int,
+        num_blocks: int,
+        block_size: int,
+        num_kv_heads: int,
+        head_size: int,
     ) -> Tuple[int, ...]:
         if is_310p():
             return (2, num_blocks, num_kv_heads * head_size // 16, block_size,
@@ -79,18 +79,18 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def get_bsh_kv_cache_shape(
-            num_blocks: int,
-            block_size: int,
-            num_kv_heads: int,
-            head_size: int,
+        num_blocks: int,
+        block_size: int,
+        num_kv_heads: int,
+        head_size: int,
     ) -> Tuple[int, ...]:
         return (2, num_blocks, block_size, num_kv_heads * head_size)
 
     @staticmethod
     def swap_blocks(
-            src_kv_cache: List[torch.Tensor],
-            dst_kv_cache: List[torch.Tensor],
-            src_to_dst: torch.Tensor,
+        src_kv_cache: List[torch.Tensor],
+        dst_kv_cache: List[torch.Tensor],
+        src_to_dst: torch.Tensor,
     ) -> None:
         src_key_cache, src_value_cache = src_kv_cache[0], src_kv_cache[1]
         dst_key_cache, dst_value_cache = dst_kv_cache[0], dst_kv_cache[1]
@@ -104,8 +104,8 @@ class AscendAttentionBackend(AttentionBackend):
 
     @staticmethod
     def copy_blocks(
-            kv_caches: List[torch.Tensor],
-            src_to_dists: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        src_to_dists: torch.Tensor,
     ) -> None:
         src_indices = src_to_dists[:, 0]
         dst_indices = src_to_dists[:, 1]
@@ -212,9 +212,9 @@ class AscendAttentionMetadataBuilder:
         return False
 
     def build(
-            self,
-            common_attn_metadata: AscendCommonAttentionMetadata,
-            model: nn.Module,
+        self,
+        common_attn_metadata: AscendCommonAttentionMetadata,
+        model: nn.Module,
     ):
         num_reqs = common_attn_metadata.num_reqs
         num_actual_tokens = common_attn_metadata.num_actual_tokens
@@ -315,18 +315,18 @@ class AscendAttentionMetadataBuilder:
 class AscendAttentionBackendImpl(AttentionImpl):
 
     def __init__(
-            self,
-            num_heads: int,
-            head_size: int,
-            scale: float,
-            num_kv_heads: int,
-            alibi_slopes: Optional[List[float]],
-            sliding_window: Optional[int],
-            kv_cache_dtype: str,
-            logits_soft_cap: Optional[float],
-            attn_type: str,
-            kv_sharing_target_layer_name: Optional[str],
-            **kwargs,
+        self,
+        num_heads: int,
+        head_size: int,
+        scale: float,
+        num_kv_heads: int,
+        alibi_slopes: Optional[List[float]],
+        sliding_window: Optional[int],
+        kv_cache_dtype: str,
+        logits_soft_cap: Optional[float],
+        attn_type: str,
+        kv_sharing_target_layer_name: Optional[str],
+        **kwargs,
     ) -> None:
         self.num_heads = num_heads
         self.head_size = head_size
@@ -366,13 +366,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
                                      head_dim)
 
     def _forward_prefill_no_cache(
-            self,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            attn_metadata: AscendMetadata,
-            output: Optional[torch.Tensor] = None,
-            num_tokens=0,
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: Optional[torch.Tensor] = None,
+        num_tokens=0,
     ) -> torch.Tensor:
         assert attn_metadata is not None
         assert attn_metadata.attn_mask is not None
@@ -422,10 +422,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return output[:num_tokens, :, :]
 
     def _forward_prefill_cache_hit(
-            self,
-            query: torch.Tensor,
-            attn_metadata: AscendMetadata,
-            output: Optional[torch.Tensor] = None,
+        self,
+        query: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         assert attn_metadata is not None
         assert attn_metadata.attn_mask is not None
@@ -449,10 +449,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return output
 
     def _forward_decode_only(
-            self,
-            query: torch.Tensor,
-            attn_metadata: AscendMetadata,
-            output: Optional[torch.Tensor] = None,
+        self,
+        query: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if is_310p():
             # seq_lens_tensor needs to be transferred to the device for 310P.
@@ -498,10 +498,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return output
 
     def _forward_v1_style(
-            self,
-            query: torch.Tensor,
-            attn_metadata: AscendMetadata,
-            output: Optional[torch.Tensor] = None,
+        self,
+        query: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         # Use chunked prefill for head size 192 scenario, like deepseek
         # paged_attention_splitfuse maybe crash at such scenario.
@@ -570,16 +570,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return tensor_tnd
 
     def _attention_with_nomask_and_mask(
-            self,
-            q: torch.Tensor,
-            q_seqlens: Optional[List[int]],
-            k_nomask: torch.Tensor,
-            v_nomask: torch.Tensor,
-            kv_seqlens_nomask: Optional[List[int]],
-            k_mask: torch.Tensor,
-            v_mask: torch.Tensor,
-            kv_seqlens_mask: Optional[List[int]],
-            mask: torch.Tensor
+        self,
+        q: torch.Tensor,
+        q_seqlens: Optional[List[int]],
+        k_nomask: torch.Tensor,
+        v_nomask: torch.Tensor,
+        kv_seqlens_nomask: Optional[List[int]],
+        k_mask: torch.Tensor,
+        v_mask: torch.Tensor,
+        kv_seqlens_mask: Optional[List[int]],
+        mask: torch.Tensor
     ) -> torch.Tensor:
         q = self._pack_tnd_2_bsnd(q, q_seqlens)
 
@@ -635,11 +635,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return output
 
     def _forward_prefill_cp(
-            self,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            attn_metadata: AscendMetadata
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AscendMetadata
     ) -> torch.Tensor:
         # Use precomputed indices from the metadata (already converted to tensors and on device)
         q_head_idx = attn_metadata.prefill.cp_metadata.q_head_idx
@@ -698,9 +698,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return out_final, lse_final
 
     def _forward_decode_cp(
-            self,
-            query: torch.Tensor,
-            attn_metadata: AscendMetadata
+        self,
+        query: torch.Tensor,
+        attn_metadata: AscendMetadata
     ) -> torch.Tensor:
         # 1. Compute out&lse by "npu_fused_infer_attention_score"
         attn_out, attn_lse = torch.ops.npu.npu_fused_infer_attention_score(
@@ -734,15 +734,15 @@ class AscendAttentionBackendImpl(AttentionImpl):
         return output
 
     def forward(
-            self,
-            layer: AttentionLayer,
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            kv_cache: Tuple[torch.Tensor],
-            attn_metadata: AscendMetadata,
-            output: Optional[torch.Tensor] = None,
-            trace_flag: bool = True,
+        self,
+        layer: AttentionLayer,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: Tuple[torch.Tensor],
+        attn_metadata: AscendMetadata,
+        output: Optional[torch.Tensor] = None,
+        trace_flag: bool = True,
     ) -> torch.Tensor:
         """Forward pass with Ascend attention.
         Args:
@@ -847,11 +847,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
 
 def unified_ascend_attention_with_output(
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        output: torch.Tensor,
-        layer_name: str,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    output: torch.Tensor,
+    layer_name: str,
 ) -> None:
     forward_context: ForwardContext = get_forward_context()
     attn_metadata = forward_context.attn_metadata
@@ -869,11 +869,11 @@ def unified_ascend_attention_with_output(
 
 
 def unified_attention_with_output_fake(
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        output: torch.Tensor,
-        layer_name: str,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    output: torch.Tensor,
+    layer_name: str,
 ) -> None:
     return
 
