@@ -1284,7 +1284,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         attn_state = self._build_attn_state(num_reqs, num_scheduled_tokens,
                                             num_valid_tokens)
 
-        if self.cp_size > 1 or self.sp_size > 1:
+        if self.cp_size > 1:
             self.attn_mask = None
         else:
             self.attn_mask = self._make_attention_mask(seq_lens=seq_lens_cpu,

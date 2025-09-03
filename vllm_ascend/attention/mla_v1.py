@@ -1111,11 +1111,12 @@ class AscendMLAImpl(MLAAttentionImpl):
         # Process for shared_expert_dp
         if need_gather_q_kv:
             q_c = get_tp_group().all_gather(q_c, 0)
+            q_c = q_c[:attn_metadata.num_input_tokens]
             kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
+            kv_no_split = kv_no_split[:attn_metadata.num_input_tokens]
         decode_preprocess_res = None
         prefill_preprocess_res = None
         # Preprocess for decode tokens
-        # TODO decode代码后期需要重新适配，新版本的代码
         if has_decode:
             decode_q_c = q_c[:num_decode_tokens]
             cos = attn_metadata.decode.cos
