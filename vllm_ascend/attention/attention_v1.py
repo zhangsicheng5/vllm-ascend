@@ -259,11 +259,6 @@ class AscendAttentionMetadataBuilder:
 
         prefill_metadata = None
         if num_prefills > 0:
-            reqs_start = num_decodes  # prefill_start
-            tokens_start = num_decode_tokens
-            prefill_query_start_loc = query_start_loc[
-                                      reqs_start:] - query_start_loc[reqs_start]
-            prefill_input_positions = input_positions[tokens_start:]
             cp_metadata = None
             common_long_seq_metadata = common_attn_metadata.common_long_seq_metadata
             if common_long_seq_metadata is not None:
