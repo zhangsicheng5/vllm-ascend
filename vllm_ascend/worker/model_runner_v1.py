@@ -242,7 +242,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         self.attn_metadata_builder = self.attn_backend.get_builder_cls()(
             vllm_config, device)
         self.attn_mask_builder = AttentionMaskBuilder(
-            self.model_config.max_model_len, self.dtype)
+            self.model_config.max_model_len, self.dtype) if self.cp_size * self.sp_size == 1 else None
 
         # Set up speculative decoding.
         self.use_aux_hidden_state_outputs = False
