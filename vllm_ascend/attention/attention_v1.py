@@ -126,7 +126,7 @@ class AscendAttentionState(Enum):
 
 
 @dataclass
-class AsecendCpMetadata:
+class AscendCpMetadata:
     cp_kv_recover_idx: list[int] = None
     q_head_idx: torch.Tensor = None
     q_tail_idx: torch.Tensor = None
@@ -144,7 +144,7 @@ class AsecendCpMetadata:
 @dataclass
 class AscendPrefillMetadata:
     """ Prefill Specific Metadata for Ascend"""
-    cp_metadata: AsecendCpMetadata = None
+    cp_metadata: AscendCpMetadata = None
 
 
 @dataclass
@@ -262,7 +262,7 @@ class AscendAttentionMetadataBuilder:
             cp_metadata = None
             common_long_seq_metadata = common_attn_metadata.common_long_seq_metadata
             if common_long_seq_metadata is not None:
-                cp_metadata = AsecendCpMetadata(
+                cp_metadata = AscendCpMetadata(
                     cp_kv_recover_idx=common_long_seq_metadata.cp_kv_recover_idx,
                     q_head_idx=common_long_seq_metadata.q_head_idx_tensor,
                     q_tail_idx=common_long_seq_metadata.q_tail_idx_tensor,
@@ -651,13 +651,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
         # 1. Attention calculation in the first half of Q in load balancing
         output_head = self._attention_with_nomask_and_mask(
             q=torch.index_select(query, 0, q_head_idx),
-            q_seqlens=[attn_mask_seqlens[0]],
+            q_seqlens=attn_mask_seqlens[0].tolist(),
             k_nomask=torch.index_select(key, 0, kv_with_q_head_nomask_idx) if self.cp_rank > 0 else None,
             v_nomask=torch.index_select(value, 0, kv_with_q_head_nomask_idx) if self.cp_rank > 0 else None,
-            kv_seqlens_nomask=[head_attn_nomask_seqlens[1]],
+            kv_seqlens_nomask=head_attn_nomask_seqlens[1].tolist(),
             k_mask=torch.index_select(key, 0, kv_with_q_head_mask_idx),
             v_mask=torch.index_select(value, 0, kv_with_q_head_mask_idx),
-            kv_seqlens_mask=[attn_mask_seqlens[0]],
+            kv_seqlens_mask=attn_mask_seqlens[0].tolist(),
             mask=mask)
 
         # 2. the Attention calculation in the latter half of Q in load balancing
@@ -665,13 +665,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
         # cp_rank1: Q2*KV0~KV1 + Q2*KV2
         output_tail = self._attention_with_nomask_and_mask(
             q=torch.index_select(query, 0, q_tail_idx),
-            q_seqlens=[attn_mask_seqlens[0]],
+            q_seqlens=attn_mask_seqlens[0].tolist(),
             k_nomask=torch.index_select(key, 0, kv_with_q_tail_nomask_idx),
             v_nomask=torch.index_select(value, 0, kv_with_q_tail_nomask_idx),
-            kv_seqlens_nomask=[tail_attn_nomask_seqlens[1]],
+            kv_seqlens_nomask=tail_attn_nomask_seqlens[1].tolist(),
             k_mask=torch.index_select(key, 0, kv_with_q_tail_mask_idx),
             v_mask=torch.index_select(value, 0, kv_with_q_tail_mask_idx),
-            kv_seqlens_mask=[attn_mask_seqlens[0]],
+            kv_seqlens_mask=attn_mask_seqlens[0].tolist(),
             mask=mask)
 
         # 3. Combine the output of the first half and second half.
