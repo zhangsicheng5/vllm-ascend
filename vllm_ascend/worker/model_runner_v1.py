@@ -241,8 +241,11 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         )
         self.attn_metadata_builder = self.attn_backend.get_builder_cls()(
             vllm_config, device)
-        self.attn_mask_builder = AttentionMaskBuilder(
-            self.model_config.max_model_len, self.dtype) if self.cp_size * self.sp_size == 1 else None
+        if self.cp_size > 1:
+            self.attn_mask_builder = None
+        else:
+            self.attn_mask_builder = AttentionMaskBuilder(
+                self.model_config.max_model_len, self.dtype)
 
         # Set up speculative decoding.
         self.use_aux_hidden_state_outputs = False
@@ -1161,9 +1164,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         max_num_scheduled_tokens = 0
         start_index = 0
         num_scheduled_tokens_for_slot = np.empty(num_reqs, dtype=np.int32)
-        self.cp_kv_recover_idx = [[]] * self.cp_size
-        for rank in range(self.cp_size):
-            self.cp_kv_recover_idx[rank] = []  # 保证各个rank的list独立
+        self.cp_kv_recover_idx = [[] for _ in range(self.cp_size)]
         for i, req_id in enumerate(self.input_batch.req_ids):
             num_tokens = scheduler_output.num_scheduled_tokens[req_id]
             if self.cp_size > 1 and num_tokens > 1:
