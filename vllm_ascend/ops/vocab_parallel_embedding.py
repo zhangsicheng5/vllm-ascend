@@ -29,6 +29,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, UnquantizedEmbeddingMethod,
     VocabParallelEmbedding, pad_vocab_size)
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.forward_context import get_forward_context
 
 from vllm_ascend.distributed.parallel_state import get_lmhead_tp_group
 from vllm_ascend.utils import lmhead_tp_enable
@@ -145,7 +146,6 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         return input_, ~vocab_mask
 
     def forward(self, input_):
-        from vllm.forward_context import get_forward_context
         forward_context = get_forward_context()
         self.enable_sp = forward_context.enable_sp
 

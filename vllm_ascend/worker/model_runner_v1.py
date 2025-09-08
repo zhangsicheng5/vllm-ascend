@@ -38,7 +38,9 @@ from vllm.compilation.counter import compilation_counter
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
 from vllm.config import CompilationLevel, CUDAGraphMode, VllmConfig
 from vllm.distributed import (get_tensor_model_parallel_world_size,
-                              get_tensor_model_parallel_rank)
+                              get_tensor_model_parallel_rank,
+                              get_tp_group, 
+                              get_cp_group)
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
@@ -1565,6 +1567,12 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
+        if self.enable_sp and with_prefill:
+            hidden_states = get_tp_group().all_gather(hidden_states, 0)
+            hidden_states = hidden_states[:attn_metadata.num_input_tokens]
+        if self.cp_size > 1 and with_prefill:
+            hidden_states = get_cp_group().all_gather(hidden_states, 0)
+            hidden_states = torch.index_select(hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
         return hidden_states
 
     def _build_attn_state(self, num_reqs, num_scheduled_tokens,

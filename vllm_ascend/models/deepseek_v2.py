@@ -28,8 +28,6 @@
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
-import torch.distributed as dist
-import torch.nn.functional as F
 import torch_npu
 from torch import nn
 from transformers import PretrainedConfig
@@ -40,10 +38,7 @@ from vllm.distributed import (get_pp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               get_tp_group, split_tensor_along_last_dim,
                               tensor_model_parallel_all_reduce,
-                              tensor_model_parallel_reduce_scatter,
-                              get_context_model_parallel_world_size,
-                              get_cp_group,
-                              get_cp_group)
+                              tensor_model_parallel_reduce_scatter)
 from vllm.distributed.parallel_state import get_dp_group, get_ep_group
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.activation import SiluAndMul
@@ -58,7 +53,7 @@ from vllm.model_executor.layers.quantization import QuantizationConfig
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.model_executor.layers.sampler import get_sampler
 from vllm.model_executor.layers.vocab_parallel_embedding import (
-    ParallelLMHead, VocabParallelEmbedding, get_masked_input_and_mask)
+    ParallelLMHead, VocabParallelEmbedding)
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.models.deepseek_v2 import \
@@ -232,6 +227,7 @@ class CustomDeepseekV2RowParallelLinear(RowParallelLinear):
             reminder = original_len % sp_size
             if reminder != 0:
                 padding_len = sp_size - reminder
+                import torch.nn.functional as F
                 output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
             output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
         elif self.reduce_results and self.tp_size > 1:
@@ -261,8 +257,6 @@ class CustomDeepseekV2MLP(nn.Module):
     ) -> None:
         super().__init__()
         self.enable_sp = enable_sp
-        self.sp_size = get_tensor_model_parallel_world_size()
-        self.sp_group = get_tp_group().device_group
         if not force_replicate and not enable_sp:
             self.gate_up_proj = MergedColumnParallelLinear(
                 hidden_size, [intermediate_size] * 2,
@@ -507,11 +501,7 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         self.prefix = prefix
         self.debug_layer_idx = int(self.prefix.split(".")[-2])
 
-        self.cp_size = get_context_model_parallel_world_size()
-        self.cp_group = get_cp_group().device_group
         self.enable_sp = enable_sp
-        self.sp_size = get_tensor_model_parallel_world_size()
-        self.sp_group = get_tp_group().device_group
 
         ascend_config = get_ascend_config()
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
@@ -850,10 +840,6 @@ class CustomDeepseekV2Model(nn.Module):
         self.vocab_size = config.vocab_size
         self.tp_size = get_tensor_model_parallel_world_size()
         self.enable_sp = vllm_config.parallel_config.enable_sequence_parallel
-        self.cp_size = get_context_model_parallel_world_size()
-        self.sp_size = get_tensor_model_parallel_world_size()
-        self.sp_group = get_tp_group().device_group
-        self.cp_group = get_cp_group().device_group
 
         if get_pp_group().is_first_rank:
             self.embed_tokens = VocabParallelEmbedding(
@@ -896,11 +882,6 @@ class CustomDeepseekV2Model(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        is_prefill = 0
-        attn_metadata = get_forward_context().attn_metadata
-        if attn_metadata:
-            is_prefill = attn_metadata.num_prefills
-
         if get_pp_group().is_first_rank:
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
@@ -931,12 +912,6 @@ class CustomDeepseekV2Model(nn.Module):
             })
 
         hidden_states, _ = self.norm(hidden_states, residual)
-        if self.enable_sp and is_prefill:
-            hidden_states = get_tp_group().all_gather(hidden_states, 0)
-            hidden_states = hidden_states[:attn_metadata.num_input_tokens]
-        if self.cp_size > 1 and is_prefill:
-            hidden_states = get_cp_group().all_gather(hidden_states, 0)
-            hidden_states = torch.index_select(hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
         return hidden_states
 
 
