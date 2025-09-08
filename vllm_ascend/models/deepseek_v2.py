@@ -666,7 +666,6 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
 
     def forward(
             self,
-            original_len: int,
             positions: torch.Tensor,
             hidden_states: torch.Tensor,
             kv_cache: Optional[torch.Tensor] = None,
@@ -781,7 +780,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
 
     def forward(
         self,
-        original_len: int,
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
         residual: Optional[torch.Tensor],
@@ -803,7 +801,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             dispose_tensor(previous_residual)
 
         hidden_states = self.self_attn(
-            original_len=original_len,
             positions=positions,
             hidden_states=hidden_states,
             kv_cache=kv_cache,
@@ -934,7 +931,6 @@ class CustomDeepseekV2Model(nn.Module):
         intermediate_tensors: Optional[IntermediateTensors] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, IntermediateTensors]:
-        original_len = 1
         is_prefill = 0
         attn_metadata = get_forward_context().attn_metadata
         if attn_metadata:
@@ -944,7 +940,6 @@ class CustomDeepseekV2Model(nn.Module):
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
             else:
-                original_len = input_ids.shape[0]
                 hidden_states = self.get_input_embeddings(is_prefill, input_ids)
             residual = None
         else:
@@ -957,7 +952,6 @@ class CustomDeepseekV2Model(nn.Module):
         for i in range(self.start_layer, self.end_layer):
             layer = self.layers[i]
             hidden_states, residual = layer(
-                original_len,
                 positions,
                 hidden_states,
                 residual,
@@ -974,7 +968,7 @@ class CustomDeepseekV2Model(nn.Module):
         hidden_states, _ = self.norm(hidden_states, residual)
         if self.enable_sp and is_prefill:
             hidden_states = get_tp_group().all_gather(hidden_states, 0)
-            hidden_states = hidden_states[:original_len]
+            hidden_states = hidden_states[:attn_metadata.num_input_tokens]
         if self.cp_size > 1 and is_prefill:
             hidden_states = get_cp_group().all_gather(hidden_states, 0)
             hidden_states = torch.index_select(hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
