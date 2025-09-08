@@ -18,12 +18,14 @@ limitations under the License.
 from typing import Optional, Union
 
 import torch
+from torch import nn
 from torch.nn.parameter import Parameter
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               split_tensor_along_last_dim,
                               tensor_model_parallel_all_gather,
-                              tensor_model_parallel_all_reduce)
+                              tensor_model_parallel_all_reduce,
+                              tensor_model_parallel_reduce_scatter)
 from vllm.model_executor.layers.linear import (WEIGHT_LOADER_V2_SUPPORTED,
                                                ColumnParallelLinear,
                                                LinearBase,
@@ -32,6 +34,7 @@ from vllm.model_executor.layers.linear import (WEIGHT_LOADER_V2_SUPPORTED,
 from vllm.model_executor.layers.quantization.base_config import \
     QuantizationConfig
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.forward_context import get_forward_context
 
 from vllm_ascend.distributed.parallel_state import (
     get_mlp_tensor_model_parallel_rank,
@@ -188,7 +191,11 @@ class AscendMlpRowParallelLinear(RowParallelLinear):
         self,
         input_,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
-        if self.enable_mlp_optimze:
+        forward_context = get_forward_context()
+        self.enable_sp = forward_context.enable_sp
+        attn_metadata = forward_context.attn_metadata
+        is_prefill = attn_metadata.num_prefills if attn_metadata else False
+        if self.enable_mlp_optimze and not self.enable_sp:
             tp_rank = get_mlp_tensor_model_parallel_rank()
             if self.input_is_parallel:
                 input_parallel = input_
@@ -227,7 +234,15 @@ class AscendMlpRowParallelLinear(RowParallelLinear):
             output_parallel = self.quant_method.apply(self,
                                                       input_parallel,
                                                       bias=bias_)
-            if self.reduce_results and self.tp_size > 1:
+            if self.reduce_results and self.enable_sp and is_prefill:
+                sp_size = get_tensor_model_parallel_world_size()
+                original_len = input_.shape[0]
+                reminder = original_len % sp_size
+                if reminder != 0:
+                    padding_len = sp_size - reminder
+                    output_parallel = nn.functional.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+                output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
+            elif self.reduce_results and self.tp_size > 1:
                 output = tensor_model_parallel_all_reduce(output_parallel)
             else:
                 output = output_parallel

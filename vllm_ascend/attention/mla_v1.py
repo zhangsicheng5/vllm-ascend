@@ -1474,9 +1474,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                          enabled=self.enable_prefetch)
 
             output[...] = self.o_proj(
-                o_proj_input,
-                is_prefill=prefill_preprocess_res is not None,
-                is_force_scatter=self.enable_shared_expert_dp)[0]
+                o_proj_input)[0]
         else:
             with torch.npu.stream(current_ms_metadata.comm_stream):
                 npu_prefetch(self.o_proj.weight,

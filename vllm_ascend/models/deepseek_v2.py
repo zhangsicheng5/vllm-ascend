@@ -205,7 +205,6 @@ class CustomDeepseekV2RowParallelLinear(RowParallelLinear):
         is_prefill=True,
         is_force_scatter=False
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[nn.Parameter]]]:
-        sp_size = get_tensor_model_parallel_world_size()
         if self.input_is_parallel:
             input_parallel = input_
         else:
@@ -222,15 +221,7 @@ class CustomDeepseekV2RowParallelLinear(RowParallelLinear):
         output_parallel = self.quant_method.apply(self,
                                                   input_parallel,
                                                   bias=bias_)
-        if self.reduce_results and self.enable_sp and is_prefill:
-            original_len = input_.shape[0]
-            reminder = original_len % sp_size
-            if reminder != 0:
-                padding_len = sp_size - reminder
-                import torch.nn.functional as F
-                output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
-            output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
-        elif self.reduce_results and self.tp_size > 1:
+        if self.reduce_results and self.tp_size > 1:
             output = tensor_model_parallel_all_reduce(output_parallel)
         else:
             output = output_parallel
@@ -542,17 +533,13 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             bias=False,
             quant_config=quant_config,
             prefix=f"{prefix}.kv_b_proj")
-        # Since new page_attn op with softmax_lse return is not ready yet,
-        # need a kv_b_proj without tp while decode + sp,
-        # refer to log in mla_v1.py _forward_decode_sp
-        # TODO remove self.kv_b_proj_full later
+
         self.kv_b_proj_full = ReplicatedLinear(
             self.kv_lora_rank,
             self.num_heads * (self.qk_nope_head_dim + self.v_head_dim),
             bias=False,
             quant_config=quant_config,
             prefix=f"{prefix}.kv_b_proj")
-        # self.kv_b_proj_full = None
         if (config.n_routed_experts is not None
                 and self.debug_layer_idx >= config.first_k_dense_replace
                 and self.debug_layer_idx % config.moe_layer_freq == 0
@@ -564,13 +551,12 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
                 quant_config=quant_config,
                 prefix=f"{prefix}.o_proj")
         else:
-            self.o_proj = CustomDeepseekV2RowParallelLinear(
+            self.o_proj = RowParallelLinear(
                 self.num_heads * self.v_head_dim,
                 self.hidden_size,
                 bias=False,
                 quant_config=quant_config,
-                prefix=f"{prefix}.o_proj",
-                enable_sp=self.enable_sp)
+                prefix=f"{prefix}.o_proj")
 
         if rope_scaling:
             rope_scaling["rope_type"] = 'deepseek_yarn'
