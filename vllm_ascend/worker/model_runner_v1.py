@@ -86,7 +86,8 @@ from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
 from vllm_ascend.attention.attention_v1 import (AscendAttentionState,
                                                 AscendMetadata)
 from vllm_ascend.attention.mla_v1 import AscendMLAMetadata
-from vllm_ascend.attention.utils import AscendCommonAttentionMetadata, AscendCommonLongSequenceMetadata
+from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata, 
+                                         AscendCommonLongSequenceMetadata)
 from vllm_ascend.compilation.acl_graph import ACLGraphWrapper
 from vllm_ascend.multistream.ms_split import compute_split_seq_index
 from vllm_ascend.platform import NPUPlatform

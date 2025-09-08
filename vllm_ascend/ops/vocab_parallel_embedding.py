@@ -145,6 +145,10 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         return input_, ~vocab_mask
 
     def forward(self, input_):
+        from vllm.forward_context import get_forward_context
+        forward_context = get_forward_context()
+        self.enable_sp = forward_context.enable_sp
+
         if self.tp_size > 1:
             # Build the mask.
             masked_input, input_mask = self._get_masked_input_and_mask(
@@ -152,7 +156,8 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
                 self.shard_indices.org_vocab_end_index,
                 self.shard_indices.num_org_vocab_padding,
                 self.shard_indices.added_vocab_start_index,
-                self.shard_indices.added_vocab_end_index)
+                self.shard_indices.added_vocab_end_index
+            )
         else:
             masked_input = input_
         # Get the embeddings.
@@ -162,6 +167,19 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
         # Reduce across all the model parallel GPUs.
+        from vllm.distributed import (get_tensor_model_parallel_world_size,
+                                      tensor_model_parallel_reduce_scatter)
+        if self.enable_sp:
+            sp_size = get_tensor_model_parallel_world_size()
+            original_len = input_.shape[0]
+
+            reminder = original_len % sp_size
+            if reminder != 0:
+                padding_len = sp_size - reminder
+                output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+
+            output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
+            return output
         output = tensor_model_parallel_all_reduce(output_parallel)
         return output
 

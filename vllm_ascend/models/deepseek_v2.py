@@ -140,39 +140,6 @@ class CustomDeepseekV2MergedReplicatedLinear(ReplicatedLinear):
         shard.copy_(loaded_weight)
 
 
-class VocabParallelEmbeddingwithSP(VocabParallelEmbedding):
-
-    def forward(self, input_, enable_sp: bool = False):
-        if self.tp_size > 1:
-            masked_input, input_mask = get_masked_input_and_mask(
-                input_, self.shard_indices.org_vocab_start_index,
-                self.shard_indices.org_vocab_end_index,
-                self.shard_indices.num_org_vocab_padding,
-                self.shard_indices.added_vocab_start_index,
-                self.shard_indices.added_vocab_end_index
-            )
-        else:
-            masked_input = input_
-        output_parallel = self.quant_method.embedding(self,
-                                                      masked_input.long())
-        if self.tp_size > 1:
-            output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
-
-        if enable_sp:
-            sp_size = get_tensor_model_parallel_world_size()
-            original_len = input_.shape[0]
-
-            reminder = original_len % sp_size
-            if reminder != 0:
-                padding_len = sp_size - reminder
-                output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
-
-            output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
-            return output
-        output = tensor_model_parallel_all_reduce(output_parallel)
-        return output
-
-
 class CustomDeepseekV2RowParallelLinearReplaceAllreduce(RowParallelLinear):
 
     def forward(
@@ -889,7 +856,7 @@ class CustomDeepseekV2Model(nn.Module):
         self.cp_group = get_cp_group().device_group
 
         if get_pp_group().is_first_rank:
-            self.embed_tokens = VocabParallelEmbeddingwithSP(
+            self.embed_tokens = VocabParallelEmbedding(
                 config.vocab_size,
                 config.hidden_size,
                 quant_config=quant_config,
@@ -917,9 +884,7 @@ class CustomDeepseekV2Model(nn.Module):
             make_empty_intermediate_tensors_factory(
                 ["hidden_states", "residual"], config.hidden_size))
 
-    def get_input_embeddings(self, is_prefill: bool, input_ids: torch.Tensor) -> torch.Tensor:
-        if self.enable_sp and is_prefill:
-            return self.embed_tokens(input_=input_ids, enable_sp=self.enable_sp)
+    def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
     def forward(
@@ -940,7 +905,7 @@ class CustomDeepseekV2Model(nn.Module):
             if inputs_embeds is not None:
                 hidden_states = inputs_embeds
             else:
-                hidden_states = self.get_input_embeddings(is_prefill, input_ids)
+                hidden_states = self.get_input_embeddings(input_ids)
             residual = None
         else:
             assert intermediate_tensors is not None
