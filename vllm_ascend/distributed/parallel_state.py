@@ -3,10 +3,12 @@ from typing import Optional
 import torch
 from vllm.distributed.parallel_state import (GroupCoordinator, get_world_group,
                                              init_model_parallel_group)
+from vllm_ascend.ascend_config import get_ascend_config
 
 # Currently, mc2 op need their own group coordinator.
 _MC2: Optional[GroupCoordinator] = None
 _LMHEAD: Optional[GroupCoordinator] = None
+_OTP: Optional[GroupCoordinator] = None
 
 
 def get_mc2_group() -> GroupCoordinator:
@@ -17,6 +19,11 @@ def get_mc2_group() -> GroupCoordinator:
 def get_lmhead_group() -> GroupCoordinator:
     assert _LMHEAD is not None, ("lmhead group is not initialized")
     return _LMHEAD
+
+
+def get_otp_group() -> GroupCoordinator:
+    assert _OTP is not None, ("output tensor parallel group is not initialized")
+    return _OTP
 
 
 def model_parallel_initialized():
@@ -59,6 +66,20 @@ def init_ascend_model_parallel(
                                             backend,
                                             group_name="lmhead")
 
+    # If oproj tensor parallel size is set, we will create a group for it.
+    otp_size = get_ascend_config().oproj_tensor_parallel_size
+    if otp_size is not None:
+        group_ranks = []
+        global _OTP
+        num_oproj_tensor_parallel_groups: int = (world_size // otp_size)
+        for i in range(num_oproj_tensor_parallel_groups):
+            ranks = list(range(i * otp_size, (i + 1) * otp_size))
+            group_ranks.append(ranks)
+        _OTP = init_model_parallel_group(group_ranks,
+                                         get_world_group().local_rank,
+                                         backend,
+                                         group_name="otp")
+
 
 def destroy_ascend_model_parallel():
     global _MC2
@@ -69,3 +90,7 @@ def destroy_ascend_model_parallel():
     if _LMHEAD:
         _LMHEAD.destroy()
     _LMHEAD = None
+    global _OTP
+    if _OTP:
+        _OTP.destroy()
+    _OTP = None
