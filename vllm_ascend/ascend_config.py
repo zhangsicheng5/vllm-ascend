@@ -63,6 +63,7 @@ class AscendConfig:
         self.enable_cpu_binding = additional_config.get(  # Whether to enable the cpu binding
             "enable_cpu_binding", False)
         self.lmhead_tp_size = additional_config.get("lmhead_tp_size", -1)
+        self.use_mlaprolog = additional_config.get("use_mlaprolog", False)
 
         self.oproj_tensor_parallel_size = additional_config.get(
             "oproj_tensor_parallel_size", None)
