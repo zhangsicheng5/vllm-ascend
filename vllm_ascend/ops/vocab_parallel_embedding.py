@@ -169,7 +169,10 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         # Reduce across all the model parallel GPUs.
         from vllm.distributed import (get_tensor_model_parallel_world_size,
                                       tensor_model_parallel_reduce_scatter)
-        if self.enable_sp:
+        is_prefill = False
+        if forward_context.attn_metadata:
+            is_prefill = forward_context.attn_metadata.num_prefills
+        if self.enable_sp and is_prefill:
             sp_size = get_tensor_model_parallel_world_size()
             original_len = input_.shape[0]
 

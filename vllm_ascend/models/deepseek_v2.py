@@ -182,22 +182,6 @@ class CustomDeepseekV2RowParallelLinearReplaceAllreduce(RowParallelLinear):
 
 
 class CustomDeepseekV2RowParallelLinear(RowParallelLinear):
-    def __init__(
-        self,
-        input_size: int,
-        output_size: int,
-        bias: bool = True,
-        quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-        enable_sp: bool = False,
-    ):
-        super().__init__(input_size,
-                         output_size,
-                         bias=bias,
-                         quant_config=quant_config,
-                         prefix=prefix)
-
-        self.enable_sp = enable_sp
 
     def forward(
         self,
@@ -367,8 +351,7 @@ class CustomDeepseekV2MoE(nn.Module):
             topk_group=config.topk_group,
             prefix=f"{prefix}.experts",
             scoring_func=config.scoring_func,
-            e_score_correction_bias=self.gate.e_score_correction_bias,
-            enable_sp=self.enable_sp)
+            e_score_correction_bias=self.gate.e_score_correction_bias)
 
         if config.n_shared_experts is not None:
             self.all_reduce_merge = self.experts.all_reduce_merge
@@ -466,7 +449,6 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
-        enable_sp: bool = False,
     ) -> None:
         nn.Module.__init__(self)
         self.hidden_size = hidden_size
@@ -491,8 +473,6 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
 
         self.prefix = prefix
         self.debug_layer_idx = int(self.prefix.split(".")[-2])
-
-        self.enable_sp = enable_sp
 
         ascend_config = get_ascend_config()
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
@@ -603,7 +583,6 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             kv_a_layernorm=self.kv_a_layernorm,
             kv_b_proj=self.kv_b_proj,
             o_proj=self.o_proj,
-            enable_sp=self.enable_sp,
             kv_b_proj_full=self.kv_b_proj_full,
         )
 
@@ -622,11 +601,6 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             # Simulate all gather to calculate output shape
             num_tokens = num_tokens * self.tp_size
             need_gather_q_kv = True
-        is_prefill = False
-        if forward_context.attn_metadata:
-            is_prefill = forward_context.attn_metadata.num_prefills
-        if self.enable_sp and is_prefill:
-            need_gather_q_kv =True
         if not self.enable_shared_expert_dp or self.debug_layer_idx < self.first_k_dense_replace:
             output_shape = hidden_states.shape
         else:
@@ -691,7 +665,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             cache_config=cache_config,
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
-            enable_sp = self.enable_sp,
         )
 
         if (config.n_routed_experts is not None
