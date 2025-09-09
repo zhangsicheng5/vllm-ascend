@@ -74,6 +74,7 @@ from vllm.sequence import IntermediateTensors
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ops.fused_moe import AscendFusedMoE
+from vllm_ascend.ops.linear import AscendRowParallelLinear
 from vllm_ascend.ops.lmhead import CustomParallelLMHead
 from vllm_ascend.ops.logits_processor import CustomLogitsProcessor
 from vllm_ascend.quantization.quant_config import AscendLinearMethod
@@ -576,13 +577,12 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         self.kv_b_proj_full = None
         if not self.enable_prefill_optimizations or int(
                 prefix.split(".")[-2]) < 3:
-            self.o_proj = CustomDeepseekV2RowParallelLinear(
+            self.o_proj = AscendRowParallelLinear(
                 self.num_heads * self.v_head_dim,
                 self.hidden_size,
                 bias=False,
                 quant_config=quant_config,
-                prefix=f"{prefix}.o_proj",
-                enable_sp=self.enable_sp)
+                prefix=f"{prefix}.o_proj")
         else:
             self.o_proj = RowParallelScatterLinear(self.num_heads *
                                                    self.v_head_dim,
