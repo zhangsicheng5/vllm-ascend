@@ -57,7 +57,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.models.deepseek_v2 import \
-    DeepseekV2ForCausalLM  # noqa: E501
+    DeepseekV2ForCausalLM, DeepseekV2MLP  # noqa: E501
 from vllm.model_executor.models.deepseek_v2 import \
     yarn_get_mscale  # noqa: E501
 from vllm.model_executor.models.deepseek_v2 import (
@@ -228,11 +228,9 @@ class CustomDeepseekV2MLP(nn.Module):
         reduce_results: bool = True,
         force_replicate: bool = False,
         prefix: str = "",
-        enable_sp: bool = False
     ) -> None:
         super().__init__()
-        self.enable_sp = enable_sp
-        if not force_replicate and not enable_sp:
+        if not force_replicate:
             self.gate_up_proj = MergedColumnParallelLinear(
                 hidden_size, [intermediate_size] * 2,
                 bias=False,
@@ -304,14 +302,12 @@ class CustomDeepseekV2MoE(nn.Module):
         self,
         config: PretrainedConfig,
         quant_config: Optional[QuantizationConfig] = None,
-        prefix: str = "",
-        enable_sp: bool = False,
+        prefix: str = ""
     ):
         super().__init__()
         self.tp_size = get_tensor_model_parallel_world_size()
         self.routed_scaling_factor = config.routed_scaling_factor
         self.n_shared_experts = config.n_shared_experts
-        self.enable_sp = enable_sp
         if self.tp_size > config.n_routed_experts:
             raise ValueError(
                 f"Tensor parallel size {self.tp_size} is greater than "
@@ -359,16 +355,13 @@ class CustomDeepseekV2MoE(nn.Module):
             intermediate_size = (config.moe_intermediate_size *
                                  config.n_shared_experts)
             enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
-            self.shared_experts = CustomDeepseekV2MLP(
+            self.shared_experts = DeepseekV2MLP(
                 hidden_size=config.hidden_size,
                 intermediate_size=intermediate_size,
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
                 reduce_results=reduce_results,
-                force_replicate=self.enable_multistream_moe
-                or enable_shared_expert_dp,
-                prefix=f"{prefix}.shared_experts",
-                enable_sp = self.enable_sp
+                prefix=f"{prefix}.shared_experts"
             )
         else:
             self.shared_experts = None  # type: ignore
@@ -626,8 +619,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         prefix: str,
         model_config: ModelConfig,
         cache_config: Optional[CacheConfig] = None,
-        quant_config: Optional[QuantizationConfig] = None,
-        enable_sp: bool = False,
+        quant_config: Optional[QuantizationConfig] = None
     ) -> None:
         nn.Module.__init__(self)
         self.hidden_size = config.hidden_size
@@ -643,7 +635,6 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         self.tp_size = get_tensor_model_parallel_world_size()
         self.tp_rank = get_tp_group().rank_in_group
         ascend_config = get_ascend_config()
-        self.enable_sp = enable_sp
         # TODO: enable mla in vllm-ascend
         if model_config.use_mla:
             attn_cls = CustomDeepseekV2MLAAttention
@@ -674,16 +665,14 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
                 config=config,
                 quant_config=quant_config,
                 prefix=f"{prefix}.mlp",
-                enable_sp = self.enable_sp,
             )
         else:
-            self.mlp = CustomDeepseekV2MLP(
+            self.mlp = DeepseekV2MLP(
                 hidden_size=config.hidden_size,
                 intermediate_size=config.intermediate_size,
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
-                prefix=f"{prefix}.mlp",
-                enable_sp = self.enable_sp
+                prefix=f"{prefix}.mlp"
             )
         self.input_layernorm = RMSNorm(config.hidden_size,
                                        eps=config.rms_norm_eps)
@@ -798,7 +787,6 @@ class CustomDeepseekV2Model(nn.Module):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
         self.tp_size = get_tensor_model_parallel_world_size()
-        self.enable_sp = vllm_config.parallel_config.enable_sequence_parallel
 
         if get_pp_group().is_first_rank:
             self.embed_tokens = VocabParallelEmbedding(
@@ -816,8 +804,7 @@ class CustomDeepseekV2Model(nn.Module):
                 prefix,
                 model_config=model_config,
                 cache_config=cache_config,
-                quant_config=quant_config,
-                enable_sp=self.enable_sp,
+                quant_config=quant_config
             ),
             prefix=f"{prefix}.layers")
 

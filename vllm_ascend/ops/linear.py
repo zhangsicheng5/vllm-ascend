@@ -15,9 +15,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-from typing import Optional, Union
+from typing import Optional, Union, Tuple, Callable
 
 import torch
+import torch_npu
 from torch import nn
 from torch.nn.parameter import Parameter
 from vllm.distributed import (divide, get_tensor_model_parallel_rank,
@@ -30,15 +31,24 @@ from vllm.model_executor.layers.linear import (WEIGHT_LOADER_V2_SUPPORTED,
                                                ColumnParallelLinear,
                                                LinearBase,
                                                MergedColumnParallelLinear,
-                                               RowParallelLinear)
+                                               RowParallelLinear,
+                                               UnquantizedLinearMethod,
+                                               ReplicatedLinear)
+from vllm.model_executor.layers.activation import SiluAndMul
 from vllm.model_executor.layers.quantization.base_config import \
     QuantizationConfig
+from vllm.model_executor.models.deepseek_v2 import DeepseekV2MLP
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.forward_context import get_forward_context
 
 from vllm_ascend.distributed.parallel_state import (
     get_mlp_tensor_model_parallel_rank,
-    get_mlp_tensor_model_parallel_world_size, get_mlp_tp_group)
+    get_mlp_tensor_model_parallel_world_size, 
+    get_mlp_tp_group,
+    is_sp_enabled)
+from vllm_ascend.quantization.quant_config import AscendLinearMethod
+from vllm_ascend.quantization.w8a8_dynamic import AscendW8A8DynamicLinearMethod
+from vllm_ascend.ascend_config import get_ascend_config
 
 
 class AscendMlpColumnParallelLinear(ColumnParallelLinear):
@@ -322,3 +332,147 @@ class AscendMlpMergedColumnParallelLinear(MergedColumnParallelLinear):
         if not self.return_bias:
             return output
         return output, output_bias
+
+
+class CustomDeepseekV2MergedReplicatedLinear(ReplicatedLinear):
+
+    def __init__(
+        self,
+        input_size: int,
+        output_sizes: list[int],
+        bias: bool = True,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ):
+        self.output_sizes = output_sizes
+        super().__init__(input_size,
+                         sum(output_sizes),
+                         bias=bias,
+                         quant_config=quant_config,
+                         prefix=prefix)
+
+    def weight_loader(self, param: torch.nn.Parameter,
+                      loaded_weight: torch.Tensor, loaded_shard_id: int):
+        # With no support for GGUF format yet.
+        assert not getattr(param, "is_gguf_weight", False)
+        assert not getattr(param, "is_gguf_weight_type", False)
+
+        assert loaded_shard_id < len(self.output_sizes)
+        shard_offset = sum(self.output_sizes[:loaded_shard_id])
+        shard_size = self.output_sizes[loaded_shard_id]
+        shard = param.data.narrow(param.output_dim, shard_offset, shard_size)
+
+        assert shard.size() == loaded_weight.size(), (
+            f"Tried to load weights of size {loaded_weight.size()}"
+            f"to a parameter shard of id {loaded_shard_id} size {shard.size()}"
+        )
+        shard.copy_(loaded_weight)
+
+
+class CustomDeepseekV2SiluAndMul(SiluAndMul):
+
+    def __init__(self,
+                 *,
+                 weight_scale: Optional[Callable[[], torch.Tensor]] = None):
+        super().__init__()
+        self.weight_scale = weight_scale
+
+    def forward_oot(self, x: Union[torch.Tensor, Tuple[torch.Tensor,
+                                                       torch.Tensor]]):
+        if isinstance(x, tuple):
+            assert self.weight_scale is not None
+            # For AscendW8A8DynamicLinearMethod:
+            # a dynamic scale is passed along with the quantized value.
+            quantized_x, dynamic_scale = x
+            return torch_npu.npu_dequant_swiglu_quant(
+                x=quantized_x,
+                weight_scale=self.weight_scale(),
+                activation_scale=dynamic_scale,
+                activate_left=True,
+                quant_mode=1)
+        else:
+            return super().forward_oot(x)
+        
+
+class AscendDeepseekV2MLP(DeepseekV2MLP):
+        
+    def __init__(
+        self,
+        hidden_size: int,
+        intermediate_size: int,
+        hidden_act: str,
+        quant_config: Optional[QuantizationConfig] = None,
+        reduce_results: bool = True,
+        prefix: str = "",
+    ) -> None:
+        nn.Module.__init__(self)
+        self.enable_sp = is_sp_enabled()
+        ascend_config = get_ascend_config()
+        self.torchair_graph_enabled = ascend_config.torchair_graph_config.enabled
+        enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
+        force_replicate = False
+        self.enable_multistream_moe = \
+            ascend_config.torchair_graph_config.enable_multistream_moe and \
+            self.torchair_graph_enabled
+        force_replicate = self.enable_multistream_moe or enable_shared_expert_dp
+        if not force_replicate and not self.enable_sp:
+            self.gate_up_proj = MergedColumnParallelLinear(
+                hidden_size, [intermediate_size] * 2,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.gate_up_proj")
+            self.down_proj = RowParallelLinear(intermediate_size,
+                                               hidden_size,
+                                               bias=False,
+                                               quant_config=quant_config,
+                                               reduce_results=reduce_results,
+                                               prefix=f"{prefix}.down_proj")
+        else:
+            self.gate_up_proj = CustomDeepseekV2MergedReplicatedLinear(
+                hidden_size, [intermediate_size] * 2,
+                bias=False,
+                quant_config=quant_config,
+                prefix=f"{prefix}.gate_up_proj")
+            self.down_proj = ReplicatedLinear(intermediate_size,
+                                              hidden_size,
+                                              bias=False,
+                                              quant_config=quant_config,
+                                              prefix=f"{prefix}.down_proj")
+        if hidden_act != "silu":
+            raise ValueError(f"Unsupported activation: {hidden_act}. "
+                             "Only silu is supported for now.")
+        quant_method = self.gate_up_proj.quant_method
+        if isinstance(quant_method, UnquantizedLinearMethod):
+            self.act_fn = CustomDeepseekV2SiluAndMul()
+        elif (isinstance(quant_method, AscendLinearMethod) and isinstance(
+                quant_method.quant_method, AscendW8A8DynamicLinearMethod)):
+            # TODO(sdmyzlp): Currently preserved as before:
+            # 1. The only quantization supported for silu is W8A8Dynamic
+            # 2. Output dtype of gate_up/down is fixed to be int32/bfloat16
+            #
+            # Maybe one can implement a better and more general configuration
+            # scheme, e.g. by somehow passing around the tweaked `quant_config`
+            self.act_fn = CustomDeepseekV2SiluAndMul(
+                # Use lazy binding, for `weight_scale_fp32` is accessible
+                # only after `process_weights_after_loading`.
+                weight_scale=lambda: self.gate_up_proj.weight_scale_fp32)
+            # To be consumed by AscendW8A8DynamicLinearMethod.apply()
+            self.gate_up_proj._ascend_quant_config = {
+                "output_dtype": torch.int32,
+                "pertoken_scale": False,
+                "return_scale": True,
+            }
+            self.down_proj._ascend_quant_config = {
+                "output_dtype": torch.bfloat16,
+                "pertoken_scale": True,
+                "return_scale": False,
+            }
+        else:
+            raise NotImplementedError(
+                f"Quantization with [{type(quant_method)}] is NOT supported")
+
+    def forward(self, x):
+        gate_up, _ = self.gate_up_proj(x)
+        x = self.act_fn(gate_up)
+        x, _ = self.down_proj(x)
+        return x
