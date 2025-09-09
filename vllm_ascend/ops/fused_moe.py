@@ -46,7 +46,7 @@ from vllm_ascend.ascend_forward_context import FusedMoEState
 from vllm_ascend.distributed.parallel_state import get_mc2_group
 from vllm_ascend.ops.expert_load_balancer import ExpertLoadBalancer
 from vllm_ascend.ops.moe_dispatcher.token_dispatcher import (
-    MoEAlltoAllSeqOverLapDispatcher, MoEDispatcherConfig)
+    MoEAlltoAllSeqOverLapDispatcher, MoEDispatcherConfig, TokenDispatcherWithAll2AllV)
 from vllm_ascend.ops.sequence_parallel import MetadataForPadding
 from vllm_ascend.utils import (AscendSocVersion, dispose_tensor,
                                get_ascend_soc_version, npu_stream_switch,
@@ -1288,8 +1288,7 @@ class AscendFusedMoE(FusedMoE):
         self.tp_group = get_tp_group().device_group
         self.quant_method.create_weights(layer=self, **moe_quant_params)
         self.token_dispatcher = None
-        if envs_ascend.VLLM_ASCEND_ENABLE_MOE_ALL2ALL_SEQ and isinstance(
-                self.quant_method, AscendUnquantizedFusedMoEMethod):
+        if envs_ascend.VLLM_ASCEND_ENABLE_MOE_ALL2ALL_SEQ:
             self.reduce_results = False
             if expert_map_path and os.path.exists(expert_map_path):
                 self.global_num_experts = self.global_num_experts + self.global_redundant_expert_num
@@ -1302,8 +1301,12 @@ class AscendFusedMoE(FusedMoE):
                             top_k).set_group_topk(topk_group).
                 set_num_groups(num_expert_group).set_expert_bias(
                     e_score_correction_bias).set_scaling_factor(1.0).build())
-            self.token_dispatcher = MoEAlltoAllSeqOverLapDispatcher(
-                moe_dispatcher_config)
+            # self.token_dispatcher = MoEAlltoAllSeqOverLapDispatcher(
+            #     moe_dispatcher_config)
+            self.token_dispatcher = TokenDispatcherWithAll2AllV(top_k=top_k,
+                                                                num_experts=self.global_num_experts,
+                                                                num_global_redundant_experts=self.global_redundant_expert_num,
+                                                                num_local_experts=self.local_num_experts)
             if envs_ascend.VLLM_ASCEND_ENABLE_DBO:
                 token_dispatcher1 = MoEAlltoAllSeqOverLapDispatcher(
                     moe_dispatcher_config)
