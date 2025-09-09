@@ -582,7 +582,8 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
                 self.hidden_size,
                 bias=False,
                 quant_config=quant_config,
-                prefix=f"{prefix}.o_proj")
+                prefix=f"{prefix}.o_proj",
+                enable_sp=self.enable_sp)
         else:
             self.o_proj = RowParallelScatterLinear(self.num_heads *
                                                    self.v_head_dim,

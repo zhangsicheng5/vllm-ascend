@@ -20,14 +20,17 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 import torch_npu
 from torch.distributed import ProcessGroup
 from torch.nn.parameter import Parameter
 from transformers import PretrainedConfig
 from vllm.config import LoRAConfig
 from vllm.forward_context import get_forward_context
-from vllm.distributed import divide, split_tensor_along_last_dim
-from vllm.distributed.parallel_state import (get_tp_group, get_dp_group)
+from vllm.distributed import divide, split_tensor_along_last_dim, tensor_model_parallel_reduce_scatter, \
+    tensor_model_parallel_all_reduce
+from vllm.distributed.parallel_state import (get_tp_group, get_dp_group, get_tensor_model_parallel_world_size,
+                                             get_tensor_model_parallel_rank)
 from vllm.lora.utils import LinearBase
 from vllm.model_executor.layers.linear import (WEIGHT_LOADER_V2_SUPPORTED,
                                                QuantizeMethodBase,
@@ -60,6 +63,7 @@ class AscendRowParallelLinear(RowParallelLinear):
         prefix: str = "",
         *,
         return_bias: bool = True,
+        enable_sp: bool = False,
     ):
 
         if prefix.find("o_proj") != -1 and oproj_tp_enable():
@@ -118,6 +122,7 @@ class AscendRowParallelLinear(RowParallelLinear):
 
         self.weight_t = self.weight.t()
         self.torchair_graph_enabled = get_ascend_config().torchair_graph_config.enabled
+        self.enable_sp = enable_sp
 
     @staticmethod
     def get_hcomm_info(group: ProcessGroup) -> str:
@@ -143,26 +148,37 @@ class AscendRowParallelLinear(RowParallelLinear):
         # Choose different forward function according to the type of TP group
         if self.forward_type == "oproj_tp":
             return self._forward_oproj_tp(input_)
-        return super().forward(input_)
-
-    # enable custom MLP tensor parallel
-    def _forward_mlp_tp(self, input_: torch.Tensor) -> torch.Tensor:
-
+        sp_size = get_tensor_model_parallel_world_size()
         if self.input_is_parallel:
             input_parallel = input_
         else:
+            tp_rank = get_tensor_model_parallel_rank()
             splitted_input = split_tensor_along_last_dim(
                 input_, num_partitions=self.tp_size)
-            input_parallel = splitted_input[self.tp_rank].contiguous()
+            input_parallel = splitted_input[tp_rank].contiguous()
 
+        # Matrix multiply.
         assert self.quant_method is not None
+        # Only fuse bias add into GEMM for rank 0 (this ensures that
+        # bias will not get added more than once in TP>1 case)
         bias_ = None if (self.tp_rank > 0 or self.skip_bias_add) else self.bias
         output_parallel = self.quant_method.apply(self,
                                                   input_parallel,
                                                   bias=bias_)
-        output = self.comm_group.reduce_scatter(output_parallel, 0)
+        if self.reduce_results and self.enable_sp and is_prefill:
+            original_len = input_.shape[0]
+            reminder = original_len % sp_size
+            if reminder != 0:
+                padding_len = sp_size - reminder
+                output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+            output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
+        elif self.reduce_results and self.tp_size > 1:
+            output = tensor_model_parallel_all_reduce(output_parallel)
+        else:
+            output = output_parallel
 
         output_bias = self.bias if self.skip_bias_add else None
+
         if not self.return_bias:
             return output
         return output, output_bias
