@@ -71,7 +71,6 @@ class AscendRowParallelLinear(RowParallelLinear):
         self.comm_group = comm_group
 
         self.tp_size = self.comm_group.world_size
-        print(f"tp_size{self.tp_size}")
         self.tp_rank = self.comm_group.rank_in_group
         self.dp_rank = get_dp_group().rank_in_group
 
@@ -281,7 +280,6 @@ class AscendRowParallelLinear(RowParallelLinear):
         output_bias = self.bias if self.skip_bias_add else None
         if not self.return_bias:
             return output
-        # print(f"output_shape{output.shape}")
         return output, output_bias
 
 
