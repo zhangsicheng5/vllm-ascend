@@ -37,6 +37,7 @@ from vllm.distributed import (get_context_model_parallel_world_size,
 
 from vllm_ascend.attention.utils import AscendCommonAttentionMetadata, split_decodes_and_prefills
 from vllm_ascend.ops.attention import vanilla_chunked_prefill
+from vllm_ascend.ops.sequence_parallel import init_metadata_for_sp, MetadataForPadding
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, aligned_16, is_310p,
                                nd_to_nz_2d, nd_to_nz_spec)
 from vllm_ascend.worker.npu_input_batch import InputBatch
@@ -124,6 +125,11 @@ class AscendAttentionState(Enum):
     ChunkedPrefill = 3
     SpecDecoding = 4
 
+@dataclass
+class AscendSpMetadata:
+    enable_sp: bool = False
+    metadata_for_padding: MetadataForPadding = None
+
 
 @dataclass
 class AscendCpMetadata:
@@ -145,6 +151,8 @@ class AscendCpMetadata:
 class AscendPrefillMetadata:
     """ Prefill Specific Metadata for Ascend"""
     cp_metadata: AscendCpMetadata = None
+    sp_metadata: AscendSpMetadata = None
+    cp_kv_recover_idx: list[int] = None
 
 
 @dataclass
@@ -277,7 +285,8 @@ class AscendAttentionMetadataBuilder:
                     cp_prefill_mask=common_long_seq_metadata.cp_prefill_mask
                 )
             prefill_metadata = AscendPrefillMetadata(
-                cp_metadata=cp_metadata
+                cp_metadata=cp_metadata,
+                cp_kv_recover_idx=common_long_seq_metadata.cp_kv_recover_idx if common_long_seq_metadata is not None else None
             )
 
         decode_metadata = None
@@ -305,6 +314,17 @@ class AscendAttentionMetadataBuilder:
             decode=decode_metadata
         )
         return attn_metadata
+
+    def update_attn_metadata_for_sp(self, input_ids: torch.Tensor, vllm_config: VllmConfig,
+                                    attn_metadata: AscendMetadata):
+        if attn_metadata.num_prefills > 0:
+            enable_sequence_parallelism = (
+                vllm_config.compilation_config.pass_config.
+                enable_sequence_parallelism if vllm_config is not None else False)
+            _metadata_for_padding = init_metadata_for_sp(input_ids, enable_sequence_parallelism, is_perifll=True)
+            sp_metadata = AscendSpMetadata(metadata_for_padding=_metadata_for_padding,
+                                           enable_sp=enable_sequence_parallelism)
+            attn_metadata.prefill.sp_metadata = sp_metadata
 
 
 class AscendAttentionBackendImpl(AttentionImpl):

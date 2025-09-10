@@ -23,6 +23,7 @@ from vllm.distributed import (get_tensor_model_parallel_world_size,
                               get_context_model_parallel_rank,
                               get_cp_group)
 from vllm.logger import logger
+from vllm.forward_context import get_forward_context
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
@@ -527,7 +528,6 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.kv_a_layernorm = kwargs.get('kv_a_layernorm', None)
         self.q_a_proj = kwargs.get('q_a_proj', None)
         self.q_a_layernorm = kwargs.get('q_a_layernorm', None)
-        self.enable_sp = kwargs.get('enable_sp', False)
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
         self.tp_size = get_tensor_model_parallel_world_size()
 
@@ -548,8 +548,6 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.cp_size = get_context_model_parallel_world_size()
         self.cp_rank = get_context_model_parallel_rank()
         self.cp_group = get_cp_group().device_group
-        self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
-        self.sp_rank = get_tensor_model_parallel_rank() if self.enable_sp else 0
         self.sp_group = get_tp_group().device_group
 
     def _v_up_proj(self, x):
@@ -1098,6 +1096,10 @@ class AscendMLAImpl(MLAAttentionImpl):
         has_prefill = attn_metadata.num_prefills > 0
         num_decode_tokens = attn_metadata.num_decode_tokens
         num_actual_tokens = attn_metadata.num_actual_tokens
+        forward_context = get_forward_context()
+        self.enable_sp = forward_context.enable_sp
+        if self.enable_sp and has_prefill:
+            need_gather_q_kv =True
         if self.q_a_proj is not None:
             npu_prefetch(self.q_a_proj.weight,
                          hidden_states,
@@ -1118,6 +1120,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         prefill_preprocess_res = None
         # Preprocess for decode tokens
         if has_decode:
+            self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
             decode_q_c = q_c[:num_decode_tokens]
             cos = attn_metadata.decode.cos
             sin = attn_metadata.decode.sin
@@ -1424,6 +1427,10 @@ class AscendMLAImpl(MLAAttentionImpl):
 
         if decode_preprocess_res is not None:
             # MLA Preprocess for decoding
+            forward_context = get_forward_context()
+            self.enable_sp = forward_context.enable_sp
+            self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
+            self.sp_rank = get_tensor_model_parallel_rank() if self.enable_sp else 0
             if self.cp_size * self.sp_size > 1:
                 output_decode = self._forward_decode_sp(decode_preprocess_res.decode_q_wo_k_up,
                                                         kv_cache,
@@ -1474,9 +1481,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                          enabled=self.enable_prefetch)
 
             output[...] = self.o_proj(
-                o_proj_input,
-                is_prefill=prefill_preprocess_res is not None,
-                is_force_scatter=self.enable_shared_expert_dp)[0]
+                o_proj_input)[0]
         else:
             with torch.npu.stream(current_ms_metadata.comm_stream):
                 npu_prefetch(self.o_proj.weight,
