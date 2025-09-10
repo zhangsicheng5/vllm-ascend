@@ -179,7 +179,7 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
             reminder = original_len % sp_size
             if reminder != 0:
                 padding_len = sp_size - reminder
-                output_parallel = nn.functional.F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+                output_parallel = nn.functional.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
 
             output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
             return output
