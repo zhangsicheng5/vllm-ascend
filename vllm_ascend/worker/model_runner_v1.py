@@ -103,6 +103,7 @@ from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
 from vllm_ascend.worker.eagle_proposer_v1 import EagleProposer
 from vllm_ascend.worker.mtp_proposer_v1 import MtpProposer
 from vllm_ascend.worker.npu_input_batch import CachedRequestState, InputBatch
+from vllm_ascend.ops.comm_utils import get_sp_metadata_context
 
 if not (vllm_version_is("0.10.1.1") or vllm_version_is("0.10.1")):
     from vllm.v1.outputs import DraftTokenIds
@@ -1499,6 +1500,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             input_ids, positions, num_input_tokens, with_prefill,
             maybe_padded_num_tokens)
 
+        if hasattr(self.attn_metadata_builder, 'update_attn_metadata_for_sp'):
+            self.attn_metadata_builder.update_attn_metadata_for_sp(input_ids, self.vllm_config, attn_metadata)
+
         if get_pp_group().is_first_rank:
             intermediate_tensors = None
         else:
@@ -1567,9 +1571,17 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             intermediate_tensors=intermediate_tensors,
             inputs_embeds=inputs_embeds,
         )
+        # SP for GQA
+        sp_metadata, _ = get_sp_metadata_context()
+        if sp_metadata and sp_metadata.metadata_for_padding and \
+                sp_metadata.metadata_for_padding.not_dummy_and_is_prefill:
+            hidden_states = sp_metadata.metadata_for_padding.allgather_unpadding_aligned(
+                hidden_states)
+        # SP for MLA
         if self.enable_sp and with_prefill:
             hidden_states = get_tp_group().all_gather(hidden_states, 0)
             hidden_states = hidden_states[:attn_metadata.num_input_tokens]
+        # CP for MLA and GQA
         if self.cp_size > 1 and with_prefill:
             hidden_states = get_cp_group().all_gather(hidden_states, 0)
             hidden_states = torch.index_select(hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
