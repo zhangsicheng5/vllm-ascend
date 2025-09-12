@@ -1374,7 +1374,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             head_attn_nomask_seqlens = torch.tensor([chunk_seqlens, kv_with_q_head_nomask_seqlens], dtype=torch.int32)
             tail_attn_nomask_seqlens = torch.tensor([chunk_seqlens, kv_with_q_tail_nomask_seqlens], dtype=torch.int32)
             if self.vllm_config.model_config.use_mla:
-                cp_prefill_mask = torch.triu(torch.ones(512, 512, device=self.device, dtype=torch.bfloat16), 1)
+                cp_prefill_mask = torch.triu(torch.ones(512, 512, device=self.device, dtype=self.dtype), 1)
             else:
                 max_seq_len = max(seq_lens, default=0)
                 cp_prefill_mask = torch.triu(torch.full((seq_lens.shape[0], max_seq_len, max_seq_len),
