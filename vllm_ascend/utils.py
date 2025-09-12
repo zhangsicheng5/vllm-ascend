@@ -522,9 +522,6 @@ def register_ascend_customop():
     from vllm_ascend.ops.common_fused_moe import AscendFusedMoE
     CustomOp.register_oot(_decorated_op_cls=AscendFusedMoE, name="FusedMoE")
 
-    from vllm_ascend.ops.linear import AscendDeepseekV2MLP
-    CustomOp.register_oot(_decorated_op_cls=AscendDeepseekV2MLP, name="DeepseekV2MLP")
-
     from vllm_ascend.ops.layers.qwen3_decoder_layer import AscendQwen3DecoderLayer
     CustomOp.register_oot(_decorated_op_cls=AscendQwen3DecoderLayer, name="Qwen3DecoderLayer")
 

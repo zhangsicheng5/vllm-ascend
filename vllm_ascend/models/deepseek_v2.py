@@ -57,7 +57,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.models.deepseek_v2 import \
-    DeepseekV2ForCausalLM, DeepseekV2MLP  # noqa: E501
+    DeepseekV2ForCausalLM  # noqa: E501
 from vllm.model_executor.models.deepseek_v2 import \
     yarn_get_mscale  # noqa: E501
 from vllm.model_executor.models.deepseek_v2 import (
@@ -355,12 +355,14 @@ class CustomDeepseekV2MoE(nn.Module):
             intermediate_size = (config.moe_intermediate_size *
                                  config.n_shared_experts)
             enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
-            self.shared_experts = DeepseekV2MLP(
+            self.shared_experts = CustomDeepseekV2MLP(
                 hidden_size=config.hidden_size,
                 intermediate_size=intermediate_size,
                 hidden_act=config.hidden_act,
                 quant_config=quant_config,
                 reduce_results=reduce_results,
+                force_replicate=self.enable_multistream_moe
+                or enable_shared_expert_dp,
                 prefix=f"{prefix}.shared_experts"
             )
         else:
@@ -660,7 +662,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
                 prefix=f"{prefix}.mlp",
             )
         else:
-            self.mlp = DeepseekV2MLP(
+            self.mlp = CustomDeepseekV2MLP(
                 hidden_size=config.hidden_size,
                 intermediate_size=config.intermediate_size,
                 hidden_act=config.hidden_act,
