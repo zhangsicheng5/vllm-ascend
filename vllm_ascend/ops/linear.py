@@ -192,6 +192,9 @@ class AscendRowParallelLinear(RowParallelLinear):
         elif dense_optim_enable():
             comm_group = get_tp_group()
             self.forward_type = "dense_optim"
+        elif self.enable_sp:
+            comm_group = get_tp_group()
+            self.forward_type = "mlp_sp"
         else:
             comm_group = get_tp_group()
             self.forward_type = "normal"
@@ -283,7 +286,7 @@ class AscendRowParallelLinear(RowParallelLinear):
             return super().forward(input_)
 
     # enable sp tensor parallel
-    def _forward_mlp_tp(self, input_: torch.Tensor) -> torch.Tensor:
+    def _forward_mlp_sp(self, input_: torch.Tensor) -> torch.Tensor:
         forward_context = get_forward_context()
         self.enable_sp = forward_context.enable_sp
         attn_metadata = forward_context.attn_metadata
@@ -488,6 +491,9 @@ class AscendMergedColumnParallelLinear(MergedColumnParallelLinear):
         elif dense_optim_enable():
             comm_group = get_tp_group()
             self.forward_type = "dense_optim"
+        elif self.enable_sp:
+            comm_group = get_tp_group()
+            self.forward_type = "mlp_sp"
         else:
             comm_group = get_tp_group()
             self.forward_type = "normal_tp"
