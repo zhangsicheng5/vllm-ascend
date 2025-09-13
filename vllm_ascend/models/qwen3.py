@@ -3,22 +3,63 @@ from typing import Optional, Union
 
 import torch
 from torch import nn
+from transformers import Qwen3Config
 from vllm.compilation.decorators import support_torch_compile
 from vllm.config import CacheConfig, VllmConfig
-from vllm.distributed import (get_pp_group,
-                              get_context_model_parallel_world_size,
-                              get_cp_group)
+from vllm.distributed import get_pp_group
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
-from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead, VocabParallelEmbedding
+from vllm.model_executor.layers.quantization import QuantizationConfig
+from vllm.model_executor.layers.vocab_parallel_embedding import ParallelLMHead
 from vllm.model_executor.models.interfaces import SupportsLoRA, SupportsPP
 from vllm.model_executor.models.qwen2 import Qwen2Model
 from vllm.model_executor.models.qwen3 import Qwen3DecoderLayer
-from vllm.model_executor.models.utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
-                    is_pp_missing_parameter,
-                    make_empty_intermediate_tensors_factory, make_layers,
-                    maybe_prefix)
+from vllm.model_executor.models.utils import (AutoWeightsLoader,
+                                              PPMissingLayer, maybe_prefix)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors
+
+from vllm_ascend.ops.layernorm import AddRMSNormW8A8Quant
+
+
+class CustomQwen3DecoderLayer(Qwen3DecoderLayer):
+
+    def __init__(
+        self,
+        config: Qwen3Config,
+        cache_config: Optional[CacheConfig] = None,
+        quant_config: Optional[QuantizationConfig] = None,
+        prefix: str = "",
+    ) -> None:
+        super().__init__(config=config,
+                         cache_config=cache_config,
+                         quant_config=quant_config,
+                         prefix=prefix)
+        if quant_config is None:
+            return
+
+        from vllm_ascend.quantization.quant_config import AscendQuantConfig
+        from vllm_ascend.quantization.w8a8 import AscendW8A8LinearMethod
+
+        assert isinstance(quant_config, AscendQuantConfig), \
+            "Expected quant_config to be an instance of AscendQuantConfig"
+
+        if isinstance(self.self_attn.qkv_proj.quant_method.quant_method,
+                      AscendW8A8LinearMethod):
+            self.input_layernorm = AddRMSNormW8A8Quant(
+                config.hidden_size,
+                layer=self.self_attn.qkv_proj,
+                eps=config.rms_norm_eps)
+        if isinstance(self.mlp.gate_up_proj.quant_method.quant_method,
+                      AscendW8A8LinearMethod):
+            self.post_attention_layernorm = AddRMSNormW8A8Quant(
+                config.hidden_size,
+                layer=self.mlp.gate_up_proj,
+                eps=config.rms_norm_eps)
+
+
+ALL_DECODER_LAYER_TYPES = {
+    "attention": CustomQwen3DecoderLayer,
+}
 
 
 @support_torch_compile(
@@ -35,7 +76,7 @@ class CustomQwen3Model(Qwen2Model):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__(vllm_config=vllm_config,
                          prefix=prefix,
-                         decoder_layer_type=Qwen3DecoderLayer)
+                         decoder_layer_type=CustomQwen3DecoderLayer)
 
 
 class CustomQwen3ForCausalLM(nn.Module, SupportsLoRA, SupportsPP):
