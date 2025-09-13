@@ -158,11 +158,6 @@ class AscendAttentionState(Enum):
     ChunkedPrefill = 3
     SpecDecoding = 4
 
-@dataclass
-class AscendSpMetadata:
-    enable_sp: bool = False
-    metadata_for_padding: MetadataForPadding = None
-
 
 @dataclass
 class AscendCpMetadata:
@@ -184,7 +179,6 @@ class AscendCpMetadata:
 class AscendPrefillMetadata:
     """ Prefill Specific Metadata for Ascend"""
     cp_metadata: AscendCpMetadata = None
-    sp_metadata: AscendSpMetadata = None
     cp_kv_recover_idx: list[int] = None
 
 
