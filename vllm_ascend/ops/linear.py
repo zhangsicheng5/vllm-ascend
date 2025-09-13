@@ -149,6 +149,7 @@ class AscendRowParallelLinear(RowParallelLinear):
         return_bias: bool = True,
         disable_tp: bool = False,
     ):
+        self.enable_sp = is_sp_enabled()
         if prefix.find("down_proj") != -1 and mlp_tp_enable() and not self.enable_sp:
             comm_group = get_mlp_tp_group()
             self.forward_type = "mlp_tp"

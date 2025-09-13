@@ -106,7 +106,7 @@ from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
                                get_ascend_soc_version, is_310p,
                                lmhead_tp_enable)
 from vllm_ascend.worker.npu_input_batch import CachedRequestState, InputBatch
-from vllm_ascend.ops.comm_utils import get_sp_metadata_context
+# from vllm_ascend.ops.comm_utils import get_sp_metadata_context
 
 if TYPE_CHECKING:
     import xgrammar as xgr  # type: ignore[import-untyped]
@@ -1572,7 +1572,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             if pad_size > 0:
                 hidden_states = hidden_states[:-pad_size, :]
         # SP for GQA
-        sp_metadata, _ = get_sp_metadata_context()
+        sp_metadata = None
         if sp_metadata and sp_metadata.metadata_for_padding and \
                 sp_metadata.metadata_for_padding.not_dummy_and_is_prefill:
             hidden_states = sp_metadata.metadata_for_padding.allgather_unpadding_aligned(
