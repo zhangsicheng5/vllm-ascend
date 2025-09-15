@@ -39,8 +39,6 @@ from vllm.v1.spec_decode.utils import is_spec_decode_unsupported
 from vllm.v1.utils import copy_slice
 from vllm.v1.worker.block_table import MultiGroupBlockTable
 
-from vllm_ascend.utils import vllm_version_is
-
 
 @dataclass
 class CachedRequestState:
@@ -49,8 +47,7 @@ class CachedRequestState:
     prompt_token_ids: list[int]
     mm_kwargs: list[MultiModalKwargsItem]
     mm_positions: list[PlaceholderRange]
-    # TODO: remove Optional after 0.10.1.1
-    mm_hashes: Optional[list[str]]
+    mm_hashes: list[str]
     sampling_params: Optional[SamplingParams]
     pooling_params: Optional[PoolingParams]
     generator: Optional[torch.Generator]
@@ -270,9 +267,14 @@ class InputBatch:
 
         self.pooling_params: dict[str, PoolingParams] = {}
 
+        # Cached reference to the GPU tensor of previously sampled tokens
+        self.prev_sampled_token_ids: Optional[torch.Tensor] = None
+        self.prev_sampled_token_ids_invalid_indices: Optional[set[int]] = None
+        self.prev_req_id_to_index: Optional[dict[str, int]] = None
+
         # cp param
-        self.kv_rank: list[tuple[int]] = [None] * max_num_reqs
-        self.num_computed_tokens_of_cp_sp: list[list[list[int]]] = [None] * max_num_reqs
+        self.kv_rank: list[Optional[tuple[int]]] = [None] * max_num_reqs
+        self.num_computed_tokens_of_cp_sp: list[Optional[list[list[int]]]] = [None] * max_num_reqs
 
     @property
     def req_ids(self) -> list[str]:
@@ -738,20 +740,13 @@ class InputBatch:
             pooling_params = [
                 self.pooling_params[req_id] for req_id in self.req_ids
             ]
-        if vllm_version_is("0.10.1.1") or vllm_version_is("0.10.1"):
-            return PoolingMetadata(
-                prompt_lens=torch.from_numpy(
-                    self.num_prompt_tokens[:self.num_reqs]).to(self.device),
-                prompt_token_ids=self.sampling_metadata.prompt_token_ids,
-                pooling_params=pooling_params,
-            )
-        else:
-            return PoolingMetadata(
-                prompt_lens=torch.from_numpy(
-                    self.num_prompt_tokens[:self.num_reqs]),
-                prompt_token_ids=self.sampling_metadata.prompt_token_ids,
-                pooling_params=pooling_params,
-            )
+
+        return PoolingMetadata(
+            prompt_lens=torch.from_numpy(
+                self.num_prompt_tokens[:self.num_reqs]),
+            prompt_token_ids=self.sampling_metadata.prompt_token_ids,
+            pooling_params=pooling_params,
+        )
 
     def _make_prompt_token_ids_tensor(self) -> torch.Tensor:
         max_prompt_len = self.num_prompt_tokens[:self.num_reqs].max()

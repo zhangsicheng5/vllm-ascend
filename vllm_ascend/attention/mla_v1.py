@@ -93,7 +93,7 @@ class AscendMLAPrefillMetadata:
     chunked_context: Optional[ChunkedContextMetadata] = None
     sin: torch.Tensor = None
     cos: torch.Tensor = None
-    cp_kv_recover_idx: list[int] = None
+    cp_kv_recover_idx: Optional[list[int]] = None
     q_head_idx: torch.Tensor = None
     q_tail_idx: torch.Tensor = None
     kv_with_q_head_nomask_idx: torch.Tensor = None
@@ -120,7 +120,7 @@ class AscendMLADecodeMetadata:
     attn_mask: Optional[torch.Tensor] = None
     sin: torch.Tensor = None
     cos: torch.Tensor = None
-    num_computed_tokens_of_cp_sp: list[list[list[int]]] = None
+    num_computed_tokens_of_cp_sp: Optional[list[list[list[int]]]] = None
 
 
 @dataclass
@@ -536,10 +536,12 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.enable_kv_nz = ascend_config.torchair_graph_config.enable_kv_nz
         self.chunked_prefill_for_mla = ascend_config.chunked_prefill_for_mla
 
+        vllm_config = get_current_vllm_config()
+        self.ring_mla_mask_size = 512
         self.prefill_mask = None
 
         # Adapt torch air graph mode with spec decoding.
-        speculative_config = get_current_vllm_config().speculative_config
+        speculative_config = vllm_config.speculative_config
         if speculative_config is not None:
             self.spec_token_num = speculative_config.num_speculative_tokens
             assert self.spec_token_num > 0
@@ -739,14 +741,10 @@ class AscendMLAImpl(MLAAttentionImpl):
                                    device=q_nope.device)
             if self.prefill_mask is None:
                 self.prefill_mask = torch.triu(
-                    torch.ones(512,
-                               512,
+                    torch.ones(self.ring_mla_mask_size,
+                               self.ring_mla_mask_size,
                                device=q_nope.device,
-                               dtype=q_nope.dtype),
-                    1)  # 512: mask only support 512
-            if attn_metadata.num_prefills > 1:
-                self.prefill_mask = self.prefill_mask.unsqueeze(0).repeat(
-                    attn_metadata.num_prefills, 1, 1)
+                               dtype=q_nope.dtype), 1)
             torch_npu.atb.npu_ring_mla(
                 q_nope=q_nope,
                 q_rope=q_pe,
@@ -813,6 +811,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         kv_c_and_k_pe_cache: Tuple[torch.Tensor],
         attn_metadata: AscendMLAMetadata,
     ) -> torch.Tensor:
+        assert attn_metadata.prefill is not None
         num_tokens = q_nope.size(0)
         # Use precomputed indices from the metadata (already converted to tensors and on device)
         q_head_idx = attn_metadata.prefill.q_head_idx
@@ -1035,7 +1034,6 @@ class AscendMLAImpl(MLAAttentionImpl):
             input_layout = "BNSD"
 
         if attn_metadata.attn_state == AscendAttentionState.SpecDecoding:
-            assert num_tokens % self.spec_token_num == 0
             input_layout = "TND"
             # [bs * q_seq_len, num_heads_per_rank, dim]
             q_nope = q_nope.view(num_tokens, self.num_heads, -1)
@@ -1251,7 +1249,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                 q_pe,
                 k_nope,
                 k_pe,
-                attn_metadata.decode.block_table,
+                decode_meta.block_table,
                 seq_len,
                 num_heads,
                 self.scale,
