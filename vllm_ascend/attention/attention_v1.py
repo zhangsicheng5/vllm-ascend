@@ -17,7 +17,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type, cast
 
 import torch
 import torch.nn as nn
@@ -161,7 +161,6 @@ class AscendAttentionState(Enum):
 
 @dataclass
 class AscendCpMetadata:
-    cp_kv_recover_idx: Optional[list[int]] = None
     q_head_idx: torch.Tensor = None
     q_tail_idx: torch.Tensor = None
     kv_with_q_head_nomask_idx: torch.Tensor = None
@@ -179,7 +178,7 @@ class AscendCpMetadata:
 class AscendPrefillMetadata:
     """ Prefill Specific Metadata for Ascend"""
     cp_metadata: Optional[AscendCpMetadata] = None
-    cp_kv_recover_idx: Optional[list[int]] = None
+    cp_kv_recover_idx: Optional[List[int]] = None
 
 
 @dataclass
@@ -290,7 +289,6 @@ class AscendAttentionMetadataBuilder:
             common_long_seq_metadata = common_attn_metadata.common_long_seq_metadata
             if common_long_seq_metadata is not None:
                 cp_metadata = AscendCpMetadata(
-                    cp_kv_recover_idx=common_long_seq_metadata.cp_kv_recover_idx,
                     q_head_idx=common_long_seq_metadata.q_head_idx_tensor,
                     q_tail_idx=common_long_seq_metadata.q_tail_idx_tensor,
                     kv_with_q_head_nomask_idx=common_long_seq_metadata.kv_with_q_head_nomask_idx_tensor,
@@ -556,13 +554,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
     def _attention_with_nomask_and_mask(
         self,
         q: torch.Tensor,
-        q_seqlens: Optional[List[int]],
+        q_seqlens: List[int],
         k_nomask: torch.Tensor,
         v_nomask: torch.Tensor,
-        kv_seqlens_nomask: Optional[List[int]],
+        kv_seqlens_nomask: List[int],
         k_mask: torch.Tensor,
         v_mask: torch.Tensor,
-        kv_seqlens_mask: Optional[List[int]],
+        kv_seqlens_mask: List[int],
         mask: torch.Tensor
     ) -> torch.Tensor:
         q = self._pack_tnd_2_bsnd(q, q_seqlens)
@@ -625,6 +623,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AscendMetadata
     ) -> torch.Tensor:
+        assert attn_metadata is not None
+        assert attn_metadata.prefill is not None
         assert attn_metadata.prefill.cp_metadata is not None
         # Use precomputed indices from the metadata (already converted to tensors and on device)
         q_head_idx = attn_metadata.prefill.cp_metadata.q_head_idx
@@ -641,13 +641,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
         # 1. Attention calculation in the first half of Q in load balancing
         output_head = self._attention_with_nomask_and_mask(
             q=torch.index_select(query, 0, q_head_idx),
-            q_seqlens=attn_mask_seqlens[0].tolist(),
+            q_seqlens=cast[List[int], attn_mask_seqlens[0].tolist()],
             k_nomask=torch.index_select(key, 0, kv_with_q_head_nomask_idx) if self.cp_rank > 0 else None,
             v_nomask=torch.index_select(value, 0, kv_with_q_head_nomask_idx) if self.cp_rank > 0 else None,
-            kv_seqlens_nomask=head_attn_nomask_seqlens[1].tolist(),
+            kv_seqlens_nomask=cast[List[int], head_attn_nomask_seqlens[1].tolist()],
             k_mask=torch.index_select(key, 0, kv_with_q_head_mask_idx),
             v_mask=torch.index_select(value, 0, kv_with_q_head_mask_idx),
-            kv_seqlens_mask=attn_mask_seqlens[0].tolist(),
+            kv_seqlens_mask=cast[List[int], attn_mask_seqlens[0].tolist()],
             mask=mask)
 
         # 2. the Attention calculation in the latter half of Q in load balancing
@@ -655,13 +655,13 @@ class AscendAttentionBackendImpl(AttentionImpl):
         # cp_rank1: Q2*KV0~KV1 + Q2*KV2
         output_tail = self._attention_with_nomask_and_mask(
             q=torch.index_select(query, 0, q_tail_idx),
-            q_seqlens=attn_mask_seqlens[0].tolist(),
+            q_seqlens=cast[List[int], attn_mask_seqlens[0].tolist()],
             k_nomask=torch.index_select(key, 0, kv_with_q_tail_nomask_idx),
             v_nomask=torch.index_select(value, 0, kv_with_q_tail_nomask_idx),
-            kv_seqlens_nomask=tail_attn_nomask_seqlens[1].tolist(),
+            kv_seqlens_nomask=cast[List[int], tail_attn_nomask_seqlens[1].tolist()],
             k_mask=torch.index_select(key, 0, kv_with_q_tail_mask_idx),
             v_mask=torch.index_select(value, 0, kv_with_q_tail_mask_idx),
-            kv_seqlens_mask=attn_mask_seqlens[0].tolist(),
+            kv_seqlens_mask=cast[List[int], attn_mask_seqlens[0].tolist()],
             mask=mask)
 
         # 3. Combine the output of the first half and second half.
@@ -793,7 +793,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 kv_list = [torch.empty_like(kv) for _ in range(self.cp_size)]
                 dist.all_gather(kv_list, kv, self.cp_group)
                 all_kv = torch.cat(kv_list, dim=0)
-                all_kv = torch.index_select(all_kv, 0, attn_metadata.prefill.cp_metadata.cp_kv_recover_idx)
+                cp_kv_recover_idx = attn_metadata.prefill.cp_kv_recover_idx if attn_metadata.prefill else None
+                all_kv = torch.index_select(all_kv, 0, cp_kv_recover_idx)
                 key, value = all_kv.split([self.head_size, self.head_size], dim=-1)
 
             if len(kv_cache) > 1:
