@@ -926,7 +926,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                   self.cp_size * self.sp_size * self.max_num_reqs))
         chunk_size = num_cp_padded_scheduled_tokens // (2 * self.cp_size)
 
-        # split position_ids (and use splited position_ids to split input_ids afterwards)
+        # split position_ids (and use split position_ids to split input_ids afterwards)
         req_position_cp = []
         req_position_cp.extend(
             full_indices[self.cp_rank * chunk_size:(self.cp_rank + 1) *

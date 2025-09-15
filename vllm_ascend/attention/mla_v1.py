@@ -1219,7 +1219,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         q_nope = q_nope.view(num_tokens, num_heads, -1)
         q_pe = q_pe.view(num_tokens, num_heads, -1)
 
-        # use cp & sp splited computed token nums from scheduler to compute actual seq_len and seq_mask
+        # use cp & sp split computed token nums from scheduler to compute actual seq_len and seq_mask
         num_computed_tokens_of_cp_sp = np.array(
             decode_meta.num_computed_tokens_of_cp_sp)  # [bs, cp_size, sp_size]
         seq_mask_cp = torch.where(
