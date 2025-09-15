@@ -183,12 +183,6 @@ class AscendPrefillMetadata:
 
 
 @dataclass
-class AscendDecodeMetadata:
-    block_table: torch.Tensor
-    seq_lens: torch.Tensor
-
-
-@dataclass
 class AscendMetadata:
     # **************************** Basic Properties ************************** #
     attn_mask: Optional[torch.Tensor] = None
@@ -226,7 +220,6 @@ class AscendMetadata:
     is_only_prefill: bool = False
 
     prefill: Optional[AscendPrefillMetadata] = None
-    decode: Optional[AscendDecodeMetadata] = None
 
 
 class AscendAttentionMetadataBuilder:
@@ -315,14 +308,9 @@ class AscendAttentionMetadataBuilder:
                 cp_kv_recover_idx=common_long_seq_metadata.cp_kv_recover_idx if common_long_seq_metadata is not None else None
             )
 
-        decode_metadata = None
         if num_decodes > 0:
             seq_lens = seq_lens[:num_decode_tokens]
             block_table = block_table[:num_decode_tokens, ...]
-            decode_metadata = AscendDecodeMetadata(
-                block_table=block_table,
-                seq_lens=seq_lens,
-            )
         attn_metadata = AscendMetadata(
             num_actual_tokens=num_actual_tokens,
             block_tables=block_table,
@@ -336,8 +324,7 @@ class AscendAttentionMetadataBuilder:
             num_prefills=num_prefills,
             enable_dbo_across_dp=common_attn_metadata.enable_dbo_across_dp,
             is_only_prefill=common_attn_metadata.is_only_prefill,
-            prefill=prefill_metadata,
-            decode=decode_metadata
+            prefill=prefill_metadata
         )
         return attn_metadata
 
@@ -702,7 +689,6 @@ class AscendAttentionBackendImpl(AttentionImpl):
     ) -> torch.Tensor:
         assert self.key_cache is not None
         assert self.value_cache is not None
-        assert attn_metadata.decode is not None
 
         # 1. Compute out&lse by "npu_fused_infer_attention_score"
         attn_out, attn_lse = torch.ops.npu.npu_fused_infer_attention_score(
@@ -718,9 +704,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
             antiquant_mode=0,
             antiquant_scale=None,
             softmax_lse_flag=True,
-            block_table=attn_metadata.decode.block_table,
+            block_table=attn_metadata.block_tables,
             block_size=self.key_cache.shape[1],
-            actual_seq_lengths_kv=attn_metadata.decode.seq_lens,
+            actual_seq_lengths_kv=attn_metadata.seq_lens,
         )
         attn_out = attn_out.view(attn_out.shape[0], attn_out.shape[2], attn_out.shape[3])
         attn_lse = attn_lse.view(attn_lse.shape[0], attn_lse.shape[1], 1)
