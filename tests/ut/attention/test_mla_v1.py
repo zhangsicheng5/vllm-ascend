@@ -825,7 +825,6 @@ class TestAscendMLAImplWithCPSP(TestAscendMLAImpl):
         num_tokens = 4
         num_heads = self.impl.num_heads
         v_head_dim = self.impl.v_head_dim
-        qk_dim = self.impl.qk_nope_head_dim + self.impl.qk_rope_head_dim
 
         q_nope = torch.randn(num_tokens, num_heads, self.impl.qk_nope_head_dim)
         q_pe = torch.randn(num_tokens, num_heads, self.impl.qk_rope_head_dim)

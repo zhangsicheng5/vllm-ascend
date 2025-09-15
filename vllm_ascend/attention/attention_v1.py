@@ -533,22 +533,22 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
     def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor, lengths: List[int]) -> torch.Tensor:
         max_len = max(lengths)
-        splits = torch.split(tensor_tnd, lengths, dim=0)  # 切成 b 段 (si, n, d)
+        splits = torch.split(tensor_tnd, lengths, dim=0)
 
         padded = []
         for s in splits:
             pad_len = max_len - s.shape[0]
-            s_pad = F.pad(s, (0, 0, 0, 0, 0, pad_len))  # 在 dim=0 左补 pad_len
+            s_pad = F.pad(s, (0, 0, 0, 0, 0, pad_len))
             padded.append(s_pad)
 
-        tensor_bsnd = torch.stack(padded, dim=0)  # (b, s, n, d)
+        tensor_bsnd = torch.stack(padded, dim=0)
         return tensor_bsnd
 
     def _unpack_bsnd_2_tnd(self, tensor_bsnd: torch.Tensor, lengths: List[int]) -> torch.Tensor:
         slices = []
-        for i, l in enumerate(lengths):
-            slices.append(tensor_bsnd[i, :l])
-        tensor_tnd = torch.cat(slices, dim=0)  # 拼成 (t, n, d)
+        for i, length in enumerate(lengths):
+            slices.append(tensor_bsnd[i, :length])
+        tensor_tnd = torch.cat(slices, dim=0)
         return tensor_tnd
 
     def _attention_with_nomask_and_mask(
