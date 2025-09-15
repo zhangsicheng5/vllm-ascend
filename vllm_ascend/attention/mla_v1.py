@@ -547,9 +547,11 @@ class AscendMLAImpl(MLAAttentionImpl):
             assert self.spec_token_num > 0
 
         self.cp_size = get_context_model_parallel_world_size()
-        self.cp_rank = get_context_model_parallel_rank()
-        self.cp_group = get_cp_group().device_group
-        self.sp_group = get_tp_group().device_group
+        self.cp_rank = get_context_model_parallel_rank() if self.cp_size > 1 else 0
+        self.cp_group = get_cp_group().device_group if self.cp_size > 1 else None
+        self.enable_sp = get_current_vllm_config().parallel_config.enable_sequence_parallel
+        self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
+        self.sp_group = get_tp_group().device_group if self.sp_size > 1 else None
 
     def _v_up_proj(self, x):
         # Convert from (B, N, L) to (N, B, L)
@@ -1093,8 +1095,6 @@ class AscendMLAImpl(MLAAttentionImpl):
         has_prefill = attn_metadata.num_prefills > 0
         num_decode_tokens = attn_metadata.num_decode_tokens
         num_actual_tokens = attn_metadata.num_actual_tokens
-        forward_context = get_forward_context()
-        self.enable_sp = forward_context.enable_sp
         if self.enable_sp and has_prefill:
             need_gather_q_kv =True
         if self.q_a_proj is not None:
@@ -1117,7 +1117,6 @@ class AscendMLAImpl(MLAAttentionImpl):
         prefill_preprocess_res = None
         # Preprocess for decode tokens
         if has_decode:
-            self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
             decode_q_c = q_c[:num_decode_tokens]
             cos = attn_metadata.decode.cos
             sin = attn_metadata.decode.sin
@@ -1368,8 +1367,6 @@ class AscendMLAImpl(MLAAttentionImpl):
 
         if decode_preprocess_res is not None:
             # MLA Preprocess for decoding
-            forward_context = get_forward_context()
-            self.enable_sp = forward_context.enable_sp
             self.sp_size = get_tensor_model_parallel_world_size() if self.enable_sp else 1
             self.sp_rank = get_tensor_model_parallel_rank() if self.enable_sp else 0
             if self.cp_size * self.sp_size > 1:
