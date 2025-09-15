@@ -258,7 +258,7 @@ class AscendRowParallelLinear(RowParallelLinear):
     # enable sp tensor parallel
     def _forward_mlp_sp(self, input_: torch.Tensor) -> torch.Tensor:
         forward_context = get_forward_context()
-        self.enable_sp = forward_context.enable_sp
+        self.enable_sp = is_sp_enabled()
         attn_metadata = forward_context.attn_metadata
         is_prefill = attn_metadata.num_prefills if attn_metadata else False
         if self.input_is_parallel:
@@ -505,7 +505,7 @@ class AscendMergedColumnParallelLinear(MergedColumnParallelLinear):
         input_: torch.Tensor,
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
         forward_context = get_forward_context()
-        self.enable_sp = forward_context.enable_sp
+        self.enable_sp = is_sp_enabled()
         attn_metadata = forward_context.attn_metadata
         is_prefill = attn_metadata.num_prefills if attn_metadata else False
         if self.enable_sp and is_prefill:

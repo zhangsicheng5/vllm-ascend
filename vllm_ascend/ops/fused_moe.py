@@ -41,7 +41,7 @@ from vllm.model_executor.layers.quantization.base_config import \
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import FusedMoEState
-from vllm_ascend.distributed.parallel_state import get_mc2_group
+from vllm_ascend.distributed.parallel_state import get_mc2_group, is_sp_enabled
 from vllm_ascend.ops.expert_load_balancer import ExpertLoadBalancer
 from vllm_ascend.ops.moe.experts_selector import select_experts
 from vllm_ascend.ops.moe.moe_mlp import unified_apply_mlp
@@ -409,7 +409,7 @@ class AscendFusedMoE(FusedMoE):
 
         forward_context = get_forward_context()
         fused_moe_state = forward_context.fused_moe_state
-        self.enable_sp = forward_context.enable_sp
+        self.enable_sp = is_sp_enabled()
         mc2_mask = forward_context.mc2_mask
         # For w8a8 dynamic we can do npu_dynamic_quant and gate in parallel.
         quantized_x_for_share, dynamic_scale_for_share = None, None
