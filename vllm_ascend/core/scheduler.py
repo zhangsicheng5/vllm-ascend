@@ -55,7 +55,8 @@ class AscendScheduler(Scheduler):
         self.cp_size = vllm_config.parallel_config.context_parallel_size
         self.enable_sp = vllm_config.parallel_config.enable_sequence_parallel
         self.sp_size = vllm_config.parallel_config.tensor_parallel_size if self.enable_sp else 1
-        if self.cp_size * self.sp_size > 1:
+        self.sp_cp_size = self.cp_size * self.sp_size
+        if self.sp_cp_size > 1:
             assert not self.cache_config.enable_prefix_caching
 
         self.finished_prefill_reqs: deque[Request] = deque()
@@ -170,12 +171,12 @@ class AscendScheduler(Scheduler):
             encoder_inputs_to_schedule = None
             new_encoder_budget = encoder_budget
 
-            if self.cp_size * self.sp_size > 1:
+            if self.sp_cp_size > 1:
                 # block_size align
                 num_total_blocks = cdiv((request.num_tokens - num_computed_tokens), self.block_size)
 
-                num_blocks_of_cp_sp = np.array([num_total_blocks // (self.cp_size * self.sp_size)] * self.cp_size * self.sp_size)
-                remain_blocks = num_total_blocks % (self.cp_size * self.sp_size)
+                num_blocks_of_cp_sp = np.array([num_total_blocks // (self.sp_cp_size)] * self.sp_cp_size)
+                remain_blocks = num_total_blocks % (self.sp_cp_size)
                 for i in range(remain_blocks):
                     num_blocks_of_cp_sp[i] += 1
                 num_blocks_of_cp_sp = num_blocks_of_cp_sp.reshape(self.cp_size, self.sp_size)
@@ -201,7 +202,7 @@ class AscendScheduler(Scheduler):
                 # We use `request.num_tokens` instead of
                 # `request.num_prompt_tokens` to consider the resumed
                 # requests, which have output tokens.
-                if self.cp_size * self.sp_size > 1:
+                if self.sp_cp_size > 1:
                     num_new_tokens = len(request.token_ids_of_cp_sp[0][0])
                 else:
                     num_new_tokens = request.num_tokens - num_computed_tokens
@@ -297,7 +298,7 @@ class AscendScheduler(Scheduler):
                     request.request_id)
             # Update request info.
             token_budget -= num_new_tokens
-            if self.cp_size * self.sp_size > 1:
+            if self.sp_cp_size > 1:
                 num_new_tokens = request.num_tokens - num_computed_tokens
             num_scheduled_tokens[request.request_id] = num_new_tokens
             request.status = RequestStatus.RUNNING
@@ -338,9 +339,9 @@ class AscendScheduler(Scheduler):
                     continue
 
                 # In decode phase, fill cp/sp ranks with unfull block first, only allocate new slot when all cp/sp blocks are full.
-                if self.cp_size * self.sp_size > 1:
+                if self.sp_cp_size > 1:
                     full_block_num_of_cp_sp = np.array(request.num_computed_tokens_of_cp_sp) // self.block_size
-                    if np.sum(full_block_num_of_cp_sp) == full_block_num_of_cp_sp[0][0] * self.cp_size * self.sp_size:
+                    if np.sum(full_block_num_of_cp_sp) == full_block_num_of_cp_sp[0][0] * self.sp_cp_size:
                         # all cp/sp blocks are full, new kv_cache will be stored in cp0 sp0 and new slot will be allocated
                         kv_rank = (0, 0)
                     else:
@@ -394,14 +395,14 @@ class AscendScheduler(Scheduler):
 
                 while True:
                     # use min computed tokens of all cp/sp ranks to allocate slot
-                    if self.cp_size * self.sp_size > 1:
+                    if self.sp_cp_size > 1:
                         computed_tokens = request.num_computed_tokens
                         request.num_computed_tokens = min(min(request.num_computed_tokens_of_cp_sp))
                     new_blocks = self.kv_cache_manager.allocate_slots(
                         request,
                         num_new_tokens,
                         num_lookahead_tokens=self.num_lookahead_tokens)
-                    if self.cp_size * self.sp_size > 1:
+                    if self.sp_cp_size > 1:
                         request.num_computed_tokens = computed_tokens
                     if new_blocks is None:
                         # The request cannot be scheduled.
@@ -433,7 +434,7 @@ class AscendScheduler(Scheduler):
                 self.scheduled_req_ids.add(request.request_id)
                 req_to_new_blocks[request.request_id] = new_blocks
                 num_scheduled_tokens[request.request_id] = num_new_tokens
-                if self.cp_size * self.sp_size > 1:
+                if self.sp_cp_size > 1:
                     request.num_computed_tokens_of_cp_sp[kv_rank[0]][kv_rank[1]] += num_new_tokens
                 token_budget -= num_new_tokens
                 req_index += 1
@@ -464,7 +465,7 @@ class AscendScheduler(Scheduler):
 
         # Check if the scheduling constraints are satisfied.
         total_num_scheduled_tokens = sum(num_scheduled_tokens.values())
-        assert total_num_scheduled_tokens <= self.max_num_scheduled_tokens * self.cp_size * self.sp_size
+        assert total_num_scheduled_tokens <= self.max_num_scheduled_tokens * self.sp_cp_size
         assert token_budget >= 0
         assert len(
             self.running
