@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Optional, List
+from typing import Any, Optional
 
 import torch
 
@@ -10,7 +10,7 @@ class AscendCommonLongSequenceMetadata:
 
     num_actual_tokens_cp_full: Optional[int] = None
 
-    num_computed_tokens_of_cp_sp: Optional[List[List[Optional[List[int]]]]] = None
+    num_computed_tokens_of_cp_sp: Optional[list[list[Optional[list[int]]]]] = None
 
     q_head_idx_tensor: torch.Tensor = None
 
