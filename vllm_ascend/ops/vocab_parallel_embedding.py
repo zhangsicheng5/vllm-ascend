@@ -31,7 +31,7 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.forward_context import get_forward_context
 
-from vllm_ascend.distributed.parallel_state import get_lmhead_tp_group
+from vllm_ascend.distributed.parallel_state import get_lmhead_tp_group, is_sp_enabled
 from vllm_ascend.utils import lmhead_tp_enable
 
 
@@ -148,7 +148,7 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
 
     def forward(self, input_):
         forward_context = get_forward_context()
-        self.enable_sp = forward_context.enable_sp
+        self.enable_sp = is_sp_enabled()
 
         if self.tp_size > 1:
             # Build the mask.
