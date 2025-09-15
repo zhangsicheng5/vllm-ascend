@@ -79,6 +79,11 @@ class AscendScheduler(Scheduler):
         req_to_new_blocks: dict[str, KVCacheBlocks] = {}
         num_scheduled_tokens: dict[str, int] = {}
         token_budget = self.max_num_scheduled_tokens
+
+        # Encoder-related.
+        scheduled_encoder_inputs: dict[str, list[int]] = {}
+        encoder_budget = self.max_num_encoder_input_tokens
+
         # Spec decode-related.
         scheduled_spec_decode_tokens: dict[str, list[int]] = {}
 
@@ -162,6 +167,9 @@ class AscendScheduler(Scheduler):
                 num_new_local_computed_tokens = 0
                 num_computed_tokens = request.num_computed_tokens
 
+            encoder_inputs_to_schedule = None
+            new_encoder_budget = encoder_budget
+
             if self.cp_size * self.sp_size > 1:
                 # block_size align
                 num_total_blocks = cdiv((request.num_tokens - num_computed_tokens), self.block_size)
@@ -221,6 +229,16 @@ class AscendScheduler(Scheduler):
                     continue
                 assert num_new_tokens > 0
                 blocks = new_computed_blocks.blocks[0]
+
+            # Schedule encoder inputs.
+            if request.has_encoder_inputs:
+                (encoder_inputs_to_schedule, num_new_tokens,
+                 new_encoder_budget) = self._try_schedule_encoder_inputs(
+                     request, num_computed_tokens, num_new_tokens,
+                     encoder_budget)
+                if num_new_tokens == 0:
+                    # The request cannot be scheduled.
+                    break
 
             watermark = getattr(self.scheduler_config, "watermark", 0.01)
             if not self._check_watermark_for_prefill(request, num_new_tokens,
@@ -288,6 +306,15 @@ class AscendScheduler(Scheduler):
             if request.num_cached_tokens < 0:
                 request.num_cached_tokens = num_computed_tokens
 
+            # Encoder-related.
+            if encoder_inputs_to_schedule:
+                scheduled_encoder_inputs[request.request_id] = (
+                    encoder_inputs_to_schedule)
+                # Allocate the encoder cache.
+                for i in encoder_inputs_to_schedule:
+                    self.encoder_cache_manager.allocate(request, i)
+                encoder_budget = new_encoder_budget
+
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
             self.waiting.extendleft(skipped_waiting_requests)
@@ -333,6 +360,16 @@ class AscendScheduler(Scheduler):
                 num_new_tokens = min(
                     num_new_tokens,
                     self.max_model_len - request.num_computed_tokens)
+
+                # Schedule encoder inputs.
+                encoder_inputs_to_schedule = None
+                new_encoder_budget = encoder_budget
+                if request.has_encoder_inputs:
+                    (encoder_inputs_to_schedule, num_new_tokens,
+                     new_encoder_budget) = self._try_schedule_encoder_inputs(
+                         request, request.num_computed_tokens, num_new_tokens,
+                         encoder_budget)
+
                 # Check that adding the request still respects the max_loras
                 # constraint.
                 if self.lora_config and request.lora_request and (
@@ -412,6 +449,15 @@ class AscendScheduler(Scheduler):
                         scheduled_spec_decode_tokens[request.request_id] = (
                             request.spec_token_ids)
 
+                # Encoder-related.
+                if encoder_inputs_to_schedule:
+                    scheduled_encoder_inputs[request.request_id] = (
+                        encoder_inputs_to_schedule)
+                    # Allocate the encoder cache.
+                    for i in encoder_inputs_to_schedule:
+                        self.encoder_cache_manager.allocate(request, i)
+                    encoder_budget = new_encoder_budget
+
                 # Record scheduled LoRA requests.
                 if self.lora_config and request.lora_request:
                     scheduled_loras.add(request.lora_request.lora_int_id)
@@ -455,7 +501,7 @@ class AscendScheduler(Scheduler):
             num_scheduled_tokens=num_scheduled_tokens,
             total_num_scheduled_tokens=total_num_scheduled_tokens,
             scheduled_spec_decode_tokens=scheduled_spec_decode_tokens,
-            scheduled_encoder_inputs={},
+            scheduled_encoder_inputs=scheduled_encoder_inputs,
             num_common_prefix_blocks=num_common_prefix_blocks,
             # finished_req_ids is an existing state in the scheduler,
             # instead of being newly scheduled in this step.
