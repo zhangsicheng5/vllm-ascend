@@ -273,8 +273,8 @@ class InputBatch:
         self.prev_req_id_to_index: Optional[dict[str, int]] = None
 
         # cp param
-        self.kv_rank: list[tuple[int]] = [None] * max_num_reqs
-        self.num_computed_tokens_of_cp_sp: list[list[list[int]]] = [None] * max_num_reqs
+        self.kv_rank: list[Optional[tuple[int]]] = [None] * max_num_reqs
+        self.num_computed_tokens_of_cp_sp: list[Optional[list[list[int]]]] = [None] * max_num_reqs
 
     @property
     def req_ids(self) -> list[str]:

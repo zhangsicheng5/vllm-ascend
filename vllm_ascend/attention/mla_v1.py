@@ -93,7 +93,7 @@ class AscendMLAPrefillMetadata:
     chunked_context: Optional[ChunkedContextMetadata] = None
     sin: torch.Tensor = None
     cos: torch.Tensor = None
-    cp_kv_recover_idx: list[int] = None
+    cp_kv_recover_idx: Optional[list[int]] = None
     q_head_idx: torch.Tensor = None
     q_tail_idx: torch.Tensor = None
     kv_with_q_head_nomask_idx: torch.Tensor = None
@@ -120,7 +120,7 @@ class AscendMLADecodeMetadata:
     attn_mask: Optional[torch.Tensor] = None
     sin: torch.Tensor = None
     cos: torch.Tensor = None
-    num_computed_tokens_of_cp_sp: list[list[list[int]]] = None
+    num_computed_tokens_of_cp_sp: Optional[list[list[list[int]]]] = None
 
 
 @dataclass
@@ -811,6 +811,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         kv_c_and_k_pe_cache: Tuple[torch.Tensor],
         attn_metadata: AscendMLAMetadata,
     ) -> torch.Tensor:
+        assert attn_metadata.prefill is not None
         num_tokens = q_nope.size(0)
         # Use precomputed indices from the metadata (already converted to tensors and on device)
         q_head_idx = attn_metadata.prefill.q_head_idx
@@ -1248,7 +1249,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                 q_pe,
                 k_nope,
                 k_pe,
-                attn_metadata.decode.block_table,
+                decode_meta.block_table,
                 seq_len,
                 num_heads,
                 self.scale,
