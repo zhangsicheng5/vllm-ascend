@@ -11,17 +11,16 @@
 # limitations under the License.
 # This file is a part of the vllm-ascend project.
 
-import unittest
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import torch
-from vllm.config import CacheConfig, ModelConfig, ParallelConfig, VllmConfig
+from vllm.config import (CacheConfig, CUDAGraphMode, ModelConfig,
+                         ParallelConfig, VllmConfig)
 from vllm.distributed.parallel_state import GroupCoordinator
-from vllm.config import CUDAGraphMode
-from tests.ut.base import TestBase
 
+from tests.ut.base import TestBase
 from vllm_ascend.utils import AscendSocVersion
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
 
@@ -47,7 +46,12 @@ class TestNPUModelRunner(TestBase):
         self.parallel_config_mock.enable_sequence_parallel = 1
 
         self.scheduler_output_mock = MagicMock()
-        self.scheduler_output_mock.num_scheduled_tokens = {0: 2, 1: 2, 2: 2, 3: 2}
+        self.scheduler_output_mock.num_scheduled_tokens = {
+            0: 2,
+            1: 2,
+            2: 2,
+            3: 2
+        }
         self.scheduler_output_mock.max_num_batched_tokens = 10
         self.scheduler_output_mock.max_num_seqs = 4
         self.scheduler_output_mock.total_num_scheduled_tokens = 8
@@ -72,33 +76,40 @@ class TestNPUModelRunner(TestBase):
         self.distributed_init_method = "tcp://localhost:12345"
         self.is_driver_worker = False
 
-    @patch("vllm_ascend.worker.model_runner_v1.lmhead_tp_enable", return_value=False)
+    @patch("vllm_ascend.worker.model_runner_v1.lmhead_tp_enable",
+           return_value=False)
     @patch("vllm_ascend.worker.model_runner_v1.get_attn_backend")
     @patch("vllm_ascend.worker.model_runner_v1.get_ascend_config")
-    @patch("vllm_ascend.worker.model_runner_v1.get_tensor_model_parallel_world_size", return_value=2)
-    @patch("vllm_ascend.worker.model_runner_v1.get_context_model_parallel_world_size", return_value=2)
+    @patch(
+        "vllm_ascend.worker.model_runner_v1.get_tensor_model_parallel_world_size",
+        return_value=2)
+    @patch(
+        "vllm_ascend.worker.model_runner_v1.get_context_model_parallel_world_size",
+        return_value=2)
     @patch("vllm_ascend.worker.model_runner_v1.get_pp_group")
     @patch("vllm_ascend.worker.model_runner_v1.get_tp_group")
     @patch("vllm_ascend.worker.model_runner_v1.get_cp_group")
-    @patch('vllm.distributed.parallel_state._TP', new_callable=lambda: MagicMock(spec=GroupCoordinator))
-    @patch("vllm.distributed.parallel_state._CP", new_callable=lambda: MagicMock(spec=GroupCoordinator))
+    @patch('vllm.distributed.parallel_state._TP',
+           new_callable=lambda: MagicMock(spec=GroupCoordinator))
+    @patch("vllm.distributed.parallel_state._CP",
+           new_callable=lambda: MagicMock(spec=GroupCoordinator))
     def test_prepare_inputs_when_sp_cp(
-            self,
-            mock_cp,
-            mock_tp,
-            mock_get_cp_group,
-            mock_get_tp_group,
-            mock_get_pp_group,
-            mock_cp_world_size,
-            mock_tp_world_size,
-            mock_get_ascend_config,
-            mock_get_attn_backend,
-            mock_lmhead_tp_enable,
+        self,
+        mock_cp,
+        mock_tp,
+        mock_get_cp_group,
+        mock_get_tp_group,
+        mock_get_pp_group,
+        mock_cp_world_size,
+        mock_tp_world_size,
+        mock_get_ascend_config,
+        mock_get_attn_backend,
+        mock_lmhead_tp_enable,
     ):
         """Test NPURunner normal initialization"""
         # Import and create NPUWorker instance
-        from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
         from vllm_ascend.attention.attention_v1 import AscendAttentionBackend
+        from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
 
         mock_cp_group = MagicMock()
         mock_cp_group.rank_in_group = 0
@@ -111,7 +122,7 @@ class TestNPUModelRunner(TestBase):
         mock_tp_group.world_size = 2
         mock_get_tp_group.return_value = mock_tp_group
         mock_tp.rank_in_group = 0
-        mock_tp.world_size=2
+        mock_tp.world_size = 2
 
         mock_pp_group = MagicMock()
         mock_pp_group.rank_in_group = 0
@@ -132,13 +143,15 @@ class TestNPUModelRunner(TestBase):
         runner.input_batch.num_reqs = 4
         runner.input_batch.req_ids = [0, 1, 2, 3]
         runner.input_batch.num_computed_tokens_cpu = np.array([0, 0, 0, 0])
-        runner.input_batch.num_computed_tokens_of_cp_sp = np.zeros((4, 2, 2), dtype=int)
+        runner.input_batch.num_computed_tokens_of_cp_sp = np.zeros((4, 2, 2),
+                                                                   dtype=int)
         runner.input_batch.token_ids_cpu_tensor = torch.zeros(
             (4, 10),
             device="cpu",
             dtype=torch.int32,
         )
-        runner.input_batch.token_ids_cpu = runner.input_batch.token_ids_cpu_tensor.numpy()
+        runner.input_batch.token_ids_cpu = runner.input_batch.token_ids_cpu_tensor.numpy(
+        )
         runner.model = MagicMock()
         output = runner._prepare_inputs(self.scheduler_output_mock, None)
         self.assertIsNotNone(output)

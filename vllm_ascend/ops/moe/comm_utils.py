@@ -34,6 +34,7 @@ def get_sp_metadata_context():
             enable_sp = sp_metadata.enable_sp if sp_metadata is not None else False
     return sp_metadata, enable_sp
 
+
 def async_all_to_all(input_,
                      output_split_sizes,
                      input_split_sizes,

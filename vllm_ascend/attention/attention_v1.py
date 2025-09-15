@@ -17,28 +17,29 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Tuple, Type, cast
+from typing import List, Optional, Tuple, Type
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
 import torch_npu
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer, AttentionType)
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.config import VllmConfig
+from vllm.distributed import (get_context_model_parallel_rank,
+                              get_context_model_parallel_world_size,
+                              get_cp_group)
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group,
                                           is_v1_kv_transfer_group)
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.utils import cdiv, direct_register_custom_op
 from vllm.v1.core.sched.output import SchedulerOutput
-from vllm.distributed import (get_context_model_parallel_world_size,
-                              get_context_model_parallel_rank,
-                              get_cp_group)
 
-from vllm_ascend.attention.utils import AscendCommonAttentionMetadata, split_decodes_and_prefills
+from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
+                                         split_decodes_and_prefills)
 from vllm_ascend.ops.attention import vanilla_chunked_prefill
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, aligned_16, is_310p,
                                nd_to_nz_2d, nd_to_nz_spec)
@@ -264,8 +265,11 @@ class AscendAttentionMetadataBuilder:
         num_actual_tokens_cp_full = long_seq_metadata.num_actual_tokens_cp_full if long_seq_metadata else None
         if num_actual_tokens_cp_full is None:
             num_actual_tokens_cp_full = num_actual_tokens
-        slot_mapping = common_attn_metadata.slot_mapping_cpu[:num_actual_tokens_cp_full].to(
-            self.device, non_blocking=True)
+        slot_mapping = common_attn_metadata.slot_mapping_cpu[:
+                                                             num_actual_tokens_cp_full].to(
+                                                                 self.device,
+                                                                 non_blocking=
+                                                                 True)
 
         attn_mask = common_attn_metadata.attn_mask
         attn_state = common_attn_metadata.attn_state
@@ -291,20 +295,26 @@ class AscendAttentionMetadataBuilder:
                 cp_metadata = AscendCpMetadata(
                     q_head_idx=common_long_seq_metadata.q_head_idx_tensor,
                     q_tail_idx=common_long_seq_metadata.q_tail_idx_tensor,
-                    kv_with_q_head_nomask_idx=common_long_seq_metadata.kv_with_q_head_nomask_idx_tensor,
-                    kv_with_q_head_mask_idx=common_long_seq_metadata.kv_with_q_head_mask_idx_tensor,
-                    kv_with_q_tail_nomask_idx=common_long_seq_metadata.kv_with_q_tail_nomask_idx_tensor,
-                    kv_with_q_tail_mask_idx=common_long_seq_metadata.kv_with_q_tail_mask_idx_tensor,
-                    attn_mask_seqlens=common_long_seq_metadata.attn_mask_seqlens,
-                    head_attn_nomask_seqlens=common_long_seq_metadata.head_attn_nomask_seqlens,
-                    tail_attn_nomask_seqlens=common_long_seq_metadata.tail_attn_nomask_seqlens,
+                    kv_with_q_head_nomask_idx=common_long_seq_metadata.
+                    kv_with_q_head_nomask_idx_tensor,
+                    kv_with_q_head_mask_idx=common_long_seq_metadata.
+                    kv_with_q_head_mask_idx_tensor,
+                    kv_with_q_tail_nomask_idx=common_long_seq_metadata.
+                    kv_with_q_tail_nomask_idx_tensor,
+                    kv_with_q_tail_mask_idx=common_long_seq_metadata.
+                    kv_with_q_tail_mask_idx_tensor,
+                    attn_mask_seqlens=common_long_seq_metadata.
+                    attn_mask_seqlens,
+                    head_attn_nomask_seqlens=common_long_seq_metadata.
+                    head_attn_nomask_seqlens,
+                    tail_attn_nomask_seqlens=common_long_seq_metadata.
+                    tail_attn_nomask_seqlens,
                     q_full_idx=common_long_seq_metadata.q_full_idx,
-                    cp_prefill_mask=common_long_seq_metadata.cp_prefill_mask
-                )
+                    cp_prefill_mask=common_long_seq_metadata.cp_prefill_mask)
             prefill_metadata = AscendPrefillMetadata(
                 cp_metadata=cp_metadata,
-                cp_kv_recover_idx=common_long_seq_metadata.cp_kv_recover_idx if common_long_seq_metadata is not None else None
-            )
+                cp_kv_recover_idx=common_long_seq_metadata.cp_kv_recover_idx
+                if common_long_seq_metadata is not None else None)
 
         if num_decodes > 0:
             seq_lens = seq_lens[:num_decode_tokens]
@@ -322,8 +332,7 @@ class AscendAttentionMetadataBuilder:
             num_prefills=num_prefills,
             enable_dbo_across_dp=common_attn_metadata.enable_dbo_across_dp,
             is_only_prefill=common_attn_metadata.is_only_prefill,
-            prefill=prefill_metadata
-        )
+            prefill=prefill_metadata)
         return attn_metadata
 
 
@@ -531,7 +540,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
             out=output)
         return output
 
-    def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor, lengths: List[int]) -> torch.Tensor:
+    def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor,
+                         lengths: List[int]) -> torch.Tensor:
         max_len = max(lengths)
         splits = torch.split(tensor_tnd, lengths, dim=0)
 
@@ -544,25 +554,23 @@ class AscendAttentionBackendImpl(AttentionImpl):
         tensor_bsnd = torch.stack(padded, dim=0)
         return tensor_bsnd
 
-    def _unpack_bsnd_2_tnd(self, tensor_bsnd: torch.Tensor, lengths: List[int]) -> torch.Tensor:
+    def _unpack_bsnd_2_tnd(self, tensor_bsnd: torch.Tensor,
+                           lengths: List[int]) -> torch.Tensor:
         slices = []
         for i, length in enumerate(lengths):
             slices.append(tensor_bsnd[i, :length])
         tensor_tnd = torch.cat(slices, dim=0)
         return tensor_tnd
 
-    def _attention_with_nomask_and_mask(
-        self,
-        q: torch.Tensor,
-        q_seqlens: List[int],
-        k_nomask: torch.Tensor,
-        v_nomask: torch.Tensor,
-        kv_seqlens_nomask: List[int],
-        k_mask: torch.Tensor,
-        v_mask: torch.Tensor,
-        kv_seqlens_mask: List[int],
-        mask: torch.Tensor
-    ) -> torch.Tensor:
+    def _attention_with_nomask_and_mask(self, q: torch.Tensor,
+                                        q_seqlens: List[int],
+                                        k_nomask: torch.Tensor,
+                                        v_nomask: torch.Tensor,
+                                        kv_seqlens_nomask: List[int],
+                                        k_mask: torch.Tensor,
+                                        v_mask: torch.Tensor,
+                                        kv_seqlens_mask: List[int],
+                                        mask: torch.Tensor) -> torch.Tensor:
         q = self._pack_tnd_2_bsnd(q, q_seqlens)
 
         # nomask Attention
@@ -581,11 +589,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 antiquant_scale=None,
                 softmax_lse_flag=True,
                 actual_seq_lengths_kv=kv_seqlens_nomask,
-                actual_seq_lengths=q_seqlens
-            )
-            attn_out_nomask = self._unpack_bsnd_2_tnd(attn_out_nomask, q_seqlens)
+                actual_seq_lengths=q_seqlens)
+            attn_out_nomask = self._unpack_bsnd_2_tnd(attn_out_nomask,
+                                                      q_seqlens)
             # (B, N, Q_S, 1) -> (B, Q_S, N, 1) -> (T, N, 1)
-            attn_lse_nomask = self._unpack_bsnd_2_tnd(attn_lse_nomask.permute([0, 2, 1, 3]), q_seqlens)
+            attn_lse_nomask = self._unpack_bsnd_2_tnd(
+                attn_lse_nomask.permute([0, 2, 1, 3]), q_seqlens)
 
         # mask Attention
         attn_out_mask, attn_lse_mask = torch.ops.npu.npu_fused_infer_attention_score(
@@ -602,10 +611,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
             antiquant_scale=None,
             softmax_lse_flag=True,
             actual_seq_lengths_kv=kv_seqlens_mask,
-            actual_seq_lengths=q_seqlens
-        )
+            actual_seq_lengths=q_seqlens)
         attn_out_mask = self._unpack_bsnd_2_tnd(attn_out_mask, q_seqlens)
-        attn_lse_mask = self._unpack_bsnd_2_tnd(attn_lse_mask.permute([0, 2, 1, 3]), q_seqlens)
+        attn_lse_mask = self._unpack_bsnd_2_tnd(
+            attn_lse_mask.permute([0, 2, 1, 3]), q_seqlens)
 
         # update
         output = attn_out_mask
@@ -616,13 +625,9 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         return output
 
-    def _forward_prefill_cp(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        attn_metadata: AscendMetadata
-    ) -> torch.Tensor:
+    def _forward_prefill_cp(self, query: torch.Tensor, key: torch.Tensor,
+                            value: torch.Tensor,
+                            attn_metadata: AscendMetadata) -> torch.Tensor:
         assert attn_metadata is not None
         assert attn_metadata.prefill is not None
         assert attn_metadata.prefill.cp_metadata is not None
@@ -642,8 +647,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
         output_head = self._attention_with_nomask_and_mask(
             q=torch.index_select(query, 0, q_head_idx),
             q_seqlens=attn_mask_seqlens[0].tolist(),
-            k_nomask=torch.index_select(key, 0, kv_with_q_head_nomask_idx) if self.cp_rank > 0 else None,
-            v_nomask=torch.index_select(value, 0, kv_with_q_head_nomask_idx) if self.cp_rank > 0 else None,
+            k_nomask=torch.index_select(key, 0, kv_with_q_head_nomask_idx)
+            if self.cp_rank > 0 else None,
+            v_nomask=torch.index_select(value, 0, kv_with_q_head_nomask_idx)
+            if self.cp_rank > 0 else None,
             kv_seqlens_nomask=head_attn_nomask_seqlens[1].tolist(),
             k_mask=torch.index_select(key, 0, kv_with_q_head_mask_idx),
             v_mask=torch.index_select(value, 0, kv_with_q_head_mask_idx),
@@ -666,10 +673,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
 
         # 3. Combine the output of the first half and second half.
         q_full_idx = attn_metadata.prefill.cp_metadata.q_full_idx
-        output = torch.index_select(torch.cat([output_head, output_tail], dim=0), 0, q_full_idx)
+        output = torch.index_select(
+            torch.cat([output_head, output_tail], dim=0), 0, q_full_idx)
         return output
 
-    def _update_out_and_lse(self, out_list: torch.Tensor, lse_list: torch.Tensor) -> torch.Tensor:
+    def _update_out_and_lse(self, out_list: torch.Tensor,
+                            lse_list: torch.Tensor) -> torch.Tensor:
         """LSE_final = log(sum(exp(LSE_i))), O_final = sum(exp(LSE_i - LSE_final) * O_i)
         Args:
             out_list: shape = [N, batch_size, num_heads, head_size]
@@ -679,14 +688,12 @@ class AscendAttentionBackendImpl(AttentionImpl):
             lse_final: shape = [batch_size, num_heads, 1]
         """
         lse_final = torch.logsumexp(lse_list, dim=0, keepdim=False)
-        out_final = torch.sum(torch.exp(lse_list - lse_final) * out_list, dim=0)
+        out_final = torch.sum(torch.exp(lse_list - lse_final) * out_list,
+                              dim=0)
         return out_final, lse_final
 
-    def _forward_decode_cp(
-        self,
-        query: torch.Tensor,
-        attn_metadata: AscendMetadata
-    ) -> torch.Tensor:
+    def _forward_decode_cp(self, query: torch.Tensor,
+                           attn_metadata: AscendMetadata) -> torch.Tensor:
         assert self.key_cache is not None
         assert self.value_cache is not None
 
@@ -694,8 +701,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
         attn_out, attn_lse = torch.ops.npu.npu_fused_infer_attention_score(
             query.view(query.shape[0], 1, query.shape[1], query.shape[2]),
             # [b,num_heads,head_size] -> [b,1,num_heads,head_size]
-            self.key_cache.view(self.key_cache.shape[0], self.key_cache.shape[1], -1),
-            self.value_cache.view(self.key_cache.shape[0], self.key_cache.shape[1], -1),
+            self.key_cache.view(self.key_cache.shape[0],
+                                self.key_cache.shape[1], -1),
+            self.value_cache.view(self.key_cache.shape[0],
+                                  self.key_cache.shape[1], -1),
             num_heads=self.num_heads,
             num_key_value_heads=self.num_kv_heads,
             input_layout="BSND",
@@ -708,17 +717,24 @@ class AscendAttentionBackendImpl(AttentionImpl):
             block_size=self.key_cache.shape[1],
             actual_seq_lengths_kv=attn_metadata.seq_lens,
         )
-        attn_out = attn_out.view(attn_out.shape[0], attn_out.shape[2], attn_out.shape[3])
+        attn_out = attn_out.view(attn_out.shape[0], attn_out.shape[2],
+                                 attn_out.shape[3])
         attn_lse = attn_lse.view(attn_lse.shape[0], attn_lse.shape[1], 1)
         # 2. Concat out&lse: [bs,num_heads,head_size] + [bs,num_heads,1] -> [bs,num_heads,head_size+1]
         attn_out_lse = torch.cat([attn_out, attn_lse], dim=-1)
         # 3. AllGather out&lse within CP group
-        attn_out_lse_list = [torch.empty_like(attn_out_lse) for _ in range(self.cp_size)]
+        attn_out_lse_list = [
+            torch.empty_like(attn_out_lse) for _ in range(self.cp_size)
+        ]
         dist.all_gather(attn_out_lse_list, attn_out_lse, group=self.cp_group)
         # 4. Update out&lse
-        attn_out_lse_allgather = torch.stack(attn_out_lse_list, dim=0)  # [cp, batch_size, num_heads, head_size+1]
-        attn_out_allgather, attn_lse_allgather = torch.split(attn_out_lse_allgather, [self.head_size, 1], dim=-1)
-        output, _ = self._update_out_and_lse(attn_out_allgather, attn_lse_allgather)
+        attn_out_lse_allgather = torch.stack(
+            attn_out_lse_list,
+            dim=0)  # [cp, batch_size, num_heads, head_size+1]
+        attn_out_allgather, attn_lse_allgather = torch.split(
+            attn_out_lse_allgather, [self.head_size, 1], dim=-1)
+        output, _ = self._update_out_and_lse(attn_out_allgather,
+                                             attn_lse_allgather)
         return output
 
     def forward(
@@ -795,7 +811,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 all_kv = torch.cat(kv_list, dim=0)
                 cp_kv_recover_idx = attn_metadata.prefill.cp_kv_recover_idx if attn_metadata.prefill else None
                 all_kv = torch.index_select(all_kv, 0, cp_kv_recover_idx)
-                key, value = all_kv.split([self.head_size, self.head_size], dim=-1)
+                key, value = all_kv.split([self.head_size, self.head_size],
+                                          dim=-1)
 
             if len(kv_cache) > 1:
                 if self.key_cache is None:
@@ -803,7 +820,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 slots = attn_metadata.slot_mapping
                 torch_npu._npu_reshape_and_cache(
                     key=key if self.cp_size > 1 else key[:num_actual_tokens],
-                    value=value if self.cp_size > 1 else value[:num_actual_tokens],
+                    value=value
+                    if self.cp_size > 1 else value[:num_actual_tokens],
                     key_cache=self.key_cache,
                     value_cache=self.value_cache,
                     slot_indices=slots)
@@ -811,7 +829,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
             # V0-Style scheduler situation.
             if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
                 if self.cp_size > 1:
-                    output = self._forward_prefill_cp(query, key, value, attn_metadata)
+                    output = self._forward_prefill_cp(query, key, value,
+                                                      attn_metadata)
                 else:
                     output = self._forward_prefill_no_cache(
                         query, key, value, attn_metadata, output, num_tokens)
@@ -823,7 +842,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 if self.cp_size > 1:
                     output = self._forward_decode_cp(query, attn_metadata)
                 else:
-                    output = self._forward_decode_only(query, attn_metadata, output)
+                    output = self._forward_decode_only(query, attn_metadata,
+                                                       output)
             # Normal V1 situation.
             else:
                 output = self._forward_v1_style(query, attn_metadata, output)

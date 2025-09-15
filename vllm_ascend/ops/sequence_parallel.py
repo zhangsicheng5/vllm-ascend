@@ -81,24 +81,29 @@ class MetadataForPadding:
         return padded_data_reduce_scatter
 
 
-def init_metadata_for_sp(input_ids, enable_sequence_parallelism, is_perifll: bool = True):
+def init_metadata_for_sp(input_ids,
+                         enable_sequence_parallelism,
+                         is_perifll: bool = True):
     if not enable_sequence_parallelism:
         return MetadataForPadding(padding_flag=False,
                                   not_dummy_and_is_prefill=False)
     tp_size = get_tensor_model_parallel_world_size()
     if is_perifll:
         lengths_sum_unpadding = input_ids.shape[0]
-        lengths_sum_padding = ((lengths_sum_unpadding + tp_size - 1) // tp_size) * tp_size
+        lengths_sum_padding = (
+            (lengths_sum_unpadding + tp_size - 1) // tp_size) * tp_size
         if lengths_sum_unpadding == lengths_sum_padding:
             padding_flag = False
         else:
             padding_flag = True
         pad_size = lengths_sum_padding - lengths_sum_unpadding
-        _metadata_for_padding = MetadataForPadding(lengths_sum_unpadding=lengths_sum_unpadding,
-                                                   lengths_sum_padding=lengths_sum_padding,
-                                                   padding_flag=padding_flag,
-                                                   pad_size=pad_size,
-                                                   not_dummy_and_is_prefill=True)
+        _metadata_for_padding = MetadataForPadding(
+            lengths_sum_unpadding=lengths_sum_unpadding,
+            lengths_sum_padding=lengths_sum_padding,
+            padding_flag=padding_flag,
+            pad_size=pad_size,
+            not_dummy_and_is_prefill=True)
 
         return _metadata_for_padding
-    return MetadataForPadding(padding_flag=False, not_dummy_and_is_prefill=False)
+    return MetadataForPadding(padding_flag=False,
+                              not_dummy_and_is_prefill=False)

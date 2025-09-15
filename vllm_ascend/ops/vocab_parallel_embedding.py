@@ -22,6 +22,7 @@ from torch import nn
 from torch.nn.parameter import Parameter
 from vllm.distributed import divide, tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import get_tp_group
+from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
@@ -29,9 +30,9 @@ from vllm.model_executor.layers.vocab_parallel_embedding import (
     DEFAULT_VOCAB_PADDING_SIZE, ParallelLMHead, UnquantizedEmbeddingMethod,
     VocabParallelEmbedding, pad_vocab_size)
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.forward_context import get_forward_context
 
-from vllm_ascend.distributed.parallel_state import get_lmhead_tp_group, is_sp_enabled
+from vllm_ascend.distributed.parallel_state import (get_lmhead_tp_group,
+                                                    is_sp_enabled)
 from vllm_ascend.utils import lmhead_tp_enable
 
 
@@ -157,8 +158,7 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
                 self.shard_indices.org_vocab_end_index,
                 self.shard_indices.num_org_vocab_padding,
                 self.shard_indices.added_vocab_start_index,
-                self.shard_indices.added_vocab_end_index
-            )
+                self.shard_indices.added_vocab_end_index)
         else:
             masked_input = input_
         # Get the embeddings.
@@ -180,9 +180,13 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
             reminder = original_len % sp_size
             if reminder != 0:
                 padding_len = sp_size - reminder
-                output_parallel = nn.functional.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+                output_parallel = nn.functional.pad(output_parallel,
+                                                    (0, 0, 0, padding_len),
+                                                    mode='constant',
+                                                    value=0)
 
-            output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
+            output = tensor_model_parallel_reduce_scatter(
+                output_parallel.movedim(0, -1)).movedim(-1, 0)
             return output
         output = tensor_model_parallel_all_reduce(output_parallel)
         return output
