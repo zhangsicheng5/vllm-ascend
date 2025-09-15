@@ -63,7 +63,7 @@ class CachedRequestState:
 
     # cp param
     kv_rank: Optional[tuple[int]] = None
-    num_computed_tokens_of_cp_sp: Optional[list[list[int]]] = None
+    num_computed_tokens_of_cp_sp: Optional[list[Optional[list[int]]]] = None
 
     def __post_init__(self):
         self.num_prompt_tokens = len(self.prompt_token_ids)
@@ -274,7 +274,7 @@ class InputBatch:
 
         # cp param
         self.kv_rank: list[Optional[tuple[int]]] = [None] * max_num_reqs
-        self.num_computed_tokens_of_cp_sp: list[Optional[list[list[int]]]] = [None] * max_num_reqs
+        self.num_computed_tokens_of_cp_sp: list[Optional[list[Optional[list[int]]]]] = [None] * max_num_reqs
 
     @property
     def req_ids(self) -> list[str]:

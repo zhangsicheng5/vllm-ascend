@@ -120,7 +120,7 @@ class AscendMLADecodeMetadata:
     attn_mask: Optional[torch.Tensor] = None
     sin: torch.Tensor = None
     cos: torch.Tensor = None
-    num_computed_tokens_of_cp_sp: Optional[list[list[Optional[list[int]]]]] = None
+    num_computed_tokens_of_cp_sp: Optional[list[Optional[list[Optional[list[int]]]]]] = None
 
 
 @dataclass
