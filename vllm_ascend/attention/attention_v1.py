@@ -161,7 +161,7 @@ class AscendAttentionState(Enum):
 
 @dataclass
 class AscendCpMetadata:
-    cp_kv_recover_idx: list[int] = None
+    cp_kv_recover_idx: Optional[list[int]] = None
     q_head_idx: torch.Tensor = None
     q_tail_idx: torch.Tensor = None
     kv_with_q_head_nomask_idx: torch.Tensor = None
@@ -178,8 +178,8 @@ class AscendCpMetadata:
 @dataclass
 class AscendPrefillMetadata:
     """ Prefill Specific Metadata for Ascend"""
-    cp_metadata: AscendCpMetadata = None
-    cp_kv_recover_idx: list[int] = None
+    cp_metadata: Optional[AscendCpMetadata] = None
+    cp_kv_recover_idx: Optional[list[int]] = None
 
 
 @dataclass
@@ -546,7 +546,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
             out=output)
         return output
 
-    def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor, lengths: Optional[List[int]]) -> torch.Tensor:
+    def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor, lengths: List[int]) -> torch.Tensor:
         max_len = max(lengths)
         splits = torch.split(tensor_tnd, lengths, dim=0)  # 切成 b 段 (si, n, d)
 
@@ -559,7 +559,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         tensor_bsnd = torch.stack(padded, dim=0)  # (b, s, n, d)
         return tensor_bsnd
 
-    def _unpack_bsnd_2_tnd(self, tensor_bsnd: torch.Tensor, lengths: Optional[List[int]]) -> torch.Tensor:
+    def _unpack_bsnd_2_tnd(self, tensor_bsnd: torch.Tensor, lengths: List[int]) -> torch.Tensor:
         slices = []
         for i, l in enumerate(lengths):
             slices.append(tensor_bsnd[i, :l])
@@ -638,6 +638,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         value: torch.Tensor,
         attn_metadata: AscendMetadata
     ) -> torch.Tensor:
+        assert attn_metadata.prefill.cp_metadata is not None
         # Use precomputed indices from the metadata (already converted to tensors and on device)
         q_head_idx = attn_metadata.prefill.cp_metadata.q_head_idx
         q_tail_idx = attn_metadata.prefill.cp_metadata.q_tail_idx
@@ -699,6 +700,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
         query: torch.Tensor,
         attn_metadata: AscendMetadata
     ) -> torch.Tensor:
+        assert self.key_cache is not None
+        assert self.value_cache is not None
+        assert attn_metadata.decode is not None
+
         # 1. Compute out&lse by "npu_fused_infer_attention_score"
         attn_out, attn_lse = torch.ops.npu.npu_fused_infer_attention_score(
             query.view(query.shape[0], 1, query.shape[1], query.shape[2]),
