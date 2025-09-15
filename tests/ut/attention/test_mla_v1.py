@@ -11,6 +11,7 @@ from vllm_ascend.attention.mla_v1 import (AscendMLABackend,
                                           AscendMLAImpl, AscendMLAMetadata,
                                           AscendMLAMetadataBuilder,
                                           AscendMLAPrefillMetadata)
+import numpy as np
 
 
 class TestAscendMLABackend(TestBase):
@@ -638,7 +639,7 @@ class TestAscendMLAImpl(TestBase):
 
 
 # test _forward_prefill_cp and ring_mla
-class TestAscendMLAImplPrefillCPSP(TestAscendMLAImpl):
+class TestAscendMLAImplWithCPSP(TestAscendMLAImpl):
 
     @patch("vllm_ascend.attention.mla_v1.npu_prefetch")
     @patch("vllm_ascend.attention.mla_v1.get_tp_group")
@@ -861,4 +862,59 @@ class TestAscendMLAImplPrefillCPSP(TestAscendMLAImpl):
 
         # should call ring_mla for twice（head + tail）
         self.assertGreaterEqual(mock_ring.call_count, 2)
+    
+    
+    @patch("torch.distributed.all_to_all_single")
+    @patch("torch.distributed.all_gather")
+    @patch("torch_npu.atb.npu_multi_head_latent_attention_with_lse")
+    def test_forward_decode_sp(self, mock_mla_with_lse, mock_all_gather, mock_all_to_all_single):
+        mock_mla_with_lse.return_value = MagicMock()
+
+        # mock 分布式 all_to_all_single，直接复制输入到输出
+        def fake_all_to_all_single(output, input, group=None):
+            output.copy_(input)
+        mock_all_to_all_single.side_effect = fake_all_to_all_single
+
+        # mock all_gather，简单模拟单卡收集
+        def fake_all_gather(tensor_list, tensor, group=None):
+            for i in range(len(tensor_list)):
+                tensor_list[i].copy_(tensor)
+        mock_all_gather.side_effect = fake_all_gather
+
+        num_tokens = 100
+        block_size = 4
+        num_blocks = 100
+
+        self.impl.enable_sp = True
+        self.impl.num_heads = 8
+        self.impl.num_kv_heads = self.impl.num_heads
+        self.impl.tp_size = 2
+        self.impl.sp_size = 2
+        self.impl.cp_size = 2
+        self.impl.sp_rank = 0
+        self.impl.cp_rank = 0
+        self.impl.sp_group = MagicMock()   # 避免 dist 默认 group
+        self.impl.cp_group = MagicMock()
+        self.impl._v_up_proj = MagicMock()
+        self.impl._v_up_proj.return_value = torch.randn(num_tokens, self.impl.v_head_dim)
+
+        meta_data = MagicMock()
+        meta_data.decode = MagicMock()
+        meta_data.decode.num_computed_tokens_of_cp_sp = np.array([[[2, 2], [2, 2]]])
+        meta_data.decode.block_table = torch.arange(num_blocks)
+
+        q_nope = torch.randn(num_tokens, self.impl.num_heads, self.impl.qk_nope_head_dim)
+        q_pe = torch.randn(num_tokens, self.impl.num_heads, self.impl.qk_rope_head_dim)
+        k_nope = torch.randn(num_blocks, self.impl.num_heads, block_size, self.impl.kv_lora_rank)
+        k_pe = torch.randn(num_blocks, self.impl.num_heads, block_size, self.impl.qk_rope_head_dim)
+
+        result = self.impl._forward_decode_sp(q_nope, q_pe, k_nope, k_pe, block_size, meta_data)
+
+        self.assertEqual(result.shape[0], num_tokens)
+        self.assertEqual(result.shape[1], self.impl.v_head_dim)
+
+        mock_all_to_all_single.assert_called()
+        mock_all_gather.assert_called()
+        mock_mla_with_lse.assert_called()
+
     
