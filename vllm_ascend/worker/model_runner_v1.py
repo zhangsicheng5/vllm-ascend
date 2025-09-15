@@ -40,7 +40,6 @@ from vllm.config import CompilationLevel, CUDAGraphMode, VllmConfig
 from vllm.distributed import (tensor_model_parallel_all_gather,
                               get_tensor_model_parallel_world_size,
                               get_tensor_model_parallel_rank,
-                              get_tp_group,
                               get_cp_group)
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)

@@ -28,8 +28,7 @@ from vllm.distributed import (divide, get_tensor_model_parallel_rank,
                               split_tensor_along_last_dim,
                               tensor_model_parallel_all_gather,
                               tensor_model_parallel_all_reduce,
-                              tensor_model_parallel_reduce_scatter,
-                              get_tp_group)
+                              tensor_model_parallel_reduce_scatter)
 from vllm.distributed.parallel_state import get_tp_group
 from vllm.model_executor.layers.linear import (  # noqa
     WEIGHT_LOADER_V2_SUPPORTED, ColumnParallelLinear,

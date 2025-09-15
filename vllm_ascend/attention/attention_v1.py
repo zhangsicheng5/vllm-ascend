@@ -274,7 +274,6 @@ class AscendAttentionMetadataBuilder:
             num_actual_tokens_cp_full = num_actual_tokens
         slot_mapping = common_attn_metadata.slot_mapping_cpu[:num_actual_tokens_cp_full].to(
             self.device, non_blocking=True)
-        input_positions = common_attn_metadata.positions[:num_actual_tokens].long()
 
         attn_mask = common_attn_metadata.attn_mask
         attn_state = common_attn_metadata.attn_state
