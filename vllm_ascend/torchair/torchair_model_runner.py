@@ -42,7 +42,9 @@ from vllm_ascend.torchair.utils import (
     torchair_quant_method_register, write_kv_cache_bytes_to_file)
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
                                is_310p, get_ascend_soc_version,
-                               AscendSocVersion)
+                               AscendSocVersion,
+                               sequence_parallel_enable,
+                               context_parallel_enable)
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
 
 
@@ -58,7 +60,8 @@ class NPUTorchairModelRunner(NPUModelRunner):
         register_torchair_model()
         torchair_ops_patch()
         torchair_quant_method_register()
-        if self.enable_shared_expert_dp:
+        
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return
         self.new_kv_cache_bytes = -1
         self.torchair_compiled_model = None  # type: ignore
@@ -83,7 +86,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
             self, num_tokens: int, with_prefill: bool, enable_dbo: bool
     ) -> tuple[int, Optional[torch.Tensor], bool, bool]:
         """Override from NPUModelRunner to pad num_tokens"""
-        if self.enable_shared_expert_dp:
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return super()._sync_metadata_across_dp(num_tokens, with_prefill,
                                                     enable_dbo)
         if self.dp_size == 1:
@@ -121,7 +124,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
     def _build_attention_metadata(self, with_prefill, num_reqs, skip_attn):
         # NOTE: If torchair graph mode and not with_prefill,
         # we can't skip_attn, it will cause graph recompile.
-        if with_prefill or self.enable_shared_expert_dp:
+        if with_prefill or self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             attn_metadata = super()._build_attention_metadata(
                 with_prefill, num_reqs, skip_attn)
         else:
@@ -141,7 +144,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
                                           is_torchair_compile, input_ids,
                                           positions, attn_metadata, num_tokens,
                                           intermediate_tensors, inputs_embeds):
-        if with_prefill or self.enable_shared_expert_dp:
+        if with_prefill or self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             if is_310p():
                 converting_weight_acl_format(self.model, ACL_FORMAT_FRACTAL_ND)
             hidden_states = super()._generate_dummy_run_hidden_states(
@@ -182,7 +185,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
         return hidden_states
 
     def _convert_torch_format(self, kv_cache):
-        if self.enable_shared_expert_dp:
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return super()._convert_torch_format(kv_cache)
         kv_cache = torch_npu.npu_format_cast(kv_cache, ACL_FORMAT_FRACTAL_ND)
         return kv_cache
@@ -201,7 +204,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
 
     def _capture_model(self):
         """Override from NPUModelRunner to use torchair graph capture."""
-        if self.enable_shared_expert_dp:
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return super()._capture_model()
         # TODO(NeverRaR): Calling graph_capture(device=self.device) in
         # torchair graph capture can cause some issues, so now we just
@@ -242,7 +245,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
                                          self.new_kv_cache_bytes)
 
     def _use_aclgraph(self) -> bool:
-        if self.enable_shared_expert_dp:
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return super()._use_aclgraph()
         return False
 
@@ -269,7 +272,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
             )
 
     def _update_graph_pad_size(self, with_prefill, graph_pad_size):
-        if with_prefill or self.enable_shared_expert_dp:
+        if with_prefill or self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             super()._update_graph_pad_size(with_prefill, graph_pad_size)
         else:
             self.graph_pad_size = graph_pad_size
@@ -282,7 +285,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
             input_ids, positions, num_input_tokens, with_prefill,
             padded_num_tokens_across_dp)
 
-        if with_prefill or self.enable_shared_expert_dp:
+        if with_prefill or self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return input_ids, positions
         else:
             input_ids = self.input_ids[:padded_num_tokens_across_dp]
@@ -297,7 +300,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
         if attn_metadata is not None and isinstance(attn_metadata, dict):
             attn_metadata = attn_metadata['model.layers.0.self_attn.attn']
 
-        if self.enable_shared_expert_dp:
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return super()._generate_process_reqs_hidden_states(
                 attn_metadata, with_prefill, padded_num_tokens_across_dp,
                 input_ids, positions, intermediate_tensors, inputs_embeds)
@@ -485,7 +488,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
             self.torchair_graph_batch_sizes = new_graph_batch_sizes
 
     def _build_drafter_prepare_inputs_torchair_param(self):
-        if self.enable_shared_expert_dp:
+        if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return super()._build_drafter_prepare_inputs_torchair_param()
         else:
             return True

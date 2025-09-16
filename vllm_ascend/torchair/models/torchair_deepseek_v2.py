@@ -668,9 +668,15 @@ class TorchairDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         ascend_config = get_ascend_config()
         # TODO: enable mla in vllm-ascend
         if model_config.use_mla:
-            attn_cls = TorchairDeepseekV2MLAAttention
+            from vllm_ascend.utils import sequence_parallel_enable, context_parallel_enable
+            from vllm_ascend.models.deepseek_v2 import CustomDeepseekV2MLAAttention
+            if sequence_parallel_enable or context_parallel_enable:
+                attn_cls = CustomDeepseekV2MLAAttention
+            else:
+                attn_cls = TorchairDeepseekV2MLAAttention
         else:
             attn_cls = DeepseekV2Attention
+        print(f"attn_cls:{attn_cls}")
         self.self_attn = attn_cls(
             config=config,
             hidden_size=self.hidden_size,
@@ -813,6 +819,8 @@ class TorchairDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             residual = get_tp_group().all_gather(residual, 0)
 
             attn_metadata = get_forward_context().attn_metadata
+            if attn_metadata is not None and isinstance(attn_metadata, dict):
+                attn_metadata = attn_metadata['model.layers.0.self_attn.attn']
             if attn_metadata is not None:
                 num_tokens = attn_metadata.num_actual_tokens
             else:
