@@ -2098,7 +2098,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     moe_comm_method = "allgather"
 
         elif soc_version in {AscendSocVersion.A3}:
-            moe_comm_method = "mc2" if num_tokens <= self.mc2_tokens_capacity else "alltoall"
+            moe_comm_method = "mc2" if num_tokens <= self.mc2_tokens_capacity and not with_prefill else "alltoall"
         else:
             raise ValueError(f"Unsupported soc_version: {soc_version}")
 
