@@ -190,7 +190,8 @@ class TestAscendMLAMetadataBuilder(TestBase):
         ascend_config = MagicMock()
         with patch("vllm_ascend.attention.mla_v1.get_ascend_config",
                    return_value=ascend_config):
-            builder = AscendMLAMetadataBuilder(mock_vllm_config, mock_device)
+            builder = AscendMLAMetadataBuilder(None, None, mock_vllm_config,
+                                               mock_device)
 
             self.assertEqual(builder.block_size,
                              mock_vllm_config.cache_config.block_size)
@@ -210,7 +211,8 @@ class TestAscendMLAMetadataBuilder(TestBase):
 
         with patch("vllm_ascend.attention.mla_v1.get_ascend_config",
                    return_value=ascend_config):
-            builder = AscendMLAMetadataBuilder(mock_vllm_config, mock_device)
+            builder = AscendMLAMetadataBuilder(None, None, mock_vllm_config,
+                                               mock_device)
             builder.decode_threshold = 1
 
         input_batch = MagicMock()

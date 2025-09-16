@@ -17,7 +17,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Tuple, Type
+from typing import ClassVar, List, Optional, Tuple, Type
 
 import torch
 import torch.distributed as dist
@@ -37,13 +37,13 @@ from vllm.distributed.kv_transfer import (get_kv_transfer_group,
 from vllm.forward_context import ForwardContext, get_forward_context
 from vllm.utils import cdiv, direct_register_custom_op
 from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.kv_cache_interface import AttentionSpec
 
 from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
                                          split_decodes_and_prefills)
 from vllm_ascend.ops.attention import vanilla_chunked_prefill
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, aligned_16, is_310p,
                                nd_to_nz_2d, nd_to_nz_spec)
-from vllm_ascend.worker.npu_input_batch import InputBatch
 
 
 def wait_for_kv_layer_from_connector(layer_name: str):
@@ -151,6 +151,10 @@ class AscendAttentionBackend(AttentionBackend):
             key_caches[dst_indices] = key_caches[src_indices]
             value_caches[dst_indices] = value_caches[src_indices]
 
+    @staticmethod
+    def get_supported_block_size() -> list[int]:
+        return [64]
+
 
 class AscendAttentionState(Enum):
     PrefillNoCache = 0
@@ -223,31 +227,37 @@ class AscendMetadata:
 
 
 class AscendAttentionMetadataBuilder:
+    reorder_batch_threshold: ClassVar[int] = 1
 
     def __init__(
         self,
+        kv_cache_spec: AttentionSpec,
+        layer_names: list[str],
         vllm_config: VllmConfig,
         device: torch.device,
     ):
         self.vllm_config = vllm_config
         self.model_config = vllm_config.model_config
         self.device = device
-        self.max_num_blocks_per_req = cdiv(self.model_config.max_model_len,
-                                           vllm_config.cache_config.block_size)
+        self.max_num_blocks_per_req = cdiv(
+            self.model_config.max_model_len,
+            AscendAttentionBackend.get_supported_block_size()[0])
 
-    def reorder_batch(self, input_batch: "InputBatch",
+    def reorder_batch(self, input_batch,
                       scheduler_output: "SchedulerOutput") -> bool:
         return False
 
     def build(
         self,
+        common_prefix_len: int,
         common_attn_metadata: AscendCommonAttentionMetadata,
         model: nn.Module,
     ):
         num_reqs = common_attn_metadata.num_reqs
         num_actual_tokens = common_attn_metadata.num_actual_tokens
-        query_start_loc_cpu = common_attn_metadata.query_start_loc_cpu
-
+        query_start_loc_cpu = common_attn_metadata.query_start_loc_cpu[:
+                                                                       num_reqs
+                                                                       + 1]
         decode_threshold = 1
         num_decodes, num_prefills, num_decode_tokens, num_prefill_tokens = \
             split_decodes_and_prefills(common_attn_metadata, decode_threshold=decode_threshold)
@@ -255,9 +265,6 @@ class AscendAttentionMetadataBuilder:
         assert num_decode_tokens + num_prefill_tokens == num_actual_tokens
 
         block_table = common_attn_metadata.block_table_tensor
-        block_table[:num_reqs, :self.max_num_blocks_per_req] = (
-            block_table[:num_reqs])
-
         query_lens = query_start_loc_cpu[1:] - query_start_loc_cpu[:-1]
         seq_lens = common_attn_metadata.seq_lens_cpu[:num_reqs]
 
@@ -865,6 +872,8 @@ def unified_ascend_attention_with_output(
     wait_for_kv_layer_from_connector(layer_name)
     forward_context: ForwardContext = get_forward_context()
     attn_metadata = forward_context.attn_metadata
+    if isinstance(attn_metadata, dict):
+        attn_metadata = attn_metadata[layer_name]
     self = forward_context.no_compile_layers[layer_name]
     kv_cache = self.kv_cache[forward_context.virtual_engine]
     self.impl.forward(self,
