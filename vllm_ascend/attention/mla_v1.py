@@ -11,15 +11,14 @@ from vllm.attention.backends.abstract import (AttentionBackend,
                                               AttentionMetadata,
                                               MLAAttentionImpl)
 from vllm.config import VllmConfig, get_current_vllm_config
-from vllm.distributed import (get_context_model_parallel_rank,
-                              get_context_model_parallel_world_size,
-                              get_cp_group, get_tensor_model_parallel_rank,
+from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               get_tp_group)
 from vllm.model_executor.layers.linear import (LinearBase,
                                                UnquantizedLinearMethod)
 from vllm.utils import cdiv, round_down
 
+from vllm_ascend.utils import context_parallel_enable, sequence_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
 from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
@@ -31,6 +30,10 @@ from vllm_ascend.ops.attention import vanilla_chunked_prefill_mla
 from vllm_ascend.utils import npu_prefetch
 from vllm_ascend.worker.npu_input_batch import InputBatch
 
+if context_parallel_enable:
+    from vllm.distributed import (get_context_model_parallel_rank,
+                                  get_context_model_parallel_world_size,
+                                  get_cp_group)
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
 
@@ -546,13 +549,15 @@ class AscendMLAImpl(MLAAttentionImpl):
             self.spec_token_num = speculative_config.num_speculative_tokens
             assert self.spec_token_num > 0
 
-        self.cp_size = get_context_model_parallel_world_size()
+        self.cp_size = get_context_model_parallel_world_size(
+        ) if context_parallel_enable else 1
         self.cp_rank = get_context_model_parallel_rank(
         ) if self.cp_size > 1 else 0
         self.cp_group = get_cp_group(
         ).device_group if self.cp_size > 1 else None
         self.enable_sp = get_current_vllm_config(
-        ).parallel_config.enable_sequence_parallel
+        ).parallel_config.enable_sequence_parallel if sequence_parallel_enable else 0
+
         self.sp_size = get_tensor_model_parallel_world_size(
         ) if self.enable_sp else 1
         self.sp_group = get_tp_group(

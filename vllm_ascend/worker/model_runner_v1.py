@@ -37,14 +37,13 @@ from vllm.attention.layer import Attention
 from vllm.compilation.counter import compilation_counter
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
 from vllm.config import CompilationLevel, CUDAGraphMode, VllmConfig
-from vllm.distributed import (get_cp_group, get_tensor_model_parallel_rank,
+from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
                               tensor_model_parallel_all_gather)
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
 from vllm.distributed.parallel_state import (
-    get_context_model_parallel_rank, get_context_model_parallel_world_size,
     get_dp_group, get_pp_group, get_tp_group, is_global_first_rank)
 from vllm.forward_context import BatchDescriptor, get_forward_context
 from vllm.logger import logger
@@ -77,6 +76,7 @@ from vllm.v1.worker.utils import (bind_kv_cache, gather_mm_placeholders,
                                   sanity_check_mm_encoder_outputs,
                                   scatter_mm_placeholders)
 
+from vllm_ascend.utils import context_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import set_ascend_forward_context
 from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
@@ -101,6 +101,12 @@ from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
                                get_ascend_soc_version, is_310p,
                                lmhead_tp_enable)
 from vllm_ascend.worker.npu_input_batch import CachedRequestState, InputBatch
+from vllm_ascend.distributed.parallel_state import is_sp_enabled
+
+if context_parallel_enable:
+    from vllm.distributed import get_cp_group
+    from vllm.distributed.parallel_state import (
+    get_context_model_parallel_rank, get_context_model_parallel_world_size)
 
 if TYPE_CHECKING:
     import xgrammar as xgr  # type: ignore[import-untyped]
@@ -229,9 +235,11 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                                 decode_max_num_seqs)
         self.dp_size = vllm_config.parallel_config.data_parallel_size
         self.dp_rank = vllm_config.parallel_config.data_parallel_rank
-        self.cp_size = get_context_model_parallel_world_size()
-        self.cp_rank = get_context_model_parallel_rank()
-        self.enable_sp = self.parallel_config.enable_sequence_parallel
+        self.cp_size = get_context_model_parallel_world_size(
+        ) if context_parallel_enable else 1
+        self.cp_rank = get_context_model_parallel_rank(
+        ) if self.cp_size > 1 else 0
+        self.enable_sp = is_sp_enabled()
         self.sp_size = get_tensor_model_parallel_world_size(
         ) if self.enable_sp else 1
         self.sp_rank = get_tensor_model_parallel_rank(
