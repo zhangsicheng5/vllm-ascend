@@ -1718,12 +1718,13 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 query_start_loc=self.query_start_loc[:num_reqs + 1],
                 query_start_loc_cpu=self.query_start_loc_cpu[:num_reqs + 1],
                 seq_lens_cpu=self.seq_lens_cpu,
+                seq_lens=self.seq_lens_cpu[:num_reqs],
                 num_reqs=num_reqs,
                 num_actual_tokens=total_num_scheduled_tokens,
                 actual_seq_lengths_q=self.actual_seq_lengths_q,
-                block_table_tensor=self.input_batch.block_table[0].
-                get_device_tensor(),
+                block_table_tensor=blk_table_tensor[:num_reqs],
                 slot_mapping_cpu=self.slot_mapping_cpu,
+                num_computed_tokens_cpu=num_computed_tokens_cpu,
                 positions=self.positions,
                 attn_mask=self.attn_mask,
                 spec_attn_mask=self.spec_attn_mask,
@@ -1734,10 +1735,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 graph_pad_size=self.graph_pad_size,
                 decode_token_per_req=self.decode_token_per_req,
                 common_long_seq_metadata=long_seq_metadata)
-            attn_metadata = self.attn_metadata_builder.build(
-                common_attn_metadata, self.model)
-            if self.vllm_config.model_config.use_mla:
-                attn_metadata.num_input_tokens = num_input_tokens
+            # attn_metadata = self.attn_metadata_builder.build(
+            #     common_attn_metadata, self.model)
+            # if self.vllm_config.model_config.use_mla:
+            #     attn_metadata.num_input_tokens = num_input_tokens
             # token id pad
             if self.cp_size > 1:
                 for i in range(num_reqs):
@@ -1810,11 +1811,11 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 hidden_states = hidden_states[:-pad_size, :]
         if self.enable_sp and with_prefill:
             hidden_states = get_tp_group().all_gather(hidden_states, 0)
-            hidden_states = hidden_states[:attn_metadata.num_input_tokens]
+            hidden_states = hidden_states[:list(attn_metadata.values())[0].num_input_tokens]
         if self.cp_size > 1 and with_prefill:
             hidden_states = get_cp_group().all_gather(hidden_states, 0)
             hidden_states = torch.index_select(
-                hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
+                hidden_states, 0, list(attn_metadata.values())[0].prefill.cp_kv_recover_idx)
         return hidden_states
 
     def _build_attn_state(self, num_reqs, num_scheduled_tokens,

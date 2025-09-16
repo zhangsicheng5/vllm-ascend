@@ -172,7 +172,7 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
                                       tensor_model_parallel_reduce_scatter)
         is_prefill = False
         if forward_context.attn_metadata:
-            is_prefill = forward_context.attn_metadata.num_prefills
+            is_prefill = list(forward_context.attn_metadata.values())[0].num_prefills
         if self.enable_sp and is_prefill:
             sp_size = get_tensor_model_parallel_world_size()
             original_len = input_.shape[0]

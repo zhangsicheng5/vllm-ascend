@@ -21,10 +21,7 @@ from typing import Any, Callable, Optional
 import torch
 import torch_npu
 from vllm.config import get_current_vllm_config
-from vllm.distributed import (get_context_model_parallel_world_size,
-                              get_tensor_model_parallel_rank,
-                              get_tensor_model_parallel_world_size,
-                              tensor_model_parallel_all_reduce)
+from vllm.distributed import get_tensor_model_parallel_world_size
 from vllm.distributed.parallel_state import (get_dp_group, get_ep_group,
                                              get_tp_group)
 from vllm.forward_context import get_forward_context
@@ -37,6 +34,7 @@ from vllm.model_executor.layers.fused_moe.layer import (
 from vllm.model_executor.layers.quantization.base_config import \
     QuantizationConfig
 
+from vllm_ascend.utils import context_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.distributed.parallel_state import get_mc2_group
 from vllm_ascend.ascend_forward_context import FusedMoEState
@@ -50,7 +48,9 @@ from vllm_ascend.ops.sequence_parallel import MetadataForPadding
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ,
                                get_all_reduce_merge_state,
                                get_rm_router_logits_state, is_310p)
-
+if context_parallel_enable:
+    from vllm.distributed import get_context_model_parallel_world_size
+    
 
 class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
 
@@ -356,7 +356,7 @@ class AscendFusedMoE(FusedMoE):
 
         forward_context = get_forward_context()
         self.enable_sp = is_sp_enabled()
-        mc2_mask = forward_context.mc2_mask
+        # mc2_mask = forward_context.mc2_mask
         # For w8a8 dynamic we can do npu_dynamic_quant and gate in parallel.
         quantized_x_for_share, dynamic_scale_for_share = None, None
 
@@ -374,7 +374,7 @@ class AscendFusedMoE(FusedMoE):
         moe_comm_method_name = forward_context.moe_comm_method_name
         forward_context.moe_comm_method = getattr(self, moe_comm_method_name)
 
-        hidden_states, router_logits = forward_context.moe_comm_method.prepare(
+        hidden_states, router_logits, mc2_mask = forward_context.moe_comm_method.prepare(
             hidden_states=hidden_states,
             router_logits=router_logits,
             enable_shared_expert_dp=self.enable_shared_expert_dp,

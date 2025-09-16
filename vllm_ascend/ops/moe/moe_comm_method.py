@@ -53,7 +53,7 @@ class MoECommMethod(ABC):
             hidden_states, router_logits, enable_shared_expert_dp,
             rm_router_logits, replace_allreduce, gate)
         self.mc2_mask = mc2_mask
-        return hidden_states, router_logits
+        return hidden_states, router_logits, mc2_mask
 
     def finalize(self, hidden_states: torch.Tensor,
                  reduce_results: bool) -> torch.Tensor:
