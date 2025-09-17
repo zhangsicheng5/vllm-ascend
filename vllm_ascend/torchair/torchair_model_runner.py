@@ -63,7 +63,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
             return
         self.new_kv_cache_bytes = -1
         self.torchair_compiled_model: Optional[Any] = None  # type: ignore
-        self.torchair_compiled_models: Dict[str, Any] = {}  # type: ignore
+        self.torchair_compiled_models: Dict[int, Any] = {}  # type: ignore
         self.use_cached_npu_graph: bool = ascend_config.torchair_graph_config.use_cached_graph
         self.use_cached_kv_cache_bytes = ascend_config.torchair_graph_config.use_cached_kv_cache_bytes
         self.torchair_graph_batch_sizes: List[
