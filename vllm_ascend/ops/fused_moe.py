@@ -390,7 +390,7 @@ class AscendFusedMoE(FusedMoE):
 
         forward_context = get_forward_context()
         self.enable_sp = is_sp_enabled()
-        # mc2_mask = forward_context.mc2_mask
+        mc2_mask = forward_context.mc2_mask
         # For w8a8 dynamic we can do npu_dynamic_quant and gate in parallel.
         quantized_x_for_share, dynamic_scale_for_share = None, None
 
@@ -407,7 +407,7 @@ class AscendFusedMoE(FusedMoE):
         moe_comm_method_name = forward_context.moe_comm_method_name
         forward_context.moe_comm_method = getattr(self, moe_comm_method_name)
 
-        hidden_states, router_logits, mc2_mask = forward_context.moe_comm_method.prepare(
+        hidden_states, router_logits = forward_context.moe_comm_method.prepare(
             hidden_states=hidden_states,
             router_logits=router_logits,
             enable_shared_expert_dp=self.enable_shared_expert_dp,
