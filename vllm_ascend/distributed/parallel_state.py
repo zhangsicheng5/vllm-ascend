@@ -71,7 +71,8 @@ def init_ascend_model_parallel(parallel_config: ParallelConfig, ):
                                      backend,
                                      group_name="mc2")
     global _ENABLE_SP
-    _ENABLE_SP = parallel_config.enable_sequence_parallel if sequence_parallel_enable() else 0
+    _ENABLE_SP = parallel_config.enable_sequence_parallel if sequence_parallel_enable(
+    ) else 0
     if envs_ascend.VLLM_ASCEND_ENABLE_MLP_OPTIMIZE:
         global _MLP_TP
         assert _MLP_TP is None, (

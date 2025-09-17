@@ -577,6 +577,7 @@ def oproj_tp_enable() -> bool:
 def mlp_tp_enable() -> bool:
     return envs_ascend.VLLM_ASCEND_ENABLE_MLP_OPTIMIZE
 
+
 def sequence_parallel_enable() -> bool:
     return envs_ascend.VLLM_ASCEND_ENABLE_SP
 

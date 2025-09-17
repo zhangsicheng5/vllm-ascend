@@ -240,7 +240,8 @@ class NPUPlatform(Platform):
 
         from vllm_ascend.utils import long_sequence_enable
         if parallel_config and parallel_config.worker_cls == "auto":
-            if ascend_config.torchair_graph_config.enabled or ascend_config.enable_shared_expert_dp or long_sequence_enable():
+            if ascend_config.torchair_graph_config.enabled or ascend_config.enable_shared_expert_dp or long_sequence_enable(
+            ):
                 parallel_config.worker_cls = "vllm_ascend.torchair.torchair_worker.NPUTorchairWorker"
             else:
                 parallel_config.worker_cls = "vllm_ascend.worker.worker_v1.NPUWorker"

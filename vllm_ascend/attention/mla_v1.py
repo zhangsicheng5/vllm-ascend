@@ -560,7 +560,8 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.cp_group = get_cp_group(
         ).device_group if self.cp_size > 1 else None
         self.enable_sp = get_current_vllm_config(
-        ).parallel_config.enable_sequence_parallel if sequence_parallel_enable() else 0
+        ).parallel_config.enable_sequence_parallel if sequence_parallel_enable(
+        ) else 0
 
         self.sp_size = get_tensor_model_parallel_world_size(
         ) if self.enable_sp else 1
