@@ -20,10 +20,10 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 from torch.nn.parameter import Parameter
-from vllm.distributed import divide, tensor_model_parallel_all_reduce
+from vllm.distributed import (divide, get_tensor_model_parallel_world_size,
+                              tensor_model_parallel_all_reduce,
+                              tensor_model_parallel_reduce_scatter)
 from vllm.distributed.parallel_state import get_tp_group
-from vllm.distributed import (get_tensor_model_parallel_world_size,
-                                      tensor_model_parallel_reduce_scatter)
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
