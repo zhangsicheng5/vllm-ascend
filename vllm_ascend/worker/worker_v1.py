@@ -327,8 +327,7 @@ class NPUWorker(WorkerBase):
             context_parallel_size = 1
         ensure_model_parallel_initialized(
             self.parallel_config.tensor_parallel_size,
-            self.parallel_config.pipeline_parallel_size,
-            context_parallel_size)
+            self.parallel_config.pipeline_parallel_size, context_parallel_size)
         init_ascend_model_parallel(self.parallel_config)
         ensure_kv_transfer_initialized(self.vllm_config)
 

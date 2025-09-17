@@ -199,8 +199,7 @@ class MockFusedMoEMethod(FusedMoEMethodBase):
 
 class TestTorchairAscendFusedMoe:
 
-    def test_init_no_quant(self, mock_dist_env,
-                           default_moe_config):
+    def test_init_no_quant(self, mock_dist_env, default_moe_config):
         layer = TorchairAscendFusedMoE(**default_moe_config)
 
         layer.w13_weight = nn.Parameter(
@@ -229,8 +228,7 @@ class TestTorchairAscendFusedMoe:
             error_config['scoring_func'] = "random"
             layer = TorchairAscendFusedMoE(**error_config)
 
-    def test_init_with_quant(self, mock_dist_env,
-                             default_moe_config):
+    def test_init_with_quant(self, mock_dist_env, default_moe_config):
         mock_quant_config = MagicMock()
         mock_quant_method = MockFusedMoEMethod()
         mock_quant_config.get_quant_method.return_value = mock_quant_method
@@ -241,8 +239,7 @@ class TestTorchairAscendFusedMoe:
             assert moe.quant_method is not None
             assert isinstance(moe.quant_method, AscendFusedMoEMethod)
 
-    def test_init_with_mixed_quant(self, mock_dist_env,
-                                   default_moe_config):
+    def test_init_with_mixed_quant(self, mock_dist_env, default_moe_config):
         mock_quant_config = MagicMock()
         mock_quant_method = MockFusedMoEMethod()
         mock_quant_config.get_quant_method.return_value = mock_quant_method
@@ -262,8 +259,7 @@ class TestTorchairAscendFusedMoe:
          [2, None, False, 5, None], [None, None, True, 5, None],
          [None, None, False, 1, None], [None, None, True, 5, 1],
          [None, None, False, 5, 1]])
-    def test_forward(self, mock_dist_env, default_moe_config,
-                     others_param):
+    def test_forward(self, mock_dist_env, default_moe_config, others_param):
         """
         1 test has shared_experts
         2 test has top_k

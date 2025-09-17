@@ -13,16 +13,11 @@
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
-import torch
-from vllm.config import (CacheConfig, CUDAGraphMode, ModelConfig,
-                         ParallelConfig, VllmConfig)
-from vllm.distributed.parallel_state import GroupCoordinator
 
-from tests.ut.base import TestBase
 from vllm_ascend.utils import AscendSocVersion
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
+
 
 # yapf: disable
 @pytest.mark.parametrize(

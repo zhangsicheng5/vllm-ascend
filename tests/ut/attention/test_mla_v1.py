@@ -243,7 +243,8 @@ class TestAscendMLAImpl(TestBase):
            return_value=2)
     @patch("vllm_ascend.attention.mla_v1.get_current_vllm_config")
     @patch("vllm_ascend.attention.mla_v1.get_ascend_config")
-    def setUp(self, ascend_config, get_current_vllm_config, mock_tp, mock_state_tp):
+    def setUp(self, ascend_config, get_current_vllm_config, mock_tp,
+              mock_state_tp):
         mock_tp.world_size = 2
         mock_state_tp.world_size = 1
         vllm_config = MagicMock()
@@ -829,8 +830,11 @@ class TestAscendMLAImplWithCPSP(TestAscendMLAImpl):
         self.impl._v_up_proj = MagicMock()
         self.impl._v_up_proj.return_value = torch.randn(
             num_tokens, self.impl.v_head_dim)
-        mock_mla.return_value = [torch.randn(num_tokens, self.impl.num_heads * self.impl.sp_size, self.impl.kv_lora_rank),
-                                 torch.randn(num_tokens, self.impl.num_heads * self.impl.sp_size, 1)]
+        mock_mla.return_value = [
+            torch.randn(num_tokens, self.impl.num_heads * self.impl.sp_size,
+                        self.impl.kv_lora_rank),
+            torch.randn(num_tokens, self.impl.num_heads * self.impl.sp_size, 1)
+        ]
 
         meta_data = MagicMock()
         meta_data.decode = MagicMock()

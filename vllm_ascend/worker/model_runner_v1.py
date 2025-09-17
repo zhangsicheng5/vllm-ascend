@@ -628,8 +628,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     num_computed_tokens=new_req_data.num_computed_tokens,
                     output_token_ids=[],
                     lora_request=new_req_data.lora_request,
-                    mm_hashes=new_req_data.mm_hashes
-                )
+                    mm_hashes=new_req_data.mm_hashes)
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
             if self.uses_mrope:
                 image_grid_thw = []

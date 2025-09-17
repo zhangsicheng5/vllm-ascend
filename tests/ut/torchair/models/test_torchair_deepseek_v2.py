@@ -13,7 +13,7 @@
 # This file is a part of the vllm-ascend project.
 #
 from types import SimpleNamespace
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 import torch
@@ -312,8 +312,7 @@ def test_torchair_deepseek_v2_decoder_layer(mock_maybe_chunk_residual,
     assert isinstance(layer.mlp, TorchairDeepseekV2MLP)
 
 
-def test_torchair_deepseek_v2_for_causal_lm(mock_distributed,
-                                            vllm_config):
+def test_torchair_deepseek_v2_for_causal_lm(mock_distributed, vllm_config):
     model = TorchairDeepseekV2ForCausalLM(vllm_config=vllm_config)
 
     input_ids = torch.randint(0, 10000, (2, 4))
