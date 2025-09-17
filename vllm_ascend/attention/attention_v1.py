@@ -39,8 +39,10 @@ from vllm.v1.kv_cache_interface import AttentionSpec
 from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
                                          split_decodes_and_prefills)
 from vllm_ascend.ops.attention import vanilla_chunked_prefill
-from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, aligned_16, is_310p,
-                               nd_to_nz_2d, nd_to_nz_spec, context_parallel_enable)
+from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, aligned_16,
+                               context_parallel_enable, is_310p, nd_to_nz_2d,
+                               nd_to_nz_spec)
+
 if context_parallel_enable():
     from vllm.distributed import (get_context_model_parallel_rank,
                                   get_context_model_parallel_world_size,
