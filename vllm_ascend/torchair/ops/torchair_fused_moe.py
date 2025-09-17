@@ -981,15 +981,21 @@ class TorchairAscendFusedMoE(FusedMoE):
             params_dtype = torch.get_default_dtype()
 
         vllm_config = get_current_vllm_config()
-
-        self.moe_parallel_config = FusedMoEParallelConfig.make(
-            tp_size_=(tp_size if tp_size is not None else
-                      get_tensor_model_parallel_world_size()),
-            dp_size_=(dp_size
-                      if dp_size is not None else get_dp_group().world_size),
-            cp_size_=(get_context_model_parallel_world_size()
-                      if context_parallel_enable() else 1),
-            vllm_parallel_config=vllm_config.parallel_config)
+        if context_parallel_enable():
+            self.moe_parallel_config = FusedMoEParallelConfig.make(
+                tp_size_=(tp_size if tp_size is not None else
+                        get_tensor_model_parallel_world_size()),
+                dp_size_=(dp_size
+                        if dp_size is not None else get_dp_group().world_size),
+                cp_size_=get_context_model_parallel_world_size(),
+                vllm_parallel_config=vllm_config.parallel_config)
+        else:
+                self.moe_parallel_config = FusedMoEParallelConfig.make(
+                tp_size_=(tp_size if tp_size is not None else
+                        get_tensor_model_parallel_world_size()),
+                dp_size_=(dp_size
+                        if dp_size is not None else get_dp_group().world_size),
+                vllm_parallel_config=vllm_config.parallel_config)
 
         self.top_k = top_k
         self.num_experts = num_experts
