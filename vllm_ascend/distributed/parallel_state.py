@@ -7,7 +7,7 @@ from vllm.distributed.parallel_state import (GroupCoordinator, get_world_group,
 
 import vllm_ascend.envs as envs_ascend
 from vllm_ascend.ascend_config import get_ascend_config
-from vllm_ascend.utils import sequence_parallel_enable, long_sequence_enable
+from vllm_ascend.utils import long_sequence_enable, sequence_parallel_enable
 
 # Currently, mc2 op need their own group coordinator.
 _MC2: Optional[GroupCoordinator] = None
@@ -63,8 +63,7 @@ def init_ascend_model_parallel(parallel_config: ParallelConfig, ):
     else:
         context_parallel_size = 1
     all_ranks = torch.arange(world_size).reshape(
-        -1, parallel_config.data_parallel_size *
-        context_parallel_size *
+        -1, parallel_config.data_parallel_size * context_parallel_size *
         parallel_config.tensor_parallel_size)
     global _MC2
     group_ranks = all_ranks.unbind(0)

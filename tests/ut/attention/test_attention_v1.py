@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import torch
-from vllm.distributed.parallel_state import GroupCoordinator
 
 from tests.ut.base import TestBase
 from vllm_ascend.attention.attention_v1 import (AscendAttentionBackend,
@@ -181,12 +180,7 @@ class TestAscendAttentionMetadataBuilder(TestBase):
 
 class TestAscendAttentionBackendImpl(TestBase):
 
-    @patch('vllm.distributed.parallel_state._CP',
-           new_callable=lambda: MagicMock(spec=GroupCoordinator))
-    @patch(
-        "vllm_ascend.attention.attention_v1.get_context_model_parallel_world_size",
-        return_value=1)
-    def setUp(self, mock_get_cp_size, mock_cp):
+    def setUp(self):
         self.layer = MagicMock()
         self.layer.layer_name = "test_layer"
         self.layer._k_scale_float = 1.0
