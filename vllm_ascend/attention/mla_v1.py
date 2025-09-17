@@ -18,7 +18,7 @@ from vllm.model_executor.layers.linear import (LinearBase,
                                                UnquantizedLinearMethod)
 from vllm.utils import cdiv, round_down
 
-from vllm_ascend.utils import sequence_parallel_enable
+from vllm_ascend.utils import sequence_parallel_enable, context_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
 from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
@@ -432,11 +432,12 @@ class AscendMLAMetadataBuilder:
 
         decode_metadata = None
         if num_decodes > 0:
+            # Notice that num_decodes != num_decode_tokens in SpecDecoding Scenario
             actual_seq_lengths_q = query_start_loc[1:num_decodes + 1].tolist()
             max_seq_lens = seq_lens[:num_decodes].max().item()
-            seq_lens = seq_lens[:num_decode_tokens]
+            seq_lens = seq_lens[:num_decodes]
             input_positions = input_positions[:num_decode_tokens]
-            block_table = block_table[:num_decode_tokens, ...]
+            block_table = block_table[:num_decodes, ...]
             seq_lens_list = seq_lens.tolist()
 
             cos = self.cos_cache[input_positions].unsqueeze(  # type: ignore
