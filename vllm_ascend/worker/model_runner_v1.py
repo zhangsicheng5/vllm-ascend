@@ -1393,7 +1393,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     self.input_batch.token_ids_cpu[
                         i][num_padded_tokens -
                            num_cp_pads[i]:num_padded_tokens] = 0
-                    
+
         # Prepare input_ids.
         # NOTE(woosuk): We use torch.index_select instead of np.take here
         # because torch.index_select is much faster than np.take for large
