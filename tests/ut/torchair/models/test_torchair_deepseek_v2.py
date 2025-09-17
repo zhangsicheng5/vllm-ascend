@@ -218,12 +218,8 @@ def test_torchair_deepseek_v2_mlp(mock_distributed, base_config):
                               quant_config=None)
 
 
-@patch("vllm.distributed.parallel_state.get_cp_group")
-def test_torchair_deepseek_v2_moe(mock_cp_group, mock_distributed, base_config,
+def test_torchair_deepseek_v2_moe(mock_distributed, base_config,
                                   mock_forward_context):
-    cp_group = MagicMock()
-    mock_cp_group.return_value = cp_group()
-    cp_group.world_size = 1
     base_config.n_shared_experts = 1
     moe = TorchairDeepseekV2MoE(config=base_config,
                                 quant_config=None,
@@ -282,16 +278,11 @@ def test_torchair_deepseek_v2_mla_attention(mock_rms_norm, mock_distributed,
 @patch("torch.ops.vllm.maybe_wait_prefetch_done", side_effect=lambda x: None)
 @patch("torch.ops.vllm.maybe_chunk_residual",
        side_effect=lambda x, residual: residual)
-@patch("vllm.distributed.parallel_state.get_cp_group")
-def test_torchair_deepseek_v2_decoder_layer(mock_cp_group,
-                                            mock_maybe_chunk_residual,
+def test_torchair_deepseek_v2_decoder_layer(mock_maybe_chunk_residual,
                                             mock_maybe_wait_prefetch_done,
                                             mock_rms_norm, mock_add_norm,
                                             mock_distributed, base_config,
                                             vllm_config):
-    cp_group = MagicMock()
-    mock_cp_group.return_value = cp_group()
-    cp_group.world_size = 1
     mock_rms_norm.return_value = (torch.randn(2, 128), torch.randn(2, 128))
     mock_add_norm.return_value = (torch.randn(2, 128), torch.randn(2, 128),
                                   torch.randn(2, 128))
@@ -321,12 +312,8 @@ def test_torchair_deepseek_v2_decoder_layer(mock_cp_group,
     assert isinstance(layer.mlp, TorchairDeepseekV2MLP)
 
 
-@patch("vllm.distributed.parallel_state.get_cp_group")
-def test_torchair_deepseek_v2_for_causal_lm(mock_cp_group, mock_distributed,
+def test_torchair_deepseek_v2_for_causal_lm(mock_distributed,
                                             vllm_config):
-    cp_group = MagicMock()
-    mock_cp_group.return_value = cp_group()
-    cp_group.world_size = 1
     model = TorchairDeepseekV2ForCausalLM(vllm_config=vllm_config)
 
     input_ids = torch.randint(0, 10000, (2, 4))

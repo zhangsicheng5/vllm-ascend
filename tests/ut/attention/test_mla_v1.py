@@ -237,20 +237,15 @@ class TestAscendMLAMetadataBuilder(TestBase):
 
 class TestAscendMLAImpl(TestBase):
 
-    @patch('vllm.distributed.parallel_state._CP',
-           new_callable=lambda: MagicMock(spec=GroupCoordinator))
-    @patch("vllm.distributed.get_context_model_parallel_world_size",
-           return_value=1)
     @patch('vllm.distributed.parallel_state._TP',
            new_callable=lambda: MagicMock(spec=GroupCoordinator))
     @patch("vllm.distributed.get_tensor_model_parallel_world_size",
            return_value=2)
     @patch("vllm_ascend.attention.mla_v1.get_current_vllm_config")
     @patch("vllm_ascend.attention.mla_v1.get_ascend_config")
-    def setUp(self, ascend_config, get_current_vllm_config, mock_get_tp_size,
-              mock_tp, mock_get_cp_size, mock_cp):
+    def setUp(self, ascend_config, get_current_vllm_config, mock_tp, mock_state_tp):
         mock_tp.world_size = 2
-        mock_cp.world_size = 1
+        mock_state_tp.world_size = 1
         vllm_config = MagicMock()
         speculative_config = MagicMock()
         model_config = MagicMock()
@@ -317,7 +312,6 @@ class TestAscendMLAImpl(TestBase):
         self.assertIsNotNone(self.impl.kv_a_proj_with_mqa)
         self.assertIsNotNone(self.impl.kv_a_layernorm)
         self.assertEqual(self.impl.num_queries_per_kv, 32)
-        self.assertEqual(self.impl.tp_size, 2)
 
     def test_v_up_proj(self):
         batch_size = 4
@@ -801,10 +795,9 @@ class TestAscendMLAImplWithCPSP(TestAscendMLAImpl):
 
     @patch("torch.distributed.all_to_all_single")
     @patch("torch.distributed.all_gather")
-    @patch("torch_npu.atb.npu_multi_head_latent_attention_with_lse")
-    def test_forward_decode_sp(self, mock_mla_with_lse, mock_all_gather,
+    @patch("torch_npu.atb.npu_multi_head_latent_attention")
+    def test_forward_decode_sp(self, mock_mla, mock_all_gather,
                                mock_all_to_all_single):
-        mock_mla_with_lse.return_value = MagicMock()
 
         # mock 分布式 all_to_all_single，直接复制输入到输出
         def fake_all_to_all_single(output, input, group=None):
@@ -836,6 +829,8 @@ class TestAscendMLAImplWithCPSP(TestAscendMLAImpl):
         self.impl._v_up_proj = MagicMock()
         self.impl._v_up_proj.return_value = torch.randn(
             num_tokens, self.impl.v_head_dim)
+        mock_mla.return_value = [torch.randn(num_tokens, self.impl.num_heads * self.impl.sp_size, self.impl.kv_lora_rank),
+                                 torch.randn(num_tokens, self.impl.num_heads * self.impl.sp_size, 1)]
 
         meta_data = MagicMock()
         meta_data.decode = MagicMock()
@@ -860,4 +855,4 @@ class TestAscendMLAImplWithCPSP(TestAscendMLAImpl):
 
         mock_all_to_all_single.assert_called()
         mock_all_gather.assert_called()
-        mock_mla_with_lse.assert_called()
+        mock_mla.assert_called()
