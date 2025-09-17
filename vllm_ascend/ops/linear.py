@@ -286,7 +286,6 @@ class AscendRowParallelLinear(RowParallelLinear):
                 original_len = input_.shape[0]
             else:
                 original_len = input_[0].shape[0]
-            original_len = input_.shape[0]
             reminder = original_len % sp_size
             if reminder != 0:
                 padding_len = sp_size - reminder
