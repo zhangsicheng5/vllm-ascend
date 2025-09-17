@@ -398,7 +398,6 @@ class AscendFusedMoE(FusedMoE):
             shared_hidden_states = shared_experts(hidden_states)
 
         enable_sp = _metadata_for_padding is not None and _metadata_for_padding.not_dummy_and_is_prefill
-        tp_size = get_tensor_model_parallel_world_size()
         # NOTE enable_sp: qwen3-moe/gqa sp, self.enable_sp: deepseek-v2/mla sp
         # TODO need to use the same enable_sp switch for deepseek & qwen3-moe sp
         if enable_sp or (self.enable_sp and is_prefill):

@@ -70,13 +70,13 @@ from vllm.model_executor.models.utils import (
 from vllm.sequence import IntermediateTensors
 
 from vllm_ascend.ascend_config import get_ascend_config
+from vllm_ascend.models.deepseek_v2 import CustomDeepseekV2MLAAttention
 from vllm_ascend.quantization.quant_config import AscendLinearMethod
 from vllm_ascend.torchair.ops.torchair_fused_moe import TorchairAscendFusedMoE
 from vllm_ascend.torchair.quantization.torchair_w8a8_dynamic import \
     TorchairAscendW8A8DynamicLinearMethod
-from vllm_ascend.utils import (dispose_tensor, npu_prefetch, oproj_tp_enable,
-                               long_sequence_enable)
-from vllm_ascend.models.deepseek_v2 import CustomDeepseekV2MLAAttention
+from vllm_ascend.utils import (dispose_tensor, long_sequence_enable,
+                               npu_prefetch, oproj_tp_enable)
 
 
 class TorchairDeepseekV2SiluAndMul(SiluAndMul):
@@ -676,7 +676,6 @@ class TorchairDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
                 attn_cls = TorchairDeepseekV2MLAAttention
         else:
             attn_cls = DeepseekV2Attention
-        print(f"attn_cls:{attn_cls}")
         self.self_attn = attn_cls(
             config=config,
             hidden_size=self.hidden_size,
