@@ -1402,6 +1402,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             req_indices, positions_np)
         self.input_batch.block_table.commit_slot_mapping(
             total_num_scheduled_tokens)
+        self.slot_mapping_cpu[:total_num_scheduled_tokens].copy_(
+            self.input_batch.block_table[0].
+            slot_mapping_cpu[:total_num_scheduled_tokens])
 
         self.query_start_loc_np[0] = 0
         self.query_start_loc_np[1:num_reqs + 1] = cu_num_tokens
@@ -1734,11 +1737,12 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 self.kv_cache_config.kv_cache_groups):
             blk_table = self.input_batch.block_table[kv_cache_group_id]
             blk_table_tensor = blk_table.get_device_tensor()
-            slot_mapping = blk_table.slot_mapping_cpu[:
-                                                      total_num_scheduled_tokens]
-            self.slot_mapping_cpu[:total_num_scheduled_tokens].copy_(
-                slot_mapping)
-            # # Fill unused with -1. Needed for reshape_and_cache in full cuda
+            if not self.cp_size * self.sp_size > 1:
+                slot_mapping = blk_table.slot_mapping_cpu[:
+                                                        total_num_scheduled_tokens]
+                self.slot_mapping_cpu[:total_num_scheduled_tokens].copy_(
+                    slot_mapping)
+                # Fill unused with -1. Needed for reshape_and_cache in full cuda
             # # graph mode.
             # blk_table.slot_mapping[total_num_scheduled_tokens:].fill_(-1)
 
@@ -1763,19 +1767,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 graph_pad_size=self.graph_pad_size,
                 decode_token_per_req=self.decode_token_per_req,
                 common_long_seq_metadata=long_seq_metadata)
-            # attn_metadata = self.attn_metadata_builder.build(
-            #     common_attn_metadata, self.model)
-            # if self.vllm_config.model_config.use_mla:
-            #     attn_metadata.num_input_tokens = num_input_tokens
             # token id pad
-            if self.cp_size > 1:
-                for i in range(num_reqs):
-                    if num_scheduled_tokens[i] > 1:
-                        num_padded_tokens = num_scheduled_tokens_for_slot[
-                                                i] + self.input_batch.num_computed_tokens_cpu[i]
-                        self.input_batch.token_ids_cpu[
-                            i][num_padded_tokens -
-                               num_cp_pads[i]:num_padded_tokens] = 0
 
             if self.speculative_config and \
                 spec_decode_common_attn_metadata is None:
@@ -1809,6 +1801,14 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 for layer_name in attn_group.layer_names:
                     attn_metadata[layer_name] = attn_metadata_i
 
+        if self.cp_size > 1:
+            for i in range(num_reqs):
+                if num_scheduled_tokens[i] > 1:
+                    num_padded_tokens = num_scheduled_tokens_for_slot[
+                                            i] + self.input_batch.num_computed_tokens_cpu[i]
+                    self.input_batch.token_ids_cpu[
+                        i][num_padded_tokens -
+                            num_cp_pads[i]:num_padded_tokens] = 0
         if lmhead_tp_enable():
             max_num_reqs_across_dp = maybe_padded_num_tokens if not with_prefill else self.max_num_reqs
             logits_indices = nn.functional.pad(
