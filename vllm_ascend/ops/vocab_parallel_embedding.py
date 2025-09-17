@@ -22,6 +22,8 @@ from torch import nn
 from torch.nn.parameter import Parameter
 from vllm.distributed import divide, tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import get_tp_group
+from vllm.distributed import (get_tensor_model_parallel_world_size,
+                                      tensor_model_parallel_reduce_scatter)
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.logits_processor import LogitsProcessor
 from vllm.model_executor.layers.quantization.base_config import (
@@ -148,7 +150,6 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         return input_, ~vocab_mask
 
     def forward(self, input_):
-        forward_context = get_forward_context()
         self.enable_sp = is_sp_enabled()
 
         if self.tp_size > 1:
@@ -168,12 +169,12 @@ class AscendVocabParallelEmbedding(VocabParallelEmbedding):
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
         # Reduce across all the model parallel GPUs.
-        from vllm.distributed import (get_tensor_model_parallel_world_size,
-                                      tensor_model_parallel_reduce_scatter)
         is_prefill = False
-        if forward_context.attn_metadata:
-            is_prefill = list(
-                forward_context.attn_metadata.values())[0].num_prefills
+        if self.enable_sp:
+            forward_context = get_forward_context()
+            if forward_context.attn_metadata:
+                is_prefill = list(
+                    forward_context.attn_metadata.values())[0].num_prefills
         if self.enable_sp and is_prefill:
             sp_size = get_tensor_model_parallel_world_size()
             original_len = input_.shape[0]
