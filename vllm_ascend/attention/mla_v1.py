@@ -1252,16 +1252,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                                      dtype=q_nope.dtype,
                                      device=q_nope.device)
         else:
-            attn_output = torch.zeros(
-                (num_tokens, num_heads, self.kv_lora_rank),
-                dtype=q_nope.dtype,
-                device=q_nope.device)
-
-            softmax_lse = torch.full((num_tokens, num_heads, 1),
-                                     float('-inf'),
-                                     dtype=q_nope.dtype,
-                                     device=q_nope.device)
-            torch_npu.atb.npu_multi_head_latent_attention_with_lse(
+            attn_output, softmax_lse = torch_npu.atb.npu_multi_head_latent_attention(
                 q_nope,
                 q_pe,
                 k_nope,
@@ -1271,9 +1262,8 @@ class AscendMLAImpl(MLAAttentionImpl):
                 num_heads,
                 self.scale,
                 self.num_kv_heads,
-                calc_type="calc_type_ring",
-                output=attn_output,
-                lse=softmax_lse)
+                return_lse=True,
+                calc_type="calc_type_ring")
 
         # TODO use update op to replace this
         def _update_out_and_lse(
