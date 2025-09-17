@@ -262,7 +262,8 @@ class AscendRowParallelLinear(RowParallelLinear):
         forward_context = get_forward_context()
         self.enable_sp = is_sp_enabled()
         attn_metadata = forward_context.attn_metadata
-        is_prefill = list(attn_metadata.values())[0].num_prefills if attn_metadata else False
+        is_prefill = list(
+            attn_metadata.values())[0].num_prefills if attn_metadata else False
         if self.input_is_parallel:
             input_parallel = input_
         else:
@@ -513,7 +514,8 @@ class AscendMergedColumnParallelLinear(MergedColumnParallelLinear):
         forward_context = get_forward_context()
         self.enable_sp = is_sp_enabled()
         attn_metadata = forward_context.attn_metadata
-        is_prefill = list(attn_metadata.values())[0].num_prefills if attn_metadata else False
+        is_prefill = list(
+            attn_metadata.values())[0].num_prefills if attn_metadata else False
         if self.enable_sp and is_prefill:
             input_ = get_tp_group().all_gather(input_, 0)
             input_ = input_[:list(attn_metadata.values())[0].num_input_tokens]
