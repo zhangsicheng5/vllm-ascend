@@ -20,7 +20,8 @@ import vllm_ascend.envs as envs_ascend
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.torchair.torchair_model_runner import NPUTorchairModelRunner
 from vllm_ascend.torchair.utils import (check_kv_cache_bytes_cache_exist,
-                                        delete_torchair_cache_file)
+                                        delete_torchair_cache_file,
+                                        read_kv_cache_bytes_from_file)
 from vllm_ascend.utils import long_sequence_enable
 from vllm_ascend.worker.worker_v1 import NPUWorker
 

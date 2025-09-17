@@ -74,9 +74,7 @@ from vllm_ascend.quantization.quant_config import AscendLinearMethod
 from vllm_ascend.torchair.ops.torchair_fused_moe import TorchairAscendFusedMoE
 from vllm_ascend.torchair.quantization.torchair_w8a8_dynamic import \
     TorchairAscendW8A8DynamicLinearMethod
-from vllm_ascend.utils import (dispose_tensor, 
-                               npu_prefetch, 
-                               oproj_tp_enable,
+from vllm_ascend.utils import (dispose_tensor, npu_prefetch, oproj_tp_enable,
                                long_sequence_enable)
 from vllm_ascend.models.deepseek_v2 import CustomDeepseekV2MLAAttention
 

@@ -49,8 +49,9 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
-from vllm.distributed.parallel_state import (
-    get_dp_group, get_pp_group, get_tp_group, is_global_first_rank)
+from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
+                                             get_tp_group,
+                                             is_global_first_rank)
 from vllm.forward_context import BatchDescriptor, get_forward_context
 from vllm.logger import logger
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
@@ -124,7 +125,7 @@ from vllm_ascend.distributed.parallel_state import is_sp_enabled
 if context_parallel_enable():
     from vllm.distributed import get_cp_group
     from vllm.distributed.parallel_state import (
-    get_context_model_parallel_rank, get_context_model_parallel_world_size)
+        get_context_model_parallel_rank, get_context_model_parallel_world_size)
 
 if TYPE_CHECKING:
     import xgrammar as xgr  # type: ignore[import-untyped]
@@ -1739,7 +1740,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             blk_table_tensor = blk_table.get_device_tensor()
             if not self.cp_size * self.sp_size > 1:
                 slot_mapping = blk_table.slot_mapping_cpu[:
-                                                        total_num_scheduled_tokens]
+                                                          total_num_scheduled_tokens]
                 self.slot_mapping_cpu[:total_num_scheduled_tokens].copy_(
                     slot_mapping)
                 # Fill unused with -1. Needed for reshape_and_cache in full cuda
@@ -1768,6 +1769,14 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 decode_token_per_req=self.decode_token_per_req,
                 common_long_seq_metadata=long_seq_metadata)
             # token id pad
+            if self.cp_size > 1:
+                for i in range(num_reqs):
+                    if num_scheduled_tokens[i] > 1:
+                        num_padded_tokens = num_scheduled_tokens_for_slot[
+                            i] + self.input_batch.num_computed_tokens_cpu[i]
+                        self.input_batch.token_ids_cpu[
+                            i][num_padded_tokens -
+                               num_cp_pads[i]:num_padded_tokens] = 0
 
             if self.speculative_config and \
                 spec_decode_common_attn_metadata is None:
@@ -1805,10 +1814,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             for i in range(num_reqs):
                 if num_scheduled_tokens[i] > 1:
                     num_padded_tokens = num_scheduled_tokens_for_slot[
-                                            i] + self.input_batch.num_computed_tokens_cpu[i]
+                        i] + self.input_batch.num_computed_tokens_cpu[i]
                     self.input_batch.token_ids_cpu[
                         i][num_padded_tokens -
-                            num_cp_pads[i]:num_padded_tokens] = 0
+                           num_cp_pads[i]:num_padded_tokens] = 0
         if lmhead_tp_enable():
             max_num_reqs_across_dp = maybe_padded_num_tokens if not with_prefill else self.max_num_reqs
             logits_indices = nn.functional.pad(
