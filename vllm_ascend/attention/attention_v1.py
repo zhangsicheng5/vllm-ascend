@@ -28,9 +28,6 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionLayer, AttentionType)
 from vllm.attention.backends.utils import CommonAttentionState
 from vllm.config import VllmConfig
-from vllm.distributed import (get_context_model_parallel_rank,
-                              get_context_model_parallel_world_size,
-                              get_cp_group)
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group,
                                           is_v1_kv_transfer_group)
@@ -43,7 +40,11 @@ from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
                                          split_decodes_and_prefills)
 from vllm_ascend.ops.attention import vanilla_chunked_prefill
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, aligned_16, is_310p,
-                               nd_to_nz_2d, nd_to_nz_spec)
+                               nd_to_nz_2d, nd_to_nz_spec, context_parallel_enable)
+if context_parallel_enable():
+    from vllm.distributed import (get_context_model_parallel_rank,
+                                  get_context_model_parallel_world_size,
+                                  get_cp_group)
 
 
 def wait_for_kv_layer_from_connector(layer_name: str):
@@ -378,7 +379,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         self.key_cache = None
         self.value_cache = None
 
-        self.cp_size = get_context_model_parallel_world_size()
+        self.cp_size = get_context_model_parallel_world_size(
+        ) if context_parallel_enable() else 1
         self.cp_rank = get_context_model_parallel_rank(
         ) if self.cp_size > 1 else 0
         self.cp_group = get_cp_group(

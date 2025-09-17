@@ -987,7 +987,7 @@ class TorchairAscendFusedMoE(FusedMoE):
                       get_tensor_model_parallel_world_size()),
             dp_size_=(dp_size
                       if dp_size is not None else get_dp_group().world_size),
-            cp_size_=(get_context_model_parallel_world_size()
+            cp_size_=(get_context_model_parallel_world_size() 
                       if context_parallel_enable() else 1),
             vllm_parallel_config=vllm_config.parallel_config)
 

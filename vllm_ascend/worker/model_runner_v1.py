@@ -1385,6 +1385,15 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         token_indices = (positions_np +
                          req_indices * self.input_batch.token_ids_cpu.shape[1])
 
+        if self.cp_size > 1:
+            for i in range(num_reqs):
+                if num_scheduled_tokens[i] > 1:
+                    num_padded_tokens = num_scheduled_tokens_for_slot[
+                        i] + self.input_batch.num_computed_tokens_cpu[i]
+                    self.input_batch.token_ids_cpu[
+                        i][num_padded_tokens -
+                           num_cp_pads[i]:num_padded_tokens] = 0
+                    
         # Prepare input_ids.
         # NOTE(woosuk): We use torch.index_select instead of np.take here
         # because torch.index_select is much faster than np.take for large
@@ -1766,15 +1775,6 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 graph_pad_size=self.graph_pad_size,
                 decode_token_per_req=self.decode_token_per_req,
                 common_long_seq_metadata=long_seq_metadata)
-            # token id pad
-            if self.cp_size > 1:
-                for i in range(num_reqs):
-                    if num_scheduled_tokens[i] > 1:
-                        num_padded_tokens = num_scheduled_tokens_for_slot[
-                            i] + self.input_batch.num_computed_tokens_cpu[i]
-                        self.input_batch.token_ids_cpu[
-                            i][num_padded_tokens -
-                               num_cp_pads[i]:num_padded_tokens] = 0
 
             if self.speculative_config and \
                 spec_decode_common_attn_metadata is None:
@@ -1808,14 +1808,6 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 for layer_name in attn_group.layer_names:
                     attn_metadata[layer_name] = attn_metadata_i
 
-        if self.cp_size > 1:
-            for i in range(num_reqs):
-                if num_scheduled_tokens[i] > 1:
-                    num_padded_tokens = num_scheduled_tokens_for_slot[
-                        i] + self.input_batch.num_computed_tokens_cpu[i]
-                    self.input_batch.token_ids_cpu[
-                        i][num_padded_tokens -
-                           num_cp_pads[i]:num_padded_tokens] = 0
         if lmhead_tp_enable():
             max_num_reqs_across_dp = maybe_padded_num_tokens if not with_prefill else self.max_num_reqs
             logits_indices = nn.functional.pad(
