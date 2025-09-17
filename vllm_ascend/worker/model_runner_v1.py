@@ -90,16 +90,14 @@ from vllm.v1.worker.utils import (AttentionGroup, bind_kv_cache,
                                   sanity_check_mm_encoder_outputs,
                                   scatter_mm_placeholders)
 
-from vllm_ascend.utils import context_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import set_ascend_forward_context
 from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
-from vllm_ascend.attention.attention_v1 import (AscendAttentionState,
-                                                AscendMetadata)
-from vllm_ascend.attention.mla_v1 import AscendMLAMetadata
+from vllm_ascend.attention.attention_v1 import AscendAttentionState
 from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
                                          AscendCommonLongSequenceMetadata)
 from vllm_ascend.compilation.acl_graph import ACLGraphWrapper
+from vllm_ascend.distributed.parallel_state import is_sp_enabled
 from vllm_ascend.eplb.adaptor.vllm_adaptor import VllmEplbAdaptor
 from vllm_ascend.eplb.core.eplb_device_transfer_loader import \
     D2DExpertWeightLoader
@@ -117,10 +115,9 @@ from vllm_ascend.spec_decode.interface import SpecDcodeType
 from vllm_ascend.spec_decode.mtp_proposer import MtpProposer
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
                                AscendSocVersion, ProfileExecuteDuration,
-                               get_ascend_soc_version, is_310p,
-                               lmhead_tp_enable)
+                               context_parallel_enable, get_ascend_soc_version,
+                               is_310p, lmhead_tp_enable)
 from vllm_ascend.worker.npu_input_batch import CachedRequestState, InputBatch
-from vllm_ascend.distributed.parallel_state import is_sp_enabled
 
 if context_parallel_enable():
     from vllm.distributed import get_cp_group

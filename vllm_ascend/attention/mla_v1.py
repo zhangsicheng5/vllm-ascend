@@ -18,7 +18,6 @@ from vllm.model_executor.layers.linear import (LinearBase,
                                                UnquantizedLinearMethod)
 from vllm.utils import cdiv, round_down
 
-from vllm_ascend.utils import sequence_parallel_enable, context_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
 from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
@@ -27,7 +26,8 @@ from vllm_ascend.multistream.base import MSAttentionMetadataSplitConfig
 from vllm_ascend.multistream.context import get_multistream_comm_context
 from vllm_ascend.multistream.ms_split import model_input_split_v1_mla_attn
 from vllm_ascend.ops.attention import vanilla_chunked_prefill_mla
-from vllm_ascend.utils import npu_prefetch
+from vllm_ascend.utils import (context_parallel_enable, npu_prefetch,
+                               sequence_parallel_enable)
 from vllm_ascend.worker.npu_input_batch import InputBatch
 
 if context_parallel_enable():

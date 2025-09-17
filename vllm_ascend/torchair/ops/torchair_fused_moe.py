@@ -38,7 +38,6 @@ from vllm.model_executor.layers.fused_moe.layer import (
 from vllm.model_executor.layers.quantization.base_config import \
     QuantizationConfig
 
-from vllm_ascend.utils import context_parallel_enable
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ascend_forward_context import FusedMoEState
 from vllm_ascend.distributed.parallel_state import get_mc2_group, is_sp_enabled
@@ -48,10 +47,14 @@ from vllm_ascend.ops.expert_load_balancer import ExpertLoadBalancer
 from vllm_ascend.ops.sequence_parallel import MetadataForPadding
 from vllm_ascend.quantization.quant_config import AscendFusedMoEMethod
 from vllm_ascend.torchair.utils import npu_stream_switch, npu_wait_tensor
-from vllm_ascend.utils import (AscendSocVersion, dispose_tensor,
-                               get_all_reduce_merge_state,
+from vllm_ascend.utils import (AscendSocVersion, context_parallel_enable,
+                               
+                               dispose_tensor, get_all_reduce_merge_state,
+                               
                                get_ascend_soc_version,
                                get_rm_router_logits_state, is_310p)
+
+
 if context_parallel_enable():
     from vllm.distributed import get_context_model_parallel_world_size
 
