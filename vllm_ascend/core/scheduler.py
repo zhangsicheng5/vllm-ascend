@@ -200,8 +200,8 @@ class AscendScheduler(Scheduler):
                                 request.num_blocks_of_cp_sp[i][j] *
                                 self.block_size]
                         request.num_computed_tokens_of_cp_sp[i][j] = len(
-                            request.token_ids_of_cp_sp[i][j]
-                        ) + num_computed_tokens
+                            request.token_ids_of_cp_sp[i]
+                            [j]) + num_computed_tokens
                         start_id += request.num_blocks_of_cp_sp[i][
                             j] * self.block_size
 

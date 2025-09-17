@@ -944,7 +944,6 @@ class TorchairAscendFusedMoE(FusedMoE):
         tp_size: Optional[int] = None,
         ep_size: Optional[int] = None,
         dp_size: Optional[int] = None,
-        cp_size: Optional[int] = None,
         prefix: str = "",
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
@@ -988,8 +987,8 @@ class TorchairAscendFusedMoE(FusedMoE):
                       get_tensor_model_parallel_world_size()),
             dp_size_=(dp_size
                       if dp_size is not None else get_dp_group().world_size),
-            cp_size_=(cp_size if cp_size is not None else
-                      get_context_model_parallel_world_size()),
+            cp_size_=(get_context_model_parallel_world_size()
+                      if context_parallel_enable() else 1),
             vllm_parallel_config=vllm_config.parallel_config)
 
         self.top_k = top_k
