@@ -33,6 +33,8 @@ from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.structured_output import StructuredOutputManager
 
+from vllm_ascend.utils import context_parallel_enable, sequence_parallel_enable
+
 
 class AscendScheduler(Scheduler):
     """This Scheduler extends vllm's original v1 scheduler
@@ -52,9 +54,15 @@ class AscendScheduler(Scheduler):
                          include_finished_set, log_stats)
         self.scheduled_req_ids: set[str] = set()
         self.running: list[Request] = []
-        self.cp_size = vllm_config.parallel_config.context_parallel_size
-        self.enable_sp = vllm_config.parallel_config.enable_sequence_parallel
-        self.sp_size = vllm_config.parallel_config.tensor_parallel_size if self.enable_sp else 1
+        if context_parallel_enable():
+            self.cp_size = vllm_config.parallel_config.context_parallel_size
+        else:
+            self.cp_size = 1
+        if sequence_parallel_enable():
+            self.enable_sp = vllm_config.parallel_config.enable_sequence_parallel
+            self.sp_size = vllm_config.parallel_config.tensor_parallel_size if self.enable_sp else 1
+        else:
+            self.sp_size = 1
         self.sp_cp_size = self.cp_size * self.sp_size
         if self.sp_cp_size > 1:
             assert not self.cache_config.enable_prefix_caching

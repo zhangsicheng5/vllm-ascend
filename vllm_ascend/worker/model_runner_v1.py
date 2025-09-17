@@ -116,7 +116,7 @@ from vllm_ascend.spec_decode.mtp_proposer import MtpProposer
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
                                AscendSocVersion, ProfileExecuteDuration,
                                context_parallel_enable, get_ascend_soc_version,
-                               is_310p, lmhead_tp_enable)
+                               is_310p, lmhead_tp_enable, long_sequence_enable)
 from vllm_ascend.worker.npu_input_batch import CachedRequestState, InputBatch
 
 if context_parallel_enable():
@@ -598,23 +598,38 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 to_update = model.pooler.get_pooling_updates(task)
                 to_update.apply(pooling_params)
 
-            self.requests[req_id] = CachedRequestState(
-                req_id=req_id,
-                prompt_token_ids=new_req_data.prompt_token_ids,
-                mm_kwargs=new_req_data.mm_kwargs,
-                mm_positions=new_req_data.mm_positions,
-                sampling_params=sampling_params,
-                pooling_params=pooling_params,
-                generator=generator,
-                block_ids=new_req_data.block_ids,
-                num_computed_tokens=new_req_data.num_computed_tokens,
-                output_token_ids=[],
-                lora_request=new_req_data.lora_request,
-                mm_hashes=new_req_data.mm_hashes,
-                num_computed_tokens_of_cp_sp=new_req_data.
-                num_computed_tokens_of_cp_sp,
-            )
-
+            if long_sequence_enable():
+                self.requests[req_id] = CachedRequestState(
+                    req_id=req_id,
+                    prompt_token_ids=new_req_data.prompt_token_ids,
+                    mm_kwargs=new_req_data.mm_kwargs,
+                    mm_positions=new_req_data.mm_positions,
+                    sampling_params=sampling_params,
+                    pooling_params=pooling_params,
+                    generator=generator,
+                    block_ids=new_req_data.block_ids,
+                    num_computed_tokens=new_req_data.num_computed_tokens,
+                    output_token_ids=[],
+                    lora_request=new_req_data.lora_request,
+                    mm_hashes=new_req_data.mm_hashes,
+                    num_computed_tokens_of_cp_sp=new_req_data.
+                    num_computed_tokens_of_cp_sp,
+                )
+            else:
+                self.requests[req_id] = CachedRequestState(
+                    req_id=req_id,
+                    prompt_token_ids=new_req_data.prompt_token_ids,
+                    mm_kwargs=new_req_data.mm_kwargs,
+                    mm_positions=new_req_data.mm_positions,
+                    sampling_params=sampling_params,
+                    pooling_params=pooling_params,
+                    generator=generator,
+                    block_ids=new_req_data.block_ids,
+                    num_computed_tokens=new_req_data.num_computed_tokens,
+                    output_token_ids=[],
+                    lora_request=new_req_data.lora_request,
+                    mm_hashes=new_req_data.mm_hashes
+                )
             # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
             if self.uses_mrope:
                 image_grid_thw = []
@@ -660,10 +675,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         req_data = scheduler_output.scheduled_cached_reqs
         for i, req_id in enumerate(req_data.req_ids):
             req_state = self.requests[req_id]
-
-            req_state.kv_rank = req_data.kv_rank[i]
-            req_state.num_computed_tokens_of_cp_sp = req_data.num_computed_tokens_of_cp_sp[
-                i]
+            if long_sequence_enable():
+                req_state.kv_rank = req_data.kv_rank[i]
+                req_state.num_computed_tokens_of_cp_sp = req_data.num_computed_tokens_of_cp_sp[
+                    i]
 
             num_computed_tokens = req_data.num_computed_tokens[i]
             new_block_ids = req_data.new_block_ids[i]
@@ -1393,7 +1408,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     self.input_batch.token_ids_cpu[
                         i][num_padded_tokens -
                            num_cp_pads[i]:num_padded_tokens] = 0
-                    
+
         # Prepare input_ids.
         # NOTE(woosuk): We use torch.index_select instead of np.take here
         # because torch.index_select is much faster than np.take for large
