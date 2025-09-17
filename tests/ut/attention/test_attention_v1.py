@@ -183,9 +183,9 @@ class TestAscendAttentionBackendImpl(TestBase):
 
     @patch('vllm.distributed.parallel_state._CP',
            new_callable=lambda: MagicMock(spec=GroupCoordinator))
-    @patch("vllm.distributed.get_context_model_parallel_world_size",
+    @patch("vllm_ascend.attention.attention_v1.get_context_model_parallel_world_size",
            return_value=1)
-    def setUp(self):
+    def setUp(self, mock_get_cp_size, mock_cp):
         self.layer = MagicMock()
         self.layer.layer_name = "test_layer"
         self.layer._k_scale_float = 1.0

@@ -199,7 +199,9 @@ class MockFusedMoEMethod(FusedMoEMethodBase):
 
 class TestTorchairAscendFusedMoe:
 
-    def test_init_no_quant(self, mock_dist_env, default_moe_config):
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_tensor_model_parallel_world_size", return_value=1)
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_context_model_parallel_world_size", return_value=1)
+    def test_init_no_quant(self, mock_cp, mock_tp, mock_dist_env, default_moe_config):
         layer = TorchairAscendFusedMoE(**default_moe_config)
 
         layer.w13_weight = nn.Parameter(
@@ -227,8 +229,9 @@ class TestTorchairAscendFusedMoe:
             error_config = default_moe_config.copy()
             error_config['scoring_func'] = "random"
             layer = TorchairAscendFusedMoE(**error_config)
-
-    def test_init_with_quant(self, mock_dist_env, default_moe_config):
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_tensor_model_parallel_world_size", return_value=1)
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_context_model_parallel_world_size", return_value=1)
+    def test_init_with_quant(self, mock_cp, mock_tp, mock_dist_env, default_moe_config):
         mock_quant_config = MagicMock()
         mock_quant_method = MockFusedMoEMethod()
         mock_quant_config.get_quant_method.return_value = mock_quant_method
@@ -239,7 +242,9 @@ class TestTorchairAscendFusedMoe:
             assert moe.quant_method is not None
             assert isinstance(moe.quant_method, AscendFusedMoEMethod)
 
-    def test_init_with_mixed_quant(self, mock_dist_env, default_moe_config):
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_tensor_model_parallel_world_size", return_value=1)
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_context_model_parallel_world_size", return_value=1)
+    def test_init_with_mixed_quant(self, mock_cp, mock_tp, mock_dist_env, default_moe_config):
         mock_quant_config = MagicMock()
         mock_quant_method = MockFusedMoEMethod()
         mock_quant_config.get_quant_method.return_value = mock_quant_method
@@ -251,7 +256,8 @@ class TestTorchairAscendFusedMoe:
         assert moe.quant_method is not None
         assert isinstance(moe.quant_method,
                           TorchairAscendUnquantizedFusedMoEMethod)
-
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_tensor_model_parallel_world_size", return_value=1)
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_context_model_parallel_world_size", return_value=1)
     @pytest.mark.parametrize(
         "others_param",
         [[None,
@@ -259,7 +265,7 @@ class TestTorchairAscendFusedMoe:
          [2, None, False, 5, None], [None, None, True, 5, None],
          [None, None, False, 1, None], [None, None, True, 5, 1],
          [None, None, False, 5, 1]])
-    def test_forward(self, mock_dist_env, default_moe_config, others_param):
+    def test_forward(self, mock_cp, mock_tp, mock_dist_env, default_moe_config, others_param):
         """
         1 test has shared_experts
         2 test has top_k
@@ -297,7 +303,9 @@ class TestTorchairAscendFusedMoe:
         else:
             assert output.shape == (num_tokens, 32)
 
-    def test_forward_ms_fused_moe_comp(self, mock_dist_env,
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_tensor_model_parallel_world_size", return_value=1)
+    @patch("vllm.model_executor.layers.fused_moe.layer.get_context_model_parallel_world_size", return_value=1)
+    def test_forward_ms_fused_moe_comp(self, mock_cp, mock_tp, mock_dist_env,
                                        default_moe_config):
         inputs = torch.randn(5, 32)
         router_logits = torch.randn(5, 8)
