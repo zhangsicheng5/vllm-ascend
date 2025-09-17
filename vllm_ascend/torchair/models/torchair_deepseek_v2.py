@@ -668,9 +668,9 @@ class TorchairDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         ascend_config = get_ascend_config()
         # TODO: enable mla in vllm-ascend
         if model_config.use_mla:
-            from vllm_ascend.utils import sequence_parallel_enable, context_parallel_enable
+            from vllm_ascend.utils import long_sequence_enable
             from vllm_ascend.models.deepseek_v2 import CustomDeepseekV2MLAAttention
-            if sequence_parallel_enable or context_parallel_enable:
+            if long_sequence_enable():
                 attn_cls = CustomDeepseekV2MLAAttention
             else:
                 attn_cls = TorchairDeepseekV2MLAAttention

@@ -42,8 +42,7 @@ from vllm_ascend.torchair.utils import (
     torchair_quant_method_register, write_kv_cache_bytes_to_file)
 from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
                                is_310p, get_ascend_soc_version,
-                               AscendSocVersion,
-                               sequence_parallel_enable,
+                               AscendSocVersion, sequence_parallel_enable,
                                context_parallel_enable)
 from vllm_ascend.worker.model_runner_v1 import NPUModelRunner
 
@@ -60,7 +59,7 @@ class NPUTorchairModelRunner(NPUModelRunner):
         register_torchair_model()
         torchair_ops_patch()
         torchair_quant_method_register()
-        
+
         if self.enable_shared_expert_dp or sequence_parallel_enable or context_parallel_enable:
             return
         self.new_kv_cache_bytes = -1

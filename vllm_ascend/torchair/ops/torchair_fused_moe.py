@@ -50,7 +50,7 @@ from vllm_ascend.utils import (AscendSocVersion, dispose_tensor,
                                get_all_reduce_merge_state,
                                get_ascend_soc_version,
                                get_rm_router_logits_state, is_310p)
-if context_parallel_enable:
+if context_parallel_enable():
     from vllm.distributed import get_context_model_parallel_world_size
 
 

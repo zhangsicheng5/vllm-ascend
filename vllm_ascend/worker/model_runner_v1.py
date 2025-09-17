@@ -114,7 +114,7 @@ from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_ND, ACL_FORMAT_FRACTAL_NZ,
 from vllm_ascend.worker.npu_input_batch import CachedRequestState, InputBatch
 from vllm_ascend.distributed.parallel_state import is_sp_enabled
 
-if context_parallel_enable:
+if context_parallel_enable():
     from vllm.distributed import get_cp_group
     from vllm.distributed.parallel_state import (
     get_context_model_parallel_rank, get_context_model_parallel_world_size)
@@ -247,7 +247,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         self.dp_size = vllm_config.parallel_config.data_parallel_size
         self.dp_rank = vllm_config.parallel_config.data_parallel_rank
         self.cp_size = get_context_model_parallel_world_size(
-        ) if context_parallel_enable else 1
+        ) if context_parallel_enable() else 1
         self.cp_rank = get_context_model_parallel_rank(
         ) if self.cp_size > 1 else 0
         self.enable_sp = is_sp_enabled()
