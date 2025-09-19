@@ -32,6 +32,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 import torch_npu
 import vllm.envs as envs
+import vllm_ascend.envs as ascend_envs
 from torch import nn
 from torch.nn.parameter import Parameter
 from transformers import PretrainedConfig
@@ -502,6 +503,7 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
         enable_sp: bool = False,
+        decoder_layer: Optional[DeepseekV2DecoderLayer] = None,
     ) -> None:
         nn.Module.__init__(self)
         self.hidden_size = hidden_size
@@ -635,6 +637,7 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             o_proj=self.o_proj,
             enable_sp=self.enable_sp,
             kv_b_proj_full=self.kv_b_proj_full,
+            decoder_layer=decoder_layer,
         )
 
         self.prefix = prefix
@@ -651,7 +654,8 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
             positions: torch.Tensor,
             hidden_states: torch.Tensor,
             kv_cache: Optional[torch.Tensor] = None,
-            attn_metadata: Optional[AttentionMetadata] = None) -> torch.Tensor:
+            attn_metadata: Optional[AttentionMetadata] = None,
+    ) -> torch.Tensor:
         forward_context = get_forward_context()
         enable_multistream_mla = (self.enable_multistream_mla
                                   and attn_metadata is not None
@@ -659,67 +663,100 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
                                   and attn_metadata.num_decodes > 0)
         forward_kwargs = {"enable_multistream_mla": enable_multistream_mla}
         is_prefill = 0
-        # NOTE influence graph mode, need to check why
-        if self.enable_sp or self.cp_size > 1:
-            if forward_context.attn_metadata:
-                is_prefill = forward_context.attn_metadata.num_prefills
-        if self.q_lora_rank is not None:
-            npu_prefetch(self.q_a_proj.weight,
-                         hidden_states,
-                         enabled=enable_multistream_mla)
-            ckq = self.q_a_proj(hidden_states)[0]
-            hidden_states_or_q_c = self.q_a_layernorm(ckq)
-        else:
-            hidden_states_or_q_c = hidden_states
-        if self.torchair_graph_enabled:
-            if envs.VLLM_USE_V1:
-                output_shape = hidden_states.shape
-                output = torch.empty(output_shape,
-                                     dtype=hidden_states_or_q_c.dtype,
-                                     device=hidden_states_or_q_c.device)
-                forward_kwargs['output'] = output
+        output_shape = hidden_states.shape
+        
+        if (ascend_envs.VLLM_ASCEND_ENABLE_MLA_PO
+                and (attn_metadata is None or not forward_context.with_prefill)):
+            if self.torchair_graph_enabled:
+                if envs.VLLM_USE_V1:
+                    output = torch.empty(output_shape,
+                                        dtype=hidden_states.dtype,
+                                        device=hidden_states.device)
+                    forward_kwargs['output'] = output
 
-            output = self.mla_attn.impl.forward(self.mla_attn,
-                                                hidden_states_or_q_c,
-                                                hidden_states, None, kv_cache,
-                                                attn_metadata,
-                                                **forward_kwargs)
-            if envs.VLLM_USE_V1:
-                output = output.view(-1, output_shape[-1])
-            return output
-        else:
-            kv_no_split = self.kv_a_proj_with_mqa(hidden_states)[0]
-            if self.enable_prefill_optimizations and self.debug_layer_idx > 3 and self.debug_layer_idx < 61:
-                hidden_states_or_q_c = get_tp_group().all_gather(
-                    hidden_states_or_q_c, 0)
-                kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
-
-            if self.enable_sp and is_prefill:
-                chunk_kv_no_split = [torch.empty_like(kv_no_split) for _ in range(self.sp_size)]
-                dist.all_gather(list(chunk_kv_no_split), kv_no_split, self.sp_group)
-                kv_no_split = torch.cat(chunk_kv_no_split, dim=0)
-                kv_no_split = kv_no_split[:original_len]
-
-                chunk_hidden_states_or_q_c = [torch.empty_like(hidden_states_or_q_c) for _ in range(self.sp_size)]
-                dist.all_gather(list(chunk_hidden_states_or_q_c), hidden_states_or_q_c, self.sp_group)
-                hidden_states_or_q_c = torch.cat(chunk_hidden_states_or_q_c, dim=0)
-                hidden_states_or_q_c = hidden_states_or_q_c[:original_len]
-
-            kv_c, k_pe = kv_no_split.split(
-                [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
-            kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
-            if not self.enable_prefill_optimizations or self.debug_layer_idx < 3:
-                output_shape = hidden_states.shape
+                output = self.mla_attn.impl.forward(self.mla_attn,
+                                                    hidden_states,
+                                                    hidden_states, None, kv_cache,
+                                                    attn_metadata,
+                                                    **forward_kwargs)
+                if envs.VLLM_USE_V1:
+                    output = output.view(-1, output_shape[-1])
+                return output
             else:
-                num_tokens = hidden_states_or_q_c.shape[0]
-                rows = num_tokens // self.tp_size
-                if num_tokens % self.tp_size:
-                    rows += 1
-                output_shape = (rows, hidden_states.shape[1])
-            return self.mla_attn(hidden_states_or_q_c,
-                                 kv_c_normed,
-                                 k_pe,
-                                 output_shape=output_shape)
+                if not self.enable_prefill_optimizations or self.debug_layer_idx < 3:
+                    output_shape = hidden_states.shape
+                else:
+                    num_tokens = hidden_states.shape[0]
+                    rows = num_tokens // self.tp_size
+                    if num_tokens % self.tp_size:
+                        rows += 1
+                    output_shape = (rows, hidden_states.shape[1])
+                return self.mla_attn(hidden_states,
+                                    None,
+                                    None,
+                                    output_shape=output_shape)
+        else:
+            # NOTE influence graph mode, need to check why
+            if self.enable_sp or self.cp_size > 1:
+                if forward_context.attn_metadata:
+                    is_prefill = forward_context.attn_metadata.num_prefills
+            if self.q_lora_rank is not None:
+                npu_prefetch(self.q_a_proj.weight,
+                            hidden_states,
+                            enabled=enable_multistream_mla)
+                ckq = self.q_a_proj(hidden_states)[0]
+                hidden_states_or_q_c = self.q_a_layernorm(ckq)
+            else:
+                hidden_states_or_q_c = hidden_states
+            if self.torchair_graph_enabled:
+                if envs.VLLM_USE_V1:
+                    # output_shape = hidden_states.shape
+                    output = torch.empty(output_shape,
+                                        dtype=hidden_states_or_q_c.dtype,
+                                        device=hidden_states_or_q_c.device)
+                    forward_kwargs['output'] = output
+
+                output = self.mla_attn.impl.forward(self.mla_attn,
+                                                    hidden_states_or_q_c,
+                                                    hidden_states, None, kv_cache,
+                                                    attn_metadata,
+                                                    **forward_kwargs)
+                if envs.VLLM_USE_V1:
+                    output = output.view(-1, output_shape[-1])
+                return output
+            else:
+                kv_no_split = self.kv_a_proj_with_mqa(hidden_states)[0]
+                if self.enable_prefill_optimizations and self.debug_layer_idx > 3 and self.debug_layer_idx < 61:
+                    hidden_states_or_q_c = get_tp_group().all_gather(
+                        hidden_states_or_q_c, 0)
+                    kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
+
+                if self.enable_sp and is_prefill:
+                    chunk_kv_no_split = [torch.empty_like(kv_no_split) for _ in range(self.sp_size)]
+                    dist.all_gather(list(chunk_kv_no_split), kv_no_split, self.sp_group)
+                    kv_no_split = torch.cat(chunk_kv_no_split, dim=0)
+                    kv_no_split = kv_no_split[:original_len]
+
+                    chunk_hidden_states_or_q_c = [torch.empty_like(hidden_states_or_q_c) for _ in range(self.sp_size)]
+                    dist.all_gather(list(chunk_hidden_states_or_q_c), hidden_states_or_q_c, self.sp_group)
+                    hidden_states_or_q_c = torch.cat(chunk_hidden_states_or_q_c, dim=0)
+                    hidden_states_or_q_c = hidden_states_or_q_c[:original_len]
+
+                kv_c, k_pe = kv_no_split.split(
+                    [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+                kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
+                if not self.enable_prefill_optimizations or self.debug_layer_idx < 3:
+                    output_shape = hidden_states.shape
+                else:
+                    num_tokens = hidden_states_or_q_c.shape[0]
+                    rows = num_tokens // self.tp_size
+                    if num_tokens % self.tp_size:
+                        rows += 1
+                    output_shape = (rows, hidden_states.shape[1])
+                return self.mla_attn(hidden_states_or_q_c,
+                                    kv_c_normed,
+                                    k_pe,
+                                    output_shape=output_shape)
 
 
 class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
@@ -744,7 +781,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         layer_idx = int(prefix.split(sep='.')[-1])
         self.layer_idx = layer_idx
         self.enable_sp = enable_sp
-        # TODO: enable mla in vllm-ascend
+
         if model_config.use_mla:
             attn_cls = CustomDeepseekV2MLAAttention
         else:
@@ -766,6 +803,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
             enable_sp=self.enable_sp,
+            decoder_layer=self,
         )
 
         if (config.n_routed_experts is not None
@@ -805,18 +843,32 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         kv_cache: Optional[torch.Tensor] = None,
         attn_metadata: Optional[AttentionMetadata] = None,
     ) -> torch.Tensor:
+        forward_context = get_forward_context()
+        attn_metadata = forward_context.attn_metadata if attn_metadata is None else attn_metadata
+
+        # print(f"SUCCESS ===== {ascend_envs.VLLM_ASCEND_ENABLE_MLA_PO=}")
+        # print(f"SUCCESS ===== {forward_context.with_prefill=}")
+        # print(f"SUCCESS ===== {attn_metadata=}")
+
         # Self Attention
-        if residual is None:
+        if (ascend_envs.VLLM_ASCEND_ENABLE_MLA_PO
+                and isinstance(self.self_attn, CustomDeepseekV2MLAAttention)
+                and (attn_metadata is None or not forward_context.with_prefill)):
+            if residual is not None:
+                hidden_states = hidden_states + residual
             residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
+            # hidden_states = self.self_attn_with_fused_mla_preprocess(hidden_states)
         else:
-            previous_hidden_states, previous_residual = hidden_states, residual
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
-            # Dispose hidden_states and residual from the previous layer
-            # to save npu memory because they're no longer used.
-            dispose_tensor(previous_hidden_states)
-            dispose_tensor(previous_residual)
+            if residual is None:
+                residual = hidden_states
+                hidden_states = self.input_layernorm(hidden_states)
+            else:
+                previous_hidden_states, previous_residual = hidden_states, residual
+                hidden_states, residual = self.input_layernorm(hidden_states, residual)
+                # Dispose hidden_states and residual from the previous layer
+                # to save npu memory because they're no longer used.
+                dispose_tensor(previous_hidden_states)
+                dispose_tensor(previous_residual)
 
         hidden_states = self.self_attn(
             original_len=original_len,
@@ -1052,3 +1104,36 @@ class CustomDeepseekV2ForCausalLM(DeepseekV2ForCausalLM):
 
 class CustomDeepseekV3ForCausalLM(CustomDeepseekV2ForCausalLM):
     pass
+
+
+def round_up(val: int, align: int) -> int:
+    if align == 0:
+        return 0
+    return -(val // -align) * align
+
+
+def trans_rope_weight(weight, rope_dim):
+    weight_1 = weight[..., -rope_dim::2, :].contiguous()
+    weight_2 = weight[..., -rope_dim + 1 :: 2, :].contiguous()
+    weight[..., -rope_dim:, :] = torch.cat([weight_1, weight_2], dim=-2)
+
+    return weight.contiguous()
+
+
+def transdata(nd_mat, block_size: tuple = (16, 16)):
+    r = round_up(nd_mat.shape[0], block_size[0])
+    c = round_up(nd_mat.shape[1], block_size[1])
+    r_pad = r - nd_mat.shape[0]
+    c_pad = c - nd_mat.shape[1]
+    nd_mat = F.pad(nd_mat, ((0, r_pad, 0, c_pad)))
+    nz_mat = torch.permute(
+        torch.reshape(
+            nd_mat,
+            (r // block_size[0], block_size[0], c // block_size[1], block_size[1]),
+        ),
+        [2, 0, 1, 3],
+    )
+    nz_mat = torch.reshape(
+        nz_mat, (nz_mat.shape[0], nz_mat.shape[1] * nz_mat.shape[2], nz_mat.shape[3])
+    )
+    return nz_mat

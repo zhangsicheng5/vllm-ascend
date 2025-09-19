@@ -11,6 +11,7 @@ from vllm.attention.backends.abstract import (AttentionBackend, AttentionLayer,
                                               MLAAttentionImpl)
 from vllm.attention.backends.utils import PAD_SLOT_ID
 from vllm.config import VllmConfig, get_current_vllm_config
+from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.linear import (LinearBase,
                                                UnquantizedLinearMethod)
 from vllm.utils import cdiv, round_down
@@ -703,6 +704,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.o_proj = kwargs['o_proj']
         self.kv_a_proj_with_mqa = kwargs.get('kv_a_proj_with_mqa', None)
         self.kv_a_layernorm = kwargs.get('kv_a_layernorm', None)
+        self.decoder_layer = kwargs.get('decoder_layer', None)
         self.num_queries_per_kv = self.num_heads // self.num_kv_heads
 
         ascend_config = get_ascend_config()
@@ -805,6 +807,85 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.W_UV = W_UV.transpose(0, 1).contiguous()
         # Convert from (L, N, P) to (N, P, L)
         self.W_UK_T = W_UK.permute(1, 2, 0).contiguous()
+        
+        # if use_mla_po and on decode node
+        if envs.VLLM_ASCEND_ENABLE_MLA_PO:
+            self._process_weights_for_fused_mlapo(act_dtype)
+        
+    def _process_weights_for_fused_mlapo(self, act_dtype: torch.dtype):
+        self.q_a_layernorm = self.decoder_layer.self_attn.q_a_layernorm
+        self.q_a_proj = self.decoder_layer.self_attn.q_a_proj
+        
+        kv_a_proj_wt = self.kv_a_proj_with_mqa.weight.data.clone()
+        kv_a_proj_wt = kv_a_proj_wt.t().contiguous()
+        kv_a_proj_wt = trans_rope_weight(kv_a_proj_wt, self.qk_rope_head_dim)
+        kv_a_proj_wt = kv_a_proj_wt.t().contiguous()
+        wd_qkv = torch.cat((kv_a_proj_wt, self.q_a_proj.weight.data.clone()), dim=-1)
+        wd_qkv = wd_qkv.t().contiguous()
+        wd_qkv = transdata(wd_qkv, block_size=(16, 32)).unsqueeze(0).contiguous()
+        self.wd_qkv = torch_npu.npu_format_cast(wd_qkv, 29)
+        
+        kv_a_proj_deq_scl = self.kv_a_proj_with_mqa.deq_scale.clone()
+        kv_a_proj_deq_scl = kv_a_proj_deq_scl.reshape(self.kv_lora_rank + self.qk_rope_head_dim, -1).contiguous()
+        kv_a_proj_deq_scl = trans_rope_weight(kv_a_proj_deq_scl, self.qk_rope_head_dim)
+        kv_a_proj_deq_scl = kv_a_proj_deq_scl.view(self.kv_lora_rank + self.qk_rope_head_dim).contiguous()
+        self.deq_scale_qkv = torch.cat((kv_a_proj_deq_scl, self.q_a_proj.deq_scale.clone()), dim=-1).contiguous()
+        
+        kv_a_proj_qt_bias = self.kv_a_proj_with_mqa.quant_bias.clone()
+        kv_a_proj_qt_bias = kv_a_proj_qt_bias.reshape(self.kv_lora_rank + self.qk_rope_head_dim, -1).contiguous()
+        kv_a_proj_qt_bias = trans_rope_weight(kv_a_proj_qt_bias, self.qk_rope_head_dim)
+        kv_a_proj_qt_bias = kv_a_proj_qt_bias.view(self.kv_lora_rank + self.qk_rope_head_dim).contiguous()
+        self.quant_bias_qkv = torch.cat((kv_a_proj_qt_bias, self.q_a_proj.quant_bias.clone()), dim=-1).contiguous()
+        
+        wu_q = self.q_proj.weight.data.clone()
+        wu_q = wu_q.t().reshape(self.num_heads, self.qk_nope_head_dim + self.qk_rope_head_dim, -1)
+        wu_q = trans_rope_weight(wu_q, self.qk_rope_head_dim)
+        wu_q = wu_q.reshape(self.num_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim), -1)
+        wu_q = transdata(wu_q, block_size=(16, 32)).unsqueeze(0).contiguous()
+        self.wu_q = torch_npu.npu_format_cast(wu_q, 29)
+        
+        qb_deq_scl = self.q_proj.deq_scale.data.clone()
+        qb_deq_scl = qb_deq_scl.reshape(self.num_heads, self.qk_nope_head_dim + self.qk_rope_head_dim, -1)
+        qb_deq_scl = trans_rope_weight(qb_deq_scl, self.qk_rope_head_dim)
+        self.qb_deq_scl = qb_deq_scl.reshape(self.num_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim))
+        
+        qb_qt_bias = self.q_proj.quant_bias.data.clone()
+        qb_qt_bias = qb_qt_bias.reshape(self.num_heads, self.qk_nope_head_dim + self.qk_rope_head_dim, -1)
+        qb_qt_bias = trans_rope_weight(qb_qt_bias, self.qk_rope_head_dim)
+        self.qb_qt_bias = qb_qt_bias.reshape(self.num_heads * (self.qk_nope_head_dim + self.qk_rope_head_dim))
+        
+        self.gamma0 = self.decoder_layer.input_layernorm.weight.data
+        self.beta0 = self.decoder_layer.input_layernorm.bias.data
+        self.gamma1 = self.q_a_layernorm.weight.data
+        self.beta1 = self.q_a_layernorm.bias.data
+        self.gamma2 = self.kv_a_layernorm.weight.data
+        self.quant_scale0 = self.q_a_proj.input_scale.data
+        self.quant_offset0 = self.q_a_proj.input_offset.data
+        self.quant_scale1 = self.q_proj.input_scale.data
+        self.quant_offset1 = self.q_proj.input_offset.data
+
+        self.decoder_layer.input_layernorm.weight.data = torch.tensor([])
+        self.decoder_layer.input_layernorm.bias.data = torch.tensor([])
+        self.decoder_layer.self_attn.q_a_layernorm.weight.data = torch.tensor([])
+        self.decoder_layer.self_attn.q_a_layernorm.bias = None
+        self.decoder_layer.self_attn.q_a_proj.weight = None
+        self.decoder_layer.self_attn.q_a_proj.input_scale = None
+        self.decoder_layer.self_attn.q_a_proj.input_offset = None
+        self.decoder_layer.self_attn.q_b_proj.weight = None
+        self.decoder_layer.self_attn.q_b_proj.input_scale = None
+        self.decoder_layer.self_attn.q_b_proj.input_offset = None
+        self.kv_a_layernorm.weight = None
+        self.kv_a_proj_with_mqa.weight = None
+        self.kv_a_proj_with_mqa.deq_scale = None
+        self.kv_a_proj_with_mqa.quant_bias = None
+        self.q_proj.weight = None
+        self.q_proj.input_scale = None
+        self.q_proj.input_offset = None
+        self.q_proj.quant_bias= None
+        self.q_proj.deq_scale = None
+        torch.npu.empty_cache()
+
+        torch.cuda.empty_cache()
 
     def _compute_prefill_context(
         self,
@@ -1021,7 +1102,7 @@ class AscendMLAImpl(MLAAttentionImpl):
         decode_meta = attn_metadata.decode
         assert decode_meta is not None
         num_tokens = q_nope.size(0)
-        if self.running_in_graph:
+        if envs.VLLM_ASCEND_ENABLE_MLA_PO:
             # shape of knope/k_pe for npu graph mode should be:
             # [num_blocks, num_kv_heads, block_size, self.kv_lora_rank/self.qk_rope_head_dim]
             block_size = kv_c_and_k_pe_cache[0].shape[1]
@@ -1136,156 +1217,229 @@ class AscendMLAImpl(MLAAttentionImpl):
         self.running_in_graph = self.torchair_graph_enabled and attn_metadata.attn_state in [
             AscendAttentionState.DecodeOnly, AscendAttentionState.SpecDecoding
         ]
+        forward_context = get_forward_context()
         num_actual_toks = attn_metadata.num_actual_tokens
-        if k_pe is None and not self.running_in_graph:
-            kv_c, k_pe = self.kv_a_proj_with_mqa(
-                hidden_states_or_kv_c_normed)[0].split(
-                    [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
-            kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
-        else:
-            kv_c_normed = hidden_states_or_kv_c_normed
-        assert attn_metadata.num_decodes is not None and \
-        attn_metadata.num_prefills is not None and \
-        attn_metadata.num_decode_tokens is not None
         has_decode = attn_metadata.num_decodes > 0
         has_prefill = attn_metadata.num_prefills > 0
         num_decode_tokens = attn_metadata.num_decode_tokens
-        if not self.running_in_graph:
-            # Inputs and outputs may be padded for CUDA graphs
-            output_padded = output
-            output = output[:num_actual_toks, ...]
-            if not self.torchair_graph_enabled:
-                kv_c_normed = kv_c_normed[:num_actual_toks, ...]
-                prefill_k_c_normed = kv_c_normed[num_decode_tokens:]
-        if not self.running_in_graph:
-            hidden_states_or_q_c = hidden_states_or_q_c[:num_actual_toks, ...]
-            prefill_hs_or_q_c = hidden_states_or_q_c[num_decode_tokens:]
-            decode_hs_or_q_c = hidden_states_or_q_c[:num_decode_tokens]
-            prefill_hs = hidden_states_or_kv_c_normed[num_decode_tokens:]
-            # if not self.torchair_graph_enabled:
-            k_pe = k_pe[:num_actual_toks, ...]
-            k_pe = k_pe.unsqueeze(1)
-            decode_k_pe = k_pe[:num_decode_tokens]
-            prefill_k_pe = k_pe[num_decode_tokens:]
-        else:
-            decode_hs_or_q_c = hidden_states_or_q_c
-        if has_decode:
-            decode_k_nope = None
-            assert attn_metadata.decode is not None
-            if self.running_in_graph:
-                cos = attn_metadata.decode.cos
-                sin = attn_metadata.decode.sin
-                with npu_stream_switch("mla_secondary",
-                                       0,
-                                       enabled=enable_multistream_mla):
-                    decode_k_pe, decode_k_nope = self.exec_kv(
-                        hidden_states_or_kv_c_normed, cos, sin, kv_cache,
-                        attn_metadata.slot_mapping)
-            if self.cp_size * self.sp_size > 1:
-                decode_q_wo_k_up = self.q_proj(decode_hs_or_q_c)[0] \
-                    .view(-1, self.num_heads, self.qk_head_dim)
-                # decode_hs_or_q_c: [seq, q_lora_rank/hidden_size(2048)],
-                # decode_q_wo_k_up: [seq, num_heads(16/tp), qk_nope_head_dim(128) + qk_rope_head_dim(64)]
+                
+        output_padded = output
+        decode_k_nope = None
+        decode_ql_nope = None
+        prefill_q = None
+        prefill_k_c_normed = None
+        prefill_k_pe = None
+        decode_q_pe = None
+        decode_k_pe = None
+        decode_q_wo_k_up = None
+        
+        def prefill_preprocess():
+            nonlocal hidden_states_or_q_c
+            nonlocal output
+            nonlocal decode_k_nope
+            nonlocal k_pe
+            nonlocal decode_ql_nope
+            nonlocal prefill_q
+            nonlocal prefill_k_c_normed
+            nonlocal prefill_k_pe
+            nonlocal decode_q_pe
+            nonlocal decode_k_pe
+            nonlocal decode_q_wo_k_up
+            nonlocal hidden_states_or_kv_c_normed
+            nonlocal kv_cache
+            nonlocal attn_metadata
+            nonlocal enable_multistream_mla
+            
+            if k_pe is None and not self.running_in_graph:
+                kv_c, k_pe = self.kv_a_proj_with_mqa(
+                    hidden_states_or_kv_c_normed)[0].split(
+                        [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+                kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
             else:
-                decode_ql_nope, decode_q_pe = \
-                    self._q_proj_and_k_up_proj(decode_hs_or_q_c)
-            if self.running_in_graph:
-                with npu_stream_switch("mla_secondary",
-                                       0,
-                                       enabled=enable_multistream_mla):
-                    npu_wait_tensor(decode_q_pe,
-                                    decode_k_pe,
-                                    enabled=enable_multistream_mla)
-                    decode_q_pe = self.rope_single(decode_q_pe, cos, sin)
+                kv_c_normed = hidden_states_or_kv_c_normed
+            assert attn_metadata.num_decodes is not None and \
+            attn_metadata.num_prefills is not None and \
+            attn_metadata.num_decode_tokens is not None
+            
+            if not self.running_in_graph:
+                # Inputs and outputs may be padded for CUDA graphs
+                # output_padded = output
+                output = output[:num_actual_toks, ...]
+                if not self.torchair_graph_enabled:
+                    kv_c_normed = kv_c_normed[:num_actual_toks, ...]
+                    prefill_k_c_normed = kv_c_normed[num_decode_tokens:]
+            if not self.running_in_graph:
+                hidden_states_or_q_c = hidden_states_or_q_c[:num_actual_toks, ...]
+                prefill_hs_or_q_c = hidden_states_or_q_c[num_decode_tokens:]
+                decode_hs_or_q_c = hidden_states_or_q_c[:num_decode_tokens]
+                prefill_hs = hidden_states_or_kv_c_normed[num_decode_tokens:]
+                # if not self.torchair_graph_enabled:
+                k_pe = k_pe[:num_actual_toks, ...]
+                k_pe = k_pe.unsqueeze(1)
+                decode_k_pe = k_pe[:num_decode_tokens]
+                prefill_k_pe = k_pe[num_decode_tokens:]
             else:
-                if self.sp_size > 1:
-                    decode_q_wo_k_up = decode_q_wo_k_up.contiguous()
-                    decode_q_wo_k_up = get_tp_group().all_gather(decode_q_wo_k_up, 1)
-
+                decode_hs_or_q_c = hidden_states_or_q_c
+            if has_decode:
+                # decode_k_nope = None
+                assert attn_metadata.decode is not None
+                if self.running_in_graph:
+                    cos = attn_metadata.decode.cos
+                    sin = attn_metadata.decode.sin
+                    with npu_stream_switch("mla_secondary",
+                                        0,
+                                        enabled=enable_multistream_mla):
+                        decode_k_pe, decode_k_nope = self.exec_kv(
+                            hidden_states_or_kv_c_normed, cos, sin, kv_cache,
+                            attn_metadata.slot_mapping)
                 if self.cp_size * self.sp_size > 1:
-                    decode_q_wo_k_up_pe = decode_q_wo_k_up[...,
-                                          self.qk_nope_head_dim:]  # [seq, num_heads_full(16), qk_rope_head_dim(64)]
-                    # decode_q_wo_k_up_nope = decode_q_wo_k_up[..., :self.qk_nope_head_dim] # [seq, num_heads_full(16), qk_nope_head_dim(128)]
-                    decode_q_wo_k_up_pe[...], decode_k_pe[...] = self.rotary_emb(
-                        attn_metadata.decode.input_positions,
-                        decode_q_wo_k_up_pe.contiguous(),
-                        decode_k_pe)
+                    decode_q_wo_k_up = self.q_proj(decode_hs_or_q_c)[0] \
+                        .view(-1, self.num_heads, self.qk_head_dim)
+                    # decode_hs_or_q_c: [seq, q_lora_rank/hidden_size(2048)],
+                    # decode_q_wo_k_up: [seq, num_heads(16/tp), qk_nope_head_dim(128) + qk_rope_head_dim(64)]
                 else:
-                    decode_q_pe[...], decode_k_pe[...] = self.rotary_emb(
-                        attn_metadata.decode.input_positions,
-                        decode_q_pe.contiguous(), decode_k_pe)
-        if has_prefill:
-            assert attn_metadata.prefill is not None
-            prefill_q = self.q_proj(prefill_hs_or_q_c)[0]\
-                .view(-1, self.num_heads, self.qk_head_dim)
-            prefill_q_pe = prefill_q[..., self.qk_nope_head_dim:]
-            prefill_q_nope = prefill_q[..., :self.qk_nope_head_dim]
+                    decode_ql_nope, decode_q_pe = \
+                        self._q_proj_and_k_up_proj(decode_hs_or_q_c)
+                if self.running_in_graph:
+                    with npu_stream_switch("mla_secondary",
+                                        0,
+                                        enabled=enable_multistream_mla):
+                        npu_wait_tensor(decode_q_pe,
+                                        decode_k_pe,
+                                        enabled=enable_multistream_mla)
+                        decode_q_pe = self.rope_single(decode_q_pe, cos, sin)
+                else:
+                    if self.sp_size > 1:
+                        decode_q_wo_k_up = decode_q_wo_k_up.contiguous()
+                        decode_q_wo_k_up = get_tp_group().all_gather(decode_q_wo_k_up, 1)
+
+                    if self.cp_size * self.sp_size > 1:
+                        decode_q_wo_k_up_pe = decode_q_wo_k_up[...,
+                                            self.qk_nope_head_dim:]  # [seq, num_heads_full(16), qk_rope_head_dim(64)]
+                        # decode_q_wo_k_up_nope = decode_q_wo_k_up[..., :self.qk_nope_head_dim] # [seq, num_heads_full(16), qk_nope_head_dim(128)]
+                        decode_q_wo_k_up_pe[...], decode_k_pe[...] = self.rotary_emb(
+                            attn_metadata.decode.input_positions,
+                            decode_q_wo_k_up_pe.contiguous(),
+                            decode_k_pe)
+                    else:
+                        decode_q_pe[...], decode_k_pe[...] = self.rotary_emb(
+                            attn_metadata.decode.input_positions,
+                            decode_q_pe.contiguous(), decode_k_pe)
+            if has_prefill:
+                assert attn_metadata.prefill is not None
+                prefill_q = self.q_proj(prefill_hs_or_q_c)[0]\
+                    .view(-1, self.num_heads, self.qk_head_dim)
+                prefill_q_pe = prefill_q[..., self.qk_nope_head_dim:]
+                prefill_q_nope = prefill_q[..., :self.qk_nope_head_dim]
+                if self.torchair_graph_enabled:
+                    num_tokens = prefill_hs_or_q_c.shape[0]
+                    cos = attn_metadata.prefill.cos
+                    sin = attn_metadata.prefill.sin
+
+                    prefill_q_pe = self.rope_single(prefill_q_pe, cos, sin)
+                    prefill_k_pe, prefill_k_nope = self.exec_kv_prefill(
+                        prefill_hs, cos, sin, kv_cache,
+                        attn_metadata.slot_mapping[num_decode_tokens:])
+
+                    kv_c_normed_prefill = prefill_k_nope[:num_actual_toks, ...]
+                    prefill_k_c_normed = prefill_k_nope
+                    prefill_k_pe = prefill_k_pe.view(num_tokens, self.num_kv_heads,
+                                                    -1)
+                    prefill_q = torch.cat([prefill_q_nope, prefill_q_pe], dim=-1)
+                else:
+                    prefill_q_pe[...], prefill_k_pe[...] = self.rotary_emb(
+                        attn_metadata.prefill.input_positions,
+                        prefill_q_pe.contiguous(), prefill_k_pe)
+
+            assert len(
+                kv_cache
+            ) > 1, "the number of kv cache should be greater than 1, namely (nope_cache and rope_cache)"
             if self.torchair_graph_enabled:
-                num_tokens = prefill_hs_or_q_c.shape[0]
-                cos = attn_metadata.prefill.cos
-                sin = attn_metadata.prefill.sin
+                if kv_cache[0].numel(
+                ) > 0 and attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
+                    slots = attn_metadata.slot_mapping
+                    # NOTE: Separate the kv cache in advance to avoid OOM or other issues
+                    torch_npu._npu_reshape_and_cache(key=kv_c_normed_prefill.view(
+                        num_tokens, self.num_kv_heads, -1),
+                                                    value=prefill_k_pe,
+                                                    key_cache=kv_cache[0],
+                                                    value_cache=kv_cache[1],
+                                                    slot_indices=slots)
 
-                prefill_q_pe = self.rope_single(prefill_q_pe, cos, sin)
-                prefill_k_pe, prefill_k_nope = self.exec_kv_prefill(
-                    prefill_hs, cos, sin, kv_cache,
-                    attn_metadata.slot_mapping[num_decode_tokens:])
-
-                kv_c_normed_prefill = prefill_k_nope[:num_actual_toks, ...]
-                prefill_k_c_normed = prefill_k_nope
-                prefill_k_pe = prefill_k_pe.view(num_tokens, self.num_kv_heads,
-                                                 -1)
-                prefill_q = torch.cat([prefill_q_nope, prefill_q_pe], dim=-1)
+                if kv_cache[0].numel(
+                ) > 0 and attn_metadata.attn_state == AscendAttentionState.ChunkedPrefill and has_decode:
+                    slots = attn_metadata.slot_mapping[:num_decode_tokens]
+                    k_c_normed_decode = kv_c_normed[:num_decode_tokens]
+                    torch_npu._npu_reshape_and_cache(key=k_c_normed_decode.view(
+                        num_decode_tokens, self.num_kv_heads, -1),
+                                                    value=decode_k_pe,
+                                                    key_cache=kv_cache[0],
+                                                    value_cache=kv_cache[1],
+                                                    slot_indices=slots)
             else:
-                prefill_q_pe[...], prefill_k_pe[...] = self.rotary_emb(
-                    attn_metadata.prefill.input_positions,
-                    prefill_q_pe.contiguous(), prefill_k_pe)
+                kv_c_normed = kv_c_normed.view(
+                    [num_actual_toks, self.num_kv_heads, -1])
 
-        assert len(
-            kv_cache
-        ) > 1, "the number of kv cache should be greater than 1, namely (nope_cache and rope_cache)"
-        if self.torchair_graph_enabled:
-            if kv_cache[0].numel(
-            ) > 0 and attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
-                slots = attn_metadata.slot_mapping
-                # NOTE: Separate the kv cache in advance to avoid OOM or other issues
-                torch_npu._npu_reshape_and_cache(key=kv_c_normed_prefill.view(
-                    num_tokens, self.num_kv_heads, -1),
-                                                 value=prefill_k_pe,
-                                                 key_cache=kv_cache[0],
-                                                 value_cache=kv_cache[1],
-                                                 slot_indices=slots)
+                if self.cp_size > 1 and attn_metadata.num_prefills > 0:
+                    prefill_k_c_normed = prefill_k_c_normed.unsqueeze(1)
+                    prefill_kv_c_k_pe = torch.cat([prefill_k_c_normed, prefill_k_pe], dim=-1)
+                    prefill_kv_c_k_pe = get_cp_group().all_gather(prefill_kv_c_k_pe, 0)
+                    prefill_kv_c_k_pe = torch.index_select(prefill_kv_c_k_pe, 0, attn_metadata.prefill.cp_metadata.cp_kv_recover_idx)
+                    prefill_k_c_normed, prefill_k_pe = prefill_kv_c_k_pe.split([self.kv_lora_rank, self.qk_rope_head_dim],
+                                                                            dim=-1)
 
-            if kv_cache[0].numel(
-            ) > 0 and attn_metadata.attn_state == AscendAttentionState.ChunkedPrefill and has_decode:
-                slots = attn_metadata.slot_mapping[:num_decode_tokens]
-                k_c_normed_decode = kv_c_normed[:num_decode_tokens]
-                torch_npu._npu_reshape_and_cache(key=k_c_normed_decode.view(
-                    num_decode_tokens, self.num_kv_heads, -1),
-                                                 value=decode_k_pe,
-                                                 key_cache=kv_cache[0],
-                                                 value_cache=kv_cache[1],
-                                                 slot_indices=slots)
-        else:
-            kv_c_normed = kv_c_normed.view(
-                [num_actual_toks, self.num_kv_heads, -1])
+                    kv_c_normed, k_pe = prefill_k_c_normed, prefill_k_pe
+                    prefill_k_c_normed = prefill_k_c_normed.squeeze()
 
-            if self.cp_size > 1 and attn_metadata.num_prefills > 0:
-                prefill_k_c_normed = prefill_k_c_normed.unsqueeze(1)
-                prefill_kv_c_k_pe = torch.cat([prefill_k_c_normed, prefill_k_pe], dim=-1)
-                prefill_kv_c_k_pe = get_cp_group().all_gather(prefill_kv_c_k_pe, 0)
-                prefill_kv_c_k_pe = torch.index_select(prefill_kv_c_k_pe, 0, attn_metadata.prefill.cp_metadata.cp_kv_recover_idx)
-                prefill_k_c_normed, prefill_k_pe = prefill_kv_c_k_pe.split([self.kv_lora_rank, self.qk_rope_head_dim],
-                                                                           dim=-1)
+                torch_npu._npu_reshape_and_cache(
+                    key=kv_c_normed,
+                    value=k_pe,
+                    key_cache=kv_cache[0],
+                    value_cache=kv_cache[1],
+                    slot_indices=attn_metadata.slot_mapping)
 
-                kv_c_normed, k_pe = prefill_k_c_normed, prefill_k_pe
-                prefill_k_c_normed = prefill_k_c_normed.squeeze()
+        if (envs.VLLM_ASCEND_ENABLE_MLA_PO and (attn_metadata is None or not forward_context.with_prefill)):
+            cos_shape = attn_metadata.decode.cos.shape
+            cos = attn_metadata.decode.cos.view(cos_shape[0], cos_shape[-1])
+            sin = attn_metadata.decode.sin.view(cos_shape[0], cos_shape[-1])
+            ctkv_scale = torch.tensor([1], dtype=hidden_states_or_q_c.dtype,
+                                      device=hidden_states_or_q_c.device)
+            q_nope_scale = torch.tensor([1], dtype=hidden_states_or_q_c.dtype,
+                                        device=hidden_states_or_q_c.device)
 
-            torch_npu._npu_reshape_and_cache(
-                key=kv_c_normed,
-                value=k_pe,
-                key_cache=kv_cache[0],
-                value_cache=kv_cache[1],
-                slot_indices=attn_metadata.slot_mapping)
+            decode_ql_nope, decode_q_pe = torch_npu.npu_mla_process(
+                hidden_states_or_q_c,
+                self.gamma0,
+                self.beta0,
+                self.wd_qkv,
+                self.deq_scale_qkv,
+                self.gamma1,
+                self.beta1,
+                self.wu_q,
+                self.qb_deq_scl,
+                self.gamma2,
+                cos,
+                sin,
+                self.W_UK_T,
+                kv_cache[0],
+                kv_cache[1],
+                attn_metadata.slot_mapping.flatten(),
+                quant_scale0=self.quant_scale0,
+                quant_offset0=self.quant_offset0,
+                bias0=self.quant_bias_qkv,
+                quant_scale1=self.quant_scale1,
+                quant_offset1=self.quant_offset1,
+                bias1=self.qb_qt_bias,
+                ctkv_scale=ctkv_scale,
+                q_nope_scale=q_nope_scale,
+                cache_mode_opt="krope_ctkv",
+                quant_mode_opt="per_tensor_quant_asymm",
+            )
+            decode_k_nope = kv_cache[0]
+            decode_k_pe = kv_cache[1]
+        else:        
+            prefill_preprocess()
+
         if not self.running_in_graph:
             o_proj_input_shape = (num_actual_toks,
                                   self.num_heads * self.v_head_dim)
@@ -1672,3 +1826,36 @@ class AscendMLAImpl(MLAAttentionImpl):
         # out = self.o_proj(attn_output, is_prefill=False)[0]
         out = attn_output
         return out
+
+
+def round_up(val: int, align: int) -> int:
+    if align == 0:
+        return 0
+    return -(val // -align) * align
+
+
+def trans_rope_weight(weight, rope_dim):
+    weight_1 = weight[..., -rope_dim::2, :].contiguous()
+    weight_2 = weight[..., -rope_dim + 1 :: 2, :].contiguous()
+    weight[..., -rope_dim:, :] = torch.cat([weight_1, weight_2], dim=-2)
+
+    return weight.contiguous()
+
+
+def transdata(nd_mat, block_size: tuple = (16, 16)):
+    r = round_up(nd_mat.shape[0], block_size[0])
+    c = round_up(nd_mat.shape[1], block_size[1])
+    r_pad = r - nd_mat.shape[0]
+    c_pad = c - nd_mat.shape[1]
+    nd_mat = F.pad(nd_mat, ((0, r_pad, 0, c_pad)))
+    nz_mat = torch.permute(
+        torch.reshape(
+            nd_mat,
+            (r // block_size[0], block_size[0], c // block_size[1], block_size[1]),
+        ),
+        [2, 0, 1, 3],
+    )
+    nz_mat = torch.reshape(
+        nz_mat, (nz_mat.shape[0], nz_mat.shape[1] * nz_mat.shape[2], nz_mat.shape[3])
+    )
+    return nz_mat
