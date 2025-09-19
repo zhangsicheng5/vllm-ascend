@@ -129,7 +129,8 @@ class CustomDeepSeekMultiTokenPredictorLayer(DeepSeekMultiTokenPredictorLayer):
                                                       model_config,
                                                       cache_config,
                                                       quant_config,
-                                                      enable_sp = self.enable_sp)
+                                                      enable_sp = self.enable_sp,
+                                                      otp_compatible=False)
 
     def forward(
         self,

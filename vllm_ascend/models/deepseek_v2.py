@@ -74,6 +74,7 @@ from vllm.sequence import IntermediateTensors
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.ops.fused_moe import AscendFusedMoE
+from vllm_ascend.ops.linear import AscendRowParallelLinear
 from vllm_ascend.ops.lmhead import CustomParallelLMHead
 from vllm_ascend.ops.logits_processor import CustomLogitsProcessor
 from vllm_ascend.quantization.quant_config import AscendLinearMethod
@@ -502,6 +503,7 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         quant_config: Optional[QuantizationConfig] = None,
         prefix: str = "",
         enable_sp: bool = False,
+        otp_compatible: bool = True,
     ) -> None:
         nn.Module.__init__(self)
         self.hidden_size = hidden_size
@@ -576,13 +578,15 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
         self.kv_b_proj_full = None
         if not self.enable_prefill_optimizations or int(
                 prefix.split(".")[-2]) < 3:
-            self.o_proj = CustomDeepseekV2RowParallelLinear(
+            self.o_proj = AscendRowParallelLinear(
                 self.num_heads * self.v_head_dim,
                 self.hidden_size,
                 bias=False,
                 quant_config=quant_config,
                 prefix=f"{prefix}.o_proj",
-                enable_sp=self.enable_sp)
+                enable_sp=self.enable_sp,
+                otp_compatible=otp_compatible,
+            )
         else:
             self.o_proj = RowParallelScatterLinear(self.num_heads *
                                                    self.v_head_dim,
@@ -732,6 +736,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
         cache_config: Optional[CacheConfig] = None,
         quant_config: Optional[QuantizationConfig] = None,
         enable_sp: bool = False,
+        otp_compatible: bool = True,
     ) -> None:
         nn.Module.__init__(self)
         self.hidden_size = config.hidden_size
@@ -766,6 +771,7 @@ class CustomDeepseekV2DecoderLayer(DeepseekV2DecoderLayer):
             quant_config=quant_config,
             prefix=f"{prefix}.self_attn",
             enable_sp=self.enable_sp,
+            otp_compatible=otp_compatible,
         )
 
         if (config.n_routed_experts is not None

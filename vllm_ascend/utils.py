@@ -37,6 +37,7 @@ from torchair.scope import super_kernel as _super_kernel
 from vllm.logger import logger
 
 import vllm_ascend.envs as envs
+from vllm_ascend.ascend_config import get_ascend_config
 
 try:
     # Recent release of torchair has moved these ops to `.scope`.
@@ -454,3 +455,8 @@ def delete_torchair_cache_file():
         shutil.rmtree(torch_air_abs_path)
     except FileNotFoundError:
         pass
+
+
+def oproj_tp_enable() -> bool:
+    return get_ascend_config().oproj_tensor_parallel_size is not None
+
