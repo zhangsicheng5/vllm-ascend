@@ -53,6 +53,7 @@ def init_ascend_model_parallel(parallel_config: ParallelConfig, ):
     # every dp rank can generate independently (in verl integration).
     all_ranks = torch.arange(world_size).reshape(
         -1, parallel_config.data_parallel_size *
+        parallel_config.context_parallel_size *
         parallel_config.tensor_parallel_size)
     global _MC2
     group_ranks = all_ranks.unbind(0)

@@ -1,11 +1,39 @@
 from dataclasses import dataclass
-from typing import Any, List
-
+from typing import Any, List, Optional
 import torch
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group,
                                           is_v1_kv_transfer_group)
 from vllm.forward_context import ForwardContext, get_forward_context
+
+
+@dataclass
+class AscendCommonLongSequenceMetadata:
+    cp_kv_recover_idx: torch.Tensor = None
+
+    num_actual_tokens_cp_full: Optional[int] = None
+
+    q_head_idx_tensor: torch.Tensor = None
+
+    q_tail_idx_tensor: torch.Tensor = None
+
+    kv_with_q_head_nomask_idx_tensor: torch.Tensor = None
+
+    kv_with_q_head_mask_idx_tensor: torch.Tensor = None
+
+    kv_with_q_tail_nomask_idx_tensor: torch.Tensor = None
+
+    kv_with_q_tail_mask_idx_tensor: torch.Tensor = None
+
+    attn_mask_seqlens: torch.Tensor = None
+
+    head_attn_nomask_seqlens: torch.Tensor = None
+
+    tail_attn_nomask_seqlens: torch.Tensor = None
+
+    q_full_idx: torch.Tensor = None
+
+    cp_prefill_mask: torch.Tensor = None
 
 
 @dataclass
@@ -62,6 +90,8 @@ class AscendCommonAttentionMetadata:
     is_only_prefill: bool = False
 
     graph_pad_size: int = -1
+
+    common_long_seq_metadata: Optional[AscendCommonLongSequenceMetadata] = None
 
 
 def split_decodes_and_prefills(
