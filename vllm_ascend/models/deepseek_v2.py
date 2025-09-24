@@ -80,6 +80,7 @@ from vllm_ascend.ops.logits_processor import CustomLogitsProcessor
 from vllm_ascend.quantization.quant_config import AscendLinearMethod
 from vllm_ascend.quantization.w8a8_dynamic import AscendW8A8DynamicLinearMethod
 from vllm_ascend.utils import dispose_tensor, npu_prefetch
+from vllm_ascend.quantization.w8a8 import quant_per_tensor
 
 
 class VocabParallelEmbeddingwithSP(VocabParallelEmbedding):
@@ -132,6 +133,8 @@ class CustomDeepseekV2RowParallelLinear(RowParallelLinear):
                          prefix=prefix)
 
         self.enable_sp = enable_sp
+        self.current_rank = torch.npu.current_device()
+        self.quant_method_way = self.quant_method.quantizer.get_quant_type()
 
     def forward(
         self,
@@ -153,26 +156,58 @@ class CustomDeepseekV2RowParallelLinear(RowParallelLinear):
         # Only fuse bias add into GEMM for rank 0 (this ensures that
         # bias will not get added more than once in TP>1 case)
         bias_ = None if (self.tp_rank > 0 or self.skip_bias_add) else self.bias
-        output_parallel = self.quant_method.apply(self,
-                                                  input_parallel,
-                                                  bias=bias_)
-        if self.reduce_results and self.enable_sp and is_prefill:
-            original_len = input_.shape[0]
+        if self.reduce_results and self.enable_sp and is_prefill and self.quant_method_way == "w8a8":
+            # current_rank = torch.npu.current_device()
+            if input_parallel.dtype != torch.int8:
+                input_parallel = quant_per_tensor(
+                    input_parallel,
+                    self.aclnn_input_scale_reciprocal,
+                    self.aclnn_input_offset,
+                )
+            original_len = input_parallel.shape[0]
             reminder = original_len % sp_size
             if reminder != 0:
                 padding_len = sp_size - reminder
-                output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
-            output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
-        elif self.reduce_results and self.tp_size > 1:
-            output = tensor_model_parallel_all_reduce(output_parallel)
+                input_parallel = F.pad(input_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+            # current_rank = torch.npu.current_device()
+            output = torch.empty(input_parallel.shape[0] // 8, self.weight.shape[1], dtype=input_.dtype,device=input_.device)
+            tp_rank = get_tensor_model_parallel_rank()
+            commDomain = str(self.current_rank // 8) + "4"
+            quant_bias = self.quant_bias if tp_rank == 0 else None
+            if tp_rank != 0:
+                quant_bias = torch.zeros_like(self.quant_bias,dtype=self.quant_bias.dtype, device=self.quant_bias.device)
+            torch_npu.atb._npu_matmul_reduce_scatter(input_parallel,
+                                                    self.weight,
+                                                    output,
+                                                    quant_bias,
+                                                    self.deq_scale,
+                                                    rank=tp_rank,
+                                                    rankSize=8,
+                                                    commDomain=commDomain,
+                                                    outdata_type=27)
+            return output, None
         else:
-            output = output_parallel
 
-        output_bias = self.bias if self.skip_bias_add else None
+            output_parallel = self.quant_method.apply(self,
+                                                    input_parallel,
+                                                    bias=bias_)
+            if self.reduce_results and self.enable_sp and is_prefill:
+                original_len = input_.shape[0]
+                reminder = original_len % sp_size
+                if reminder != 0:
+                    padding_len = sp_size - reminder
+                    output_parallel = F.pad(output_parallel, (0, 0, 0, padding_len), mode='constant', value=0)
+                output = tensor_model_parallel_reduce_scatter(output_parallel.movedim(0, -1)).movedim(-1, 0)
+            elif self.reduce_results and self.tp_size > 1:
+                output = tensor_model_parallel_all_reduce(output_parallel)
+            else:
+                output = output_parallel
 
-        if not self.return_bias:
-            return output
-        return output, output_bias
+            output_bias = self.bias if self.skip_bias_add else None
+
+            if not self.return_bias:
+                return output
+            return output, output_bias
 
 
 class RowParallelScatterLinear(RowParallelLinear):
@@ -732,14 +767,10 @@ class CustomDeepseekV2MLAAttention(DeepseekV2MLAAttention):
                     kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
 
                 if self.enable_sp and is_prefill:
-                    chunk_kv_no_split = [torch.empty_like(kv_no_split) for _ in range(self.sp_size)]
-                    dist.all_gather(list(chunk_kv_no_split), kv_no_split, self.sp_group)
-                    kv_no_split = torch.cat(chunk_kv_no_split, dim=0)
+                    kv_no_split = get_tp_group().all_gather(kv_no_split, 0)
                     kv_no_split = kv_no_split[:original_len]
 
-                    chunk_hidden_states_or_q_c = [torch.empty_like(hidden_states_or_q_c) for _ in range(self.sp_size)]
-                    dist.all_gather(list(chunk_hidden_states_or_q_c), hidden_states_or_q_c, self.sp_group)
-                    hidden_states_or_q_c = torch.cat(chunk_hidden_states_or_q_c, dim=0)
+                    hidden_states_or_q_c = get_tp_group().all_gather(hidden_states_or_q_c, 0)
                     hidden_states_or_q_c = hidden_states_or_q_c[:original_len]
 
                 kv_c, k_pe = kv_no_split.split(
@@ -1037,14 +1068,10 @@ class CustomDeepseekV2Model(nn.Module):
 
         hidden_states, _ = self.norm(hidden_states, residual)
         if self.enable_sp and is_prefill:
-            chunk_hidden_states = [torch.empty_like(hidden_states) for _ in range(self.sp_size)]
-            dist.all_gather(list(chunk_hidden_states), hidden_states, self.sp_group)
-            hidden_states = torch.cat(chunk_hidden_states, dim=0)
+            hidden_states = get_tp_group().all_gather(hidden_states, 0)
             hidden_states = hidden_states[:original_len]
         if self.cp_size > 1 and is_prefill:
-            chunk_hidden_states = [torch.empty_like(hidden_states) for _ in range(self.cp_size)]
-            dist.all_gather(list(chunk_hidden_states), hidden_states, self.cp_group)
-            hidden_states = torch.cat(chunk_hidden_states, dim=0)
+            hidden_states = get_cp_group().all_gather(hidden_states, 0)
             hidden_states = torch.index_select(hidden_states, 0, attn_metadata.prefill.cp_metadata.cp_kv_recover_idx)
         return hidden_states
 

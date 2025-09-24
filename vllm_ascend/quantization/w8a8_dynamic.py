@@ -34,6 +34,26 @@ from vllm_ascend.utils import (ACL_FORMAT_FRACTAL_NZ, AscendSocVersion,
                                super_kernel)
 
 CHUNK_SIZE: int = ascend_envs.VLLM_ASCEND_FUSED_MOE_MC2_CHUNK_SIZE
+VLLM_ASCEND_FUSION_ACLNN: bool = ascend_envs.VLLM_ASCEND_FUSION_ACLNN
+VLLM_ASCEND_FUSION_ACLNN_FUSION: bool = ascend_envs.VLLM_ASCEND_FUSION_ACLNN_FUSION
+VLLM_ASCEND_FUSION_ATB: bool = ascend_envs.VLLM_ASCEND_FUSION_ATB
+
+out_tensor1 = None
+out_tensor2 = None
+# shape = None
+
+def all_gather_experts(input_tensor: torch.Tensor) -> torch.Tensor:
+    ep_world_size = get_ep_group().world_size
+    tensor_list = [torch.empty_like(input_tensor, device=input_tensor.device, dtype=input_tensor.dtype) for _ in range(ep_world_size)]
+    dist.all_gather(tensor_list, input_tensor)
+    output_tensor = torch.stack(tensor_list, dim=0)
+    return output_tensor
+
+
+def scale_from_float_to_int64(scale):
+    import numpy as np
+    scale = torch.from_numpy(np.frombuffer(scale.cpu().to(torch.float32).numpy().tobytes(), dtype=np.int32).astype(np.int64)).to(scale.device)
+    return scale
 
 
 def apply_mlp_decode(hidden_states_wrapper: List[torch.Tensor],
@@ -481,6 +501,149 @@ def init_routing_quant(hidden_states, top_k, topk_ids, global_num_experts):
     return quantized_tokens, expanded_row_idx, global_expert_tokens, token_scales
 
 
+
+def fused_experts_with_all2all_atb(
+    hidden_states: torch.Tensor,
+    w1: torch.Tensor,
+    w1_scale: torch.Tensor,
+    w2: torch.Tensor,
+    w2_scale: torch.Tensor,
+    topk_weights: torch.Tensor,
+    topk_ids: torch.Tensor,
+    top_k: int,
+    expert_map: torch.Tensor = None,
+    ep_group: GroupCoordinator = None,
+    log2phy: torch.Tensor = None,
+    global_redundant_expert_num: int = 0,
+):
+    if log2phy:
+        topk_ids = log2phy[topk_ids]
+    original_shape = hidden_states.shape
+    if len(original_shape) == 3:
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
+    device = hidden_states.device
+    global_num_experts = len(expert_map) + global_redundant_expert_num
+    local_num_experts = global_num_experts // ep_group.world_size
+    dtype = hidden_states.dtype
+    global out_tensor1, out_tensor2
+    # if out_tensor1 is None original_shape.shape[0]:
+    if out_tensor1 is None:
+        out_tensor1 = torch.empty(65536, 4096, dtype=torch.float16, device=device)
+        out_tensor2 = torch.empty(65536, 7168, dtype=torch.float16, device=device)    
+    hidden_states, expanded_row_idx, expert_tokens_count, expert_tokens_before_capacity, dynamic_scale = torch_npu.npu_moe_init_routing_quantv2(
+            hidden_states,
+            expert_idx=topk_ids.to(torch.int32),
+            active_num=0,
+            expert_capacity=0,
+            expert_num=256,
+            drop_pad_mode=0,
+            expert_tokens_count_or_cumsum_flag=2, # 表示输出的值为各个专家处理的token数量。
+            expert_tokens_before_capacity_flag=False,
+            quant_mode=1  # 1 表示动态quant场景
+    )
+
+    # 两次 alltoall 共用同一份 AllGather 得到的 global_tokens_per_expert_matrix
+    global_tokens_per_expert_matrix = all_gather_experts(expert_tokens_count)  # expert_per_token_matrix [ep, 256]
+    quant_type = 3  # atb::infer::LinearParallelParam::QuantType::QUANT_TYPE_PER_TOKEN == 3
+    world_size = ep_group.world_size
+    m_p = 65536
+    maxOutputSize = torch.zeros(m_p, dtype=torch.int32, device=device)
+    torch_npu.atb._npu_alltoallv_all_gather_gmm(hidden_states, w1,
+                                global_tokens_per_expert_matrix, maxOutputSize, out_tensor1,
+                                deqScaleOpt=w1_scale, dequantPerTokenScaleOpt=dynamic_scale, 
+                                transWeight=False, rank=ep_group.rank, rankSize=world_size, commDomain="0", quantType=quant_type,
+                                outDataType=torch.float16, localExpertNums=local_num_experts, epSize=world_size, tpSize=1)
+    hidden_states, dynamic_scale = torch_npu.npu_dequant_swiglu_quant(
+                    x=out_tensor1, # 支持输入 FP16、BF16、INT32
+                    bias=None,
+                    quant_scale=None,
+                    quant_offset=None,
+                    group_index=None,
+                    activate_left=True,
+                    quant_mode=1)  # 1 动态量化
+    maxOutputSize = torch.zeros(m_p, dtype=torch.int32, device=device)
+    torch_npu.atb._npu_gmm_reduce_scatter_alltoallv(hidden_states, w2,
+                            global_tokens_per_expert_matrix, maxOutputSize, out_tensor2,
+                            deqScaleOpt=w2_scale, dequantPerTokenScaleOpt=dynamic_scale, 
+                            transWeight=False, rank=ep_group.rank, rankSize=world_size, commDomain="0", quantType=quant_type,
+                            outDataType=torch.float16, localExpertNums=local_num_experts, epSize=world_size, tpSize=1)
+    hidden_states = out_tensor2.to(dtype)
+    hidden_states = torch_npu.npu_moe_token_unpermute(hidden_states, expanded_row_idx, probs=topk_weights)
+    if len(hidden_states) == 3:
+        hidden_states = hidden_states.view(original_shape)
+    return hidden_states
+
+
+def fused_experts_with_all2all_aclnn(hidden_states: torch.Tensor,
+                               w1: torch.Tensor,
+                               w1_scale: torch.Tensor,
+                               w2: torch.Tensor,
+                               w2_scale: torch.Tensor,
+                               topk_weights: torch.Tensor,
+                               topk_ids: torch.Tensor,
+                               top_k: int,
+                               moe_all_to_all_group_name="",
+                               expert_map: torch.Tensor = None,
+                               ep_group: GroupCoordinator = None,
+                               log2phy: torch.Tensor = None,
+                               global_redundant_expert_num: int = 0,
+                               w1_scale_bias: torch.Tensor = None,
+                               w2_scale_bias: torch.Tensor = None):
+    out = torch.empty_like(hidden_states)
+    hidden_states, expanded_row_idx, expert_tokens_count, expert_tokens_before_capacity, dynamic_scale = torch_npu.npu_moe_init_routing_quantv2(
+            hidden_states,
+            expert_idx=topk_ids.to(torch.int32),
+            active_num=0,
+            expert_capacity=0,
+            expert_num=256,
+            drop_pad_mode=0,
+            expert_tokens_count_or_cumsum_flag=2, # 表示输出的值为各个专家处理的token数量。
+            expert_tokens_before_capacity_flag=False,
+            quant_mode=1  # 1 表示动态quant场景
+    )
+    # print("hidden_states.shape=",hidden_states.shape)
+    return torch_npu.npu_dispatch_combine1(hidden_states,
+                                          w1, 
+                                          w2,
+                                          expanded_row_idx,
+                                          expert_tokens_count,
+                                          dynamic_scale,
+                                          w1_scale,
+                                          w2_scale, 
+                                          topk_weights.to(torch.float32), 
+                                          group=moe_all_to_all_group_name,
+                                          maxOutputSize=65536,
+                                          out=out)
+
+
+def fused_experts_with_all2all_aclnn_withinitrouting(hidden_states: torch.Tensor,
+                               w1: torch.Tensor,
+                               w1_scale: torch.Tensor,
+                               w2: torch.Tensor,
+                               w2_scale: torch.Tensor,
+                               topk_weights: torch.Tensor,
+                               topk_ids: torch.Tensor,
+                               top_k: int,
+                               moe_all_to_all_group_name="",
+                               expert_map: torch.Tensor = None,
+                               ep_group: GroupCoordinator = None,
+                               log2phy: torch.Tensor = None,
+                               global_redundant_expert_num: int = 0,
+                               w1_scale_bias: torch.Tensor = None,
+                               w2_scale_bias: torch.Tensor = None):
+    out = torch.empty_like(hidden_states)
+
+    return torch_npu.npu_dispatch_combine(hidden_states,
+                                          w1, 
+                                          w2,
+                                          topk_ids,
+                                          w1_scale,
+                                          w2_scale, 
+                                          topk_weights.to(torch.float32), 
+                                          group=moe_all_to_all_group_name,
+                                          maxOutputSize=65536,
+                                          out=out)
+
 # currently expert parallelism implemented with all2all
 # is under-optimized.
 def fused_experts_with_all2all(hidden_states: torch.Tensor,
@@ -840,10 +1003,11 @@ class AscendW8A8DynamicFusedMoEMethod:
 
         ascend_config = get_ascend_config()
         self.torchair_graph_enabled = ascend_config.torchair_graph_config.enabled
-        self.enable_weight_nz_layout = ascend_config.enable_weight_nz_layout
-
+        # self.enable_weight_nz_layout = ascend_config.enable_weight_nz_layout
+        self.enable_weight_nz_layout = True
         try:
             device_group = get_mc2_group().device_group
+            # device_group = get_ep_group().device_group
             # TODO: Try local_rank = ep_group.rank_in_group
             local_rank = torch.distributed.get_rank(group=device_group)
             backend = device_group._get_backend(torch.device("npu"))
@@ -1023,24 +1187,68 @@ class AscendW8A8DynamicFusedMoEMethod:
                                  top_k=top_k,
                                  expert_map=expert_map)
         else:
-            # The current implementation of deepseek moe splits hidden_states
-            # according to tp_size before they are feed into fused_moe module.
-            # Therefore, all2all is needed no matter how dp/tp is set so as to
-            # dispatch/combine tokens.
-            return fused_experts_with_all2all(
-                hidden_states=x,
-                w1=layer.w13_weight,
-                w1_scale=layer.w13_weight_scale,
-                w2=layer.w2_weight,
-                w2_scale=layer.w2_weight_scale,
-                topk_weights=topk_weights,
-                topk_ids=topk_ids,
-                top_k=top_k,
-                expert_map=expert_map,
-                ep_group=self.ep_group,
-                log2phy=log2phy,
-                global_redundant_expert_num=global_redundant_expert_num,
-            )
+            if VLLM_ASCEND_FUSION_ACLNN:
+                return fused_experts_with_all2all_aclnn(
+                    hidden_states=x,
+                    w1=layer.w13_weight,
+                    w1_scale=layer.w13_weight_scale,
+                    w2=layer.w2_weight,
+                    w2_scale=layer.w2_weight_scale,
+                    topk_weights=topk_weights,
+                    topk_ids=topk_ids,
+                    top_k=top_k,
+                    moe_all_to_all_group_name=self.moe_all_to_all_group_name,
+                    expert_map=expert_map,
+                    ep_group=self.ep_group,
+                    log2phy=log2phy,
+                    global_redundant_expert_num=global_redundant_expert_num,
+                )
+            elif VLLM_ASCEND_FUSION_ATB:
+                return fused_experts_with_all2all_atb(
+                    hidden_states=x,
+                    w1=layer.w13_weight,
+                    w1_scale=layer.w13_weight_scale,
+                    w2=layer.w2_weight,
+                    w2_scale=layer.w2_weight_scale,
+                    topk_weights=topk_weights,
+                    topk_ids=topk_ids,
+                    top_k=top_k,
+                    expert_map=expert_map,
+                    ep_group=self.ep_group,
+                    log2phy=log2phy,
+                    global_redundant_expert_num=global_redundant_expert_num,
+                )
+            elif VLLM_ASCEND_FUSION_ACLNN_FUSION:
+                return fused_experts_with_all2all_aclnn_withinitrouting(
+                    hidden_states=x,
+                    w1=layer.w13_weight,
+                    w1_scale=layer.w13_weight_scale,
+                    w2=layer.w2_weight,
+                    w2_scale=layer.w2_weight_scale,
+                    topk_weights=topk_weights,
+                    topk_ids=topk_ids,
+                    top_k=top_k,
+                    moe_all_to_all_group_name=self.moe_all_to_all_group_name,
+                    expert_map=expert_map,
+                    ep_group=self.ep_group,
+                    log2phy=log2phy,
+                    global_redundant_expert_num=global_redundant_expert_num,
+                )
+            else:
+                return fused_experts_with_all2all(
+                    hidden_states=x,
+                    w1=layer.w13_weight,
+                    w1_scale=layer.w13_weight_scale,
+                    w2=layer.w2_weight,
+                    w2_scale=layer.w2_weight_scale,
+                    topk_weights=topk_weights,
+                    topk_ids=topk_ids,
+                    top_k=top_k,
+                    expert_map=expert_map,
+                    ep_group=self.ep_group,
+                    log2phy=log2phy,
+                    global_redundant_expert_num=global_redundant_expert_num,
+                )
 
     def process_weights_after_loading(self, layer):
         if self.transpose_weight:
@@ -1050,6 +1258,9 @@ class AscendW8A8DynamicFusedMoEMethod:
                 1, 2).contiguous()
         if self.enable_weight_nz_layout:
             # cast quantized weight tensors in NZ layout for higher inference speed
+            if VLLM_ASCEND_FUSION_ATB or VLLM_ASCEND_FUSION_ACLNN or VLLM_ASCEND_FUSION_ACLNN_FUSION:
+                layer.w13_weight_scale.data = scale_from_float_to_int64(layer.w13_weight_scale.data)
+                layer.w2_weight_scale.data = scale_from_float_to_int64(layer.w2_weight_scale.data)
             layer.w13_weight.data = torch_npu.npu_format_cast(
                 layer.w13_weight.data, ACL_FORMAT_FRACTAL_NZ)
             layer.w2_weight.data = torch_npu.npu_format_cast(

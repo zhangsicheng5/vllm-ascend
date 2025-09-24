@@ -19,6 +19,7 @@ from typing import Any, Dict, Optional
 
 import torch
 import torch_npu
+from vllm_ascend import envs
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.utils import ACL_FORMAT_FRACTAL_NZ
@@ -119,6 +120,52 @@ class AscendW8A8LinearMethod:
         layer.aclnn_input_offset = torch.nn.Parameter(
             layer.input_offset.data.repeat(expanding_factor),
             requires_grad=False).to(layer.aclnn_input_scale.dtype)
+        # Modified begin
+        module_name = layer.prefix.split(".")[-1] if hasattr(layer, 'prefix') else ""
+        if envs.VLLM_ASCEND_ROPE_OPT and module_name == "q_b_proj":
+            temp_weight = layer.weight.data
+            temp_weight = temp_weight.view(-1, 192, temp_weight.shape[-1])
+            weight_1 = temp_weight[..., -64:: 2, :].contiguous()
+            weight_2 = temp_weight[..., -64 + 1:: 2, :].contiguous()
+            temp_weight[..., -64:, :] = torch.cat([weight_1, weight_2], dim=-2)
+            layer.weight.data = temp_weight.view(layer.weight.shape) 
+            deq_scale = layer.deq_scale.data 
+            weight_scale = deq_scale.view(-1, 192, 1)
+            weight_1 = weight_scale[..., -64:: 2, :].contiguous()
+            weight_2 = weight_scale[..., -64 + 1:: 2, :].contiguous()
+            weight_scale[..., -64:, :] = torch.cat([weight_1, weight_2], dim=-2)
+            layer.deq_scale.data  = weight_scale.view(layer.deq_scale.shape).flatten()
+
+            weight_offset = layer.quant_bias.data
+            weight_offset = weight_offset.view(-1, 192, 1)
+            weight_1 = weight_offset[..., -64:: 2, :].contiguous()
+            weight_2 = weight_offset[..., -64 + 1:: 2, :].contiguous()
+            weight_offset[..., -64:, :] = torch.cat([weight_1, weight_2], dim=-2)
+            layer.quant_bias.data = weight_offset.view(layer.quant_bias.shape).flatten()
+        
+        # Modified
+        if envs.VLLM_ASCEND_ROPE_OPT and module_name == "kv_a_proj_with_mqa":
+            temp_weight = layer.weight.data
+            temp_weight = temp_weight.view(-1, temp_weight.shape[-1])
+            weight_1 = temp_weight[-64:: 2, :].contiguous()
+            weight_2 = temp_weight[-64 + 1:: 2, :].contiguous()
+            temp_weight[-64:, :] = torch.cat([weight_1, weight_2], dim=0)
+            layer.weight.data = temp_weight.view(layer.weight.shape)
+            deq_scale = layer.deq_scale.data 
+            weight_scale = deq_scale.view(-1, 1)
+            weight_1 = weight_scale[-64:: 2, :].contiguous()
+            weight_2 = weight_scale[-64 + 1:: 2, :].contiguous()
+            weight_scale[-64:, :] = torch.cat([weight_1, weight_2], dim=0)
+            layer.deq_scale.data  = weight_scale.view(layer.deq_scale.shape).flatten()
+
+            weight_offset = layer.quant_bias.data
+            weight_offset = weight_offset.view(-1, 1)
+            weight_1 = weight_offset[-64:: 2, :].contiguous()
+            weight_2 = weight_offset[-64 + 1:: 2, :].contiguous()
+            weight_offset[-64:, :] = torch.cat([weight_1, weight_2], dim=0)
+            layer.quant_bias.data = weight_offset.view(layer.quant_bias.shape).flatten()
+
+        # Modified， 除了o_proj和q_b_proj外其余的权重要转为NZ 
         if self.transpose_weight:
             layer.weight.data = layer.weight.data.transpose(0, 1).contiguous()
         if self.enable_weight_nz_layout:
@@ -127,3 +174,5 @@ class AscendW8A8LinearMethod:
                 layer.weight.data, ACL_FORMAT_FRACTAL_NZ)
         layer.weight_scale.data = torch.flatten(layer.weight_scale.data)
         layer.weight_offset.data = torch.flatten(layer.weight_offset.data)
+
+        torch.npu.empty_cache()

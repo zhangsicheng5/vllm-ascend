@@ -663,9 +663,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             with_prefill_tensor = torch.tensor([with_prefill],
                                                device="npu",
                                                dtype=torch.bool)
-            dist.all_reduce(with_prefill_tensor,
-                            group=get_dp_group().device_group,
-                            op=dist.ReduceOp.MAX)
+            # dist.all_reduce(with_prefill_tensor,
+            #                 group=get_dp_group().device_group,
+            #                 op=dist.ReduceOp.MAX)
             if not with_prefill_tensor.item():
                 max_num_decode_tokens = self.torchair_graph_batch_sizes[0]
                 num_tokens_across_dp = torch.tensor([max_num_decode_tokens] *
@@ -2676,13 +2676,17 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         if self.decode_token_per_req > 1:
             # pd disaggregation scenario need redundant_batch_sizes to avoid each batch's seq_len exceed 16 tokens
             if self.is_kv_consumer:
-                FIA_SEQ_LEN_LIMIT = 16
+                # FIA_SEQ_LEN_LIMIT = 16
+                # self.torchair_graph_batch_sizes = [
+                #     (graph_batch_size +
+                #      math.ceil(graph_batch_size / FIA_SEQ_LEN_LIMIT) +
+                #      math.ceil(graph_batch_size * self.decode_token_per_req /
+                #                FIA_SEQ_LEN_LIMIT / FIA_SEQ_LEN_LIMIT)) *
+                #     self.decode_token_per_req
+                #     for graph_batch_size in self.torchair_graph_batch_sizes
+                # ]
                 self.torchair_graph_batch_sizes = [
-                    (graph_batch_size +
-                     math.ceil(graph_batch_size / FIA_SEQ_LEN_LIMIT) +
-                     math.ceil(graph_batch_size * self.decode_token_per_req /
-                               FIA_SEQ_LEN_LIMIT / FIA_SEQ_LEN_LIMIT)) *
-                    self.decode_token_per_req
+                    graph_batch_size * self.decode_token_per_req
                     for graph_batch_size in self.torchair_graph_batch_sizes
                 ]
             else:

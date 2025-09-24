@@ -273,12 +273,20 @@ class W4A8DYNAMICQuantizer(VLLMAscendQuantizer):
     def build_moe_method():
         return AscendW4A8DynamicFusedMoEMethod()
 
+    @staticmethod
+    def get_quant_type():
+        return "w4a8_dynamic"
+
 
 class W8A8Quantizer(VLLMAscendQuantizer):
 
     @staticmethod
     def build_linear_method():
         return AscendW8A8LinearMethod()
+
+    @staticmethod
+    def get_quant_type():
+        return "w8a8"
 
 
 class W8A8DYNAMICQuantizer(VLLMAscendQuantizer):
@@ -290,6 +298,10 @@ class W8A8DYNAMICQuantizer(VLLMAscendQuantizer):
     @staticmethod
     def build_moe_method():
         return AscendW8A8DynamicFusedMoEMethod()
+
+    @staticmethod
+    def get_quant_type():
+        return "w8a8_dynamic"
 
 
 SUPPORT_ASCEND_QUANTIZER_TYPE = {

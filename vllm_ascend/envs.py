@@ -174,6 +174,14 @@ env_variables: Dict[str, Callable[[], Any]] = {
     #   1: fused mla_po kernel.
     "VLLM_ASCEND_ENABLE_MLA_PO":
     lambda: bool(int(os.getenv('VLLM_ASCEND_ENABLE_MLA_PO', '0'))),
+    "VLLM_ASCEND_ROPE_OPT":
+    lambda: bool(int(os.getenv('VLLM_ASCEND_ROPE_OPT', '0'))),
+    "VLLM_ASCEND_FUSION_ACLNN":
+    lambda: bool(int(os.getenv("VLLM_ASCEND_FUSION_ACLNN", '0'))),
+    "VLLM_ASCEND_FUSION_ATB":
+    lambda: bool(int(os.getenv("VLLM_ASCEND_FUSION_ATB", '0'))),
+    "VLLM_ASCEND_FUSION_ACLNN_FUSION":
+    lambda: bool(int(os.getenv("VLLM_ASCEND_FUSION_ACLNN_FUSION", '0'))),
 }
 
 # end-env-vars-definition

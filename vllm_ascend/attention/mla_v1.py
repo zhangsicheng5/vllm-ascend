@@ -1407,7 +1407,7 @@ class AscendMLAImpl(MLAAttentionImpl):
             q_nope_scale = torch.tensor([1], dtype=hidden_states_or_q_c.dtype,
                                         device=hidden_states_or_q_c.device)
 
-            decode_ql_nope, decode_q_pe = torch_npu.npu_mla_process(
+            decode_ql_nope, _, decode_q_pe, _ = torch_npu.npu_mla_process(
                 hidden_states_or_q_c,
                 self.gamma0,
                 self.beta0,
