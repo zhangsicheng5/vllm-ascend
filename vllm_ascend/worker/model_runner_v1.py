@@ -98,7 +98,8 @@ from vllm_ascend.ascend_forward_context import (MoECommType,
                                                 set_ascend_forward_context)
 from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
-from vllm_ascend.attention.utils import AscendCommonAttentionMetadata
+from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
+                                         AscendCommonLongSequenceMetadata)
 from vllm_ascend.compilation.acl_graph import (ACLGraphWrapper,
                                                set_graph_params,
                                                update_attn_params)
@@ -1197,6 +1198,166 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 start_index += num_tokens
         return tokens
 
+    def _update_logits_indices_for_cp(self, cu_num_tokens, scheduler_output: "SchedulerOutput"):
+        # todo: find a better way to get is_prefill
+        is_prefill = list(
+            scheduler_output.num_scheduled_tokens.values())[0] > 1
+        num_reqs = self.input_batch.num_reqs
+        if self.cp_size > 1 and is_prefill:
+            # logits_indices = cu_num_tokens - num_cp_pads[:num_reqs] - 1 # if without all-gather and only sample on cp0
+            logits_indices = cu_num_tokens * self.cp_size - self.num_cp_pads[:
+                                                                        num_reqs] - 1
+        else:
+            logits_indices = cu_num_tokens - 1
+        return logits_indices
+
+    def _generate_cp_metadata(self, total_num_scheduled_tokens, seq_lens, scheduler_output: "SchedulerOutput"):
+        # todo: find a better way to get is_prefill
+        is_prefill = list(
+            scheduler_output.num_scheduled_tokens.values())[0] > 1
+        num_actual_tokens_cp_full = total_num_scheduled_tokens * (
+            self.cp_size if is_prefill > 0 else 1)
+        long_seq_metadata = None
+        if self.cp_size > 1 and is_prefill > 0:
+            cp_kv_recover_idx = torch.zeros(num_actual_tokens_cp_full,
+                                            dtype=torch.int32,
+                                            device=self.device)
+            cp_kv_recover_idx.copy_(torch.tensor(
+                np.array(self.cp_kv_recover_idx).flatten().tolist()),
+                non_blocking=True)
+            self.cp_kv_recover_idx = cp_kv_recover_idx.to(
+                torch.float32).argsort().to(torch.int32)
+
+            q_head_idx, q_tail_idx = [], []
+            kv_with_q_head_nomask_idx, kv_with_q_head_mask_idx = [], []
+            kv_with_q_tail_nomask_idx, kv_with_q_tail_mask_idx = [], []
+            chunk_seqlens = []
+            kv_with_q_head_nomask_seqlens, kv_with_q_tail_nomask_seqlens = [], []
+            q_req_offset = 0
+            kv_req_offset = 0
+            q_head_chunk_id = self.cp_rank
+            q_tail_chunk_id = self.cp_size * 2 - 1 - self.cp_rank
+            for seq_len in seq_lens:
+                chunk_len = seq_len // 2
+                chunk_seqlens.append(chunk_len)
+                q_head_idx.extend(
+                    list(range(q_req_offset, q_req_offset + chunk_len)))
+                kv_with_q_head_nomask_idx.extend(
+                    list(
+                        range(kv_req_offset,
+                              kv_req_offset + chunk_len * q_head_chunk_id)))
+                kv_with_q_head_mask_idx.extend(
+                    list(
+                        range(
+                            kv_req_offset + chunk_len * q_head_chunk_id,
+                            kv_req_offset + chunk_len *
+                            (q_head_chunk_id + 1))))
+                kv_with_q_head_nomask_seqlens.append(chunk_len *
+                                                     q_head_chunk_id)
+
+                q_tail_idx.extend(
+                    list(
+                        range(q_req_offset + chunk_len,
+                              q_req_offset + chunk_len * 2)))
+                kv_with_q_tail_nomask_idx.extend(
+                    list(
+                        range(kv_req_offset,
+                              kv_req_offset + chunk_len * q_tail_chunk_id)))
+                kv_with_q_tail_mask_idx.extend(
+                    list(
+                        range(
+                            kv_req_offset + chunk_len * q_tail_chunk_id,
+                            kv_req_offset + chunk_len *
+                            (q_tail_chunk_id + 1))))
+                kv_with_q_tail_nomask_seqlens.append(chunk_len *
+                                                     q_tail_chunk_id)
+
+                q_req_offset += seq_len
+                kv_req_offset += seq_len * self.cp_size
+
+            # Convert lists to tensors and move to device
+            def _list_to_tensor(lst, device, dtype=torch.int32):
+                tensor_npu = torch.zeros(len(lst), dtype=dtype, device=device)
+                tensor_npu.copy_(torch.tensor(lst, dtype=dtype),
+                                 non_blocking=True)
+                return tensor_npu
+
+            q_head_idx_tensor = _list_to_tensor(q_head_idx, self.device)
+            q_tail_idx_tensor = _list_to_tensor(q_tail_idx, self.device)
+            self.q_head_idx_tensor = q_head_idx_tensor
+            self.q_tail_idx_tensor = q_tail_idx_tensor
+
+            q_full_idx = torch.cat([q_head_idx_tensor, q_tail_idx_tensor])
+            q_full_idx = q_full_idx.to(torch.float32).argsort().to(torch.int32)
+            self.q_full_idx = q_full_idx
+
+            self.kv_idx_names = {
+                'kv_with_q_head_nomask_idx_tensor': kv_with_q_head_nomask_idx,
+                'kv_with_q_head_mask_idx_tensor': kv_with_q_head_mask_idx,
+                'kv_with_q_tail_nomask_idx_tensor': kv_with_q_tail_nomask_idx,
+                'kv_with_q_tail_mask_idx_tensor': kv_with_q_tail_mask_idx
+            }
+            for key, value in self.kv_idx_names.items():
+                tensor_npu = _list_to_tensor(value, self.device)
+                self.kv_idx_names[key] = tensor_npu
+
+            attn_mask_seqlens = torch.tensor([chunk_seqlens, chunk_seqlens],
+                                             dtype=torch.int32)
+            head_attn_nomask_seqlens = torch.tensor(
+                [chunk_seqlens, kv_with_q_head_nomask_seqlens],
+                dtype=torch.int32)
+            tail_attn_nomask_seqlens = torch.tensor(
+                [chunk_seqlens, kv_with_q_tail_nomask_seqlens],
+                dtype=torch.int32)
+            if self.vllm_config.model_config.use_mla:
+                cp_prefill_mask = torch.triu(
+                    torch.ones(512, 512, device=self.device, dtype=self.dtype),
+                    1)
+            else:
+                max_seq_len = max(seq_lens, default=0)
+                cp_prefill_mask = torch.triu(
+                    torch.full((seq_lens.shape[0], max_seq_len, max_seq_len),
+                               True,
+                               device=self.device,
+                               dtype=torch.bool), 1)
+
+            self.extra_long_seq_kwargs = {
+                'attn_mask_seqlens': attn_mask_seqlens,
+                'head_attn_nomask_seqlens': head_attn_nomask_seqlens,
+                'tail_attn_nomask_seqlens': tail_attn_nomask_seqlens,
+                'cp_prefill_mask': cp_prefill_mask
+            }
+            long_seq_metadata = AscendCommonLongSequenceMetadata(
+                cp_kv_recover_idx=self.cp_kv_recover_idx,
+                num_actual_tokens_cp_full=num_actual_tokens_cp_full,
+                num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
+                    self.input_batch.num_computed_tokens_cpu[:self.input_batch.num_reqs]),
+                q_head_idx_tensor=self.q_head_idx_tensor,
+                q_tail_idx_tensor=self.q_tail_idx_tensor,
+                q_full_idx=self.q_full_idx,
+                kv_with_q_head_nomask_idx_tensor=self.
+                                             kv_idx_names['kv_with_q_head_nomask_idx_tensor'],
+                kv_with_q_head_mask_idx_tensor=self.
+                                             kv_idx_names['kv_with_q_head_mask_idx_tensor'],
+                kv_with_q_tail_nomask_idx_tensor=self.
+                                             kv_idx_names['kv_with_q_tail_nomask_idx_tensor'],
+                kv_with_q_tail_mask_idx_tensor=self.
+                                             kv_idx_names['kv_with_q_tail_mask_idx_tensor'],
+                attn_mask_seqlens=self.
+                                             extra_long_seq_kwargs['attn_mask_seqlens'],
+                head_attn_nomask_seqlens=self.
+                                             extra_long_seq_kwargs['head_attn_nomask_seqlens'],
+                tail_attn_nomask_seqlens=self.
+                                             extra_long_seq_kwargs['tail_attn_nomask_seqlens'],
+                cp_prefill_mask=self.extra_long_seq_kwargs['cp_prefill_mask'])
+        else:
+            long_seq_metadata = AscendCommonLongSequenceMetadata(
+                num_actual_tokens_cp_full=num_actual_tokens_cp_full,
+                num_computed_tokens_of_cp_sp=self.input_batch.block_table.split_computed_tokens(
+                    self.input_batch.num_computed_tokens_cpu[:self.input_batch.num_reqs]),)
+
+        return long_seq_metadata
+
     def _get_cumsum_and_arange(
         self,
         num_tokens: np.ndarray,
@@ -1556,9 +1717,12 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             # We will ignore the sampled tokens from the partial requests.
             # TODO: Support prompt logprobs.
             spec_decode_metadata = None
-            logits_indices = torch.from_numpy(cu_num_tokens - 1).to(
+            logits_indices = self._update_logits_indices_for_cp(cu_num_tokens, scheduler_output)
+            logits_indices = torch.from_numpy(logits_indices).to(
                 self.device, non_blocking=True)
         else:
+            # cp not supported now
+            assert self.cp_size == 1
             # Get the number of draft tokens for each request.
             # Iterate over the dictionary rather than all requests since not all
             # requests have draft tokens.
@@ -1586,6 +1750,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             self.num_accepted_tokens.np[num_reqs:].fill(1)
             self.num_accepted_tokens.copy_to_gpu()
 
+        # prepare cp meta data
+        long_seq_metadata = self._generate_cp_metadata(total_num_scheduled_tokens, seq_lens_cpu, scheduler_output)
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         for kv_cache_group_id, kv_cache_group_spec in enumerate(
@@ -1621,6 +1787,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 max_query_len=max_num_scheduled_tokens,
                 graph_pad_size=self.graph_pad_size,
                 decode_token_per_req=self.decode_token_per_req,
+                common_long_seq_metadata=long_seq_metadata,
             )
 
             if self.speculative_config and \
@@ -1693,6 +1860,10 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             pad_size = get_forward_context().pad_size
             if pad_size > 0:
                 hidden_states = hidden_states[:-pad_size, :]
+        if self.cp_size > 1 and with_prefill:
+            hidden_states = get_cp_group().all_gather(hidden_states, 0)
+            hidden_states = torch.index_select(
+                hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
         return hidden_states
 
     def _build_attn_state(self, num_reqs, num_scheduled_tokens,
