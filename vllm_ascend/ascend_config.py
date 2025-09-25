@@ -16,7 +16,6 @@
 from typing import Optional
 
 from vllm.logger import logger
-from vllm.distributed import get_dcp_group
 
 TORCHAIR_MODEL_LIST = ["deepseek", "pangu", "kimi_k2", "qwen"]
 
@@ -61,8 +60,7 @@ class AscendConfig:
             "chunked_prefill_for_mla", False)
         self.enable_shared_expert_dp = additional_config.get(
             "enable_shared_expert_dp", False
-        ) and not self.torchair_graph_config.enabled and vllm_config.parallel_config.enable_expert_parallel \
-          and not get_dcp_group().world_size > 1
+        ) and not self.torchair_graph_config.enabled and vllm_config.parallel_config.enable_expert_parallel
         self.multistream_overlap_shared_expert = additional_config.get(
             "multistream_overlap_shared_expert", False)
         self.enable_prefetch = additional_config.get("enable_prefetch", False)
