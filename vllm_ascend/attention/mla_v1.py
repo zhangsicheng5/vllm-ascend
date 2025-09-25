@@ -122,6 +122,8 @@ class AscendMLADecodeMetadata:
     attn_mask: Optional[torch.Tensor] = None
     sin: torch.Tensor = None
     cos: torch.Tensor = None
+    num_computed_tokens_of_cp_sp: Optional[list[Optional[list[Optional[
+        list[int]]]]]] = None
 
 
 @dataclass
@@ -464,7 +466,8 @@ class AscendMLAMetadataBuilder:
                 attn_mask=common_attn_metadata.spec_attn_mask,
                 actual_seq_lengths_q=actual_seq_lengths_q,
                 sin=sin,
-                cos=cos)
+                cos=cos,
+                num_computed_tokens_of_cp_sp=num_computed_tokens_of_cp_sp)
 
         return self.metadata_cls(  # type: ignore
             num_actual_tokens=num_actual_tokens,
