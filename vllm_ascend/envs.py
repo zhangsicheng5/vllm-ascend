@@ -159,6 +159,9 @@ env_variables: Dict[str, Callable[[], Any]] = {
     # caused by the initialization of the Mooncake connector.
     "PHYSICAL_DEVICES":
     lambda: os.getenv("PHYSICAL_DEVICES", None),
+    # Decide whether we should enable CP parallelism.
+    "VLLM_ASCEND_ENABLE_CP":
+    lambda: bool(int(os.getenv("VLLM_ASCEND_ENABLE_CP", '0')))
 }
 
 # end-env-vars-definition

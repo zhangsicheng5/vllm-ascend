@@ -17,10 +17,7 @@ from vllm.distributed import (get_tensor_model_parallel_rank,
                               get_tp_group,
                               get_decode_context_model_parallel_rank,
                               get_decode_context_model_parallel_world_size,
-                              get_dcp_group,
-                              get_context_model_parallel_rank,
-                              get_context_model_parallel_world_size,
-                              get_cp_group)
+                              get_dcp_group)
 from vllm.model_executor.layers.linear import (LinearBase,
                                                UnquantizedLinearMethod)
 from vllm.utils import cdiv, round_down
@@ -35,9 +32,13 @@ from vllm_ascend.attention.utils import (AscendCommonAttentionMetadata,
 from vllm_ascend.multistream.base import MSAttentionMetadataSplitConfig
 from vllm_ascend.multistream.context import get_multistream_comm_context
 from vllm_ascend.multistream.ms_split import model_input_split_v1_mla_attn
-from vllm_ascend.utils import npu_prefetch
+from vllm_ascend.utils import npu_prefetch, context_parallel_enable
 from vllm_ascend.worker.npu_input_batch import InputBatch
 
+if context_parallel_enable():
+    from vllm.distributed import (get_context_model_parallel_rank,
+                                  get_context_model_parallel_world_size,
+                                  get_cp_group)
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
 
@@ -559,7 +560,8 @@ class AscendMLAImpl(MLAAttentionImpl):
 
         self.speculative_config = vllm_config.speculative_config
 
-        self.cp_size = get_context_model_parallel_world_size()
+        self.cp_size = get_context_model_parallel_world_size(
+        ) if context_parallel_enable() else 1
         self.cp_rank = get_context_model_parallel_rank(
         ) if self.cp_size > 1 else 0
         self.cp_group = get_cp_group(

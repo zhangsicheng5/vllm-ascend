@@ -2,8 +2,13 @@ from typing import Optional, Union
 
 import numpy as np
 import torch
-from vllm.distributed import get_dcp_group, get_cp_group
+from vllm.distributed import get_dcp_group
 from vllm.utils import cdiv
+
+from vllm_ascend.utils import context_parallel_enable
+
+if context_parallel_enable():
+    from vllm.distributed import get_cp_group
 
 
 class BlockTable:
@@ -80,8 +85,8 @@ class BlockTable:
                                         dtype=torch.int64,
                                         device=self.device)
         try:
-            self.cp_world_size = get_cp_group().world_size
-            self.cp_rank = get_cp_group().rank_in_group
+            self.cp_world_size = get_cp_group().world_size if context_parallel_enable() else 1
+            self.cp_rank = get_cp_group().rank_in_group if self.cp_world_size > 1 else 0
             self.dcp_world_size = get_dcp_group().world_size
             self.dcp_rank = get_dcp_group().rank_in_group
         except AssertionError:

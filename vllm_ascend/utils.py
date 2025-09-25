@@ -598,6 +598,10 @@ def enable_sp() -> bool:
         or envs_ascend.VLLM_ASCEND_ENABLE_FLASHCOMM)
 
 
+def context_parallel_enable() -> bool:
+    return envs_ascend.VLLM_ASCEND_ENABLE_CP
+
+
 def is_moe_model(vllm_config: VllmConfig):
     config = vllm_config.model_config.hf_config
     return any('experts' in key.lower() for key in config.to_dict())
