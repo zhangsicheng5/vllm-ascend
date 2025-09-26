@@ -316,6 +316,8 @@ class MultiGroupBlockTable:
 
     def get_split_computed_tokens(self, num_computed_tokens: np.ndarray) -> list[list[list[int]]]:
         "Splits computed token counts across dcp and sp dimensions for distributed allocation."
+        self.cp_world_size = get_cp_group().world_size if context_parallel_enable() else 1
+        self.dcp_world_size = get_dcp_group().world_size
         num_requests = len(num_computed_tokens)
         num_computed_tokens_of_dcp_sp = [[
             [0] * self.dcp_world_size for _ in range(self.cp_world_size)

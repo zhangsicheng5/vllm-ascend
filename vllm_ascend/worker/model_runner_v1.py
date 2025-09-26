@@ -49,7 +49,7 @@ from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
 from vllm.distributed.parallel_state import (get_dp_group, get_pp_group,
-                                             get_tp_group,
+                                             get_tp_group, get_dcp_group,
                                              is_global_first_rank)
 from vllm.forward_context import BatchDescriptor, get_forward_context
 from vllm.logger import logger
@@ -267,6 +267,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         ) if context_parallel_enable() else 1
         self.cp_rank = get_context_model_parallel_rank(
         ) if self.cp_size > 1 else 0
+        self.dcp_size = get_dcp_group().world_size
+        self.dcp_rank = get_dcp_group().rank_in_group
         self.device = device
         if envs_ascend.VLLM_ASCEND_ENABLE_PREFETCH_MLP:
             self.prefetch_stream = torch.npu.Stream(device=device)
@@ -1138,8 +1140,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                                                        )  # pad to 2*cp_size
         cp_pad = num_cp_padded_scheduled_tokens - num_scheduled_tokens  # 给sample用
         full_indices = list(
-            range(self.max_num_tokens * self.cp_size * self.sp_size +
-                  self.cp_size * self.sp_size * self.max_num_reqs))
+            range(self.max_num_tokens * self.cp_size * self.dcp_size +
+                  self.cp_size * self.dcp_size * self.max_num_reqs))
         chunk_size = num_cp_padded_scheduled_tokens // (2 * self.cp_size)
 
         # split position_ids (and use split position_ids to split input_ids afterwards)
@@ -1563,7 +1565,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                                              original_num_scheduled_tokens)
             _, original_arange = self._get_cumsum_and_arange(
                 original_num_scheduled_tokens)
-            original_positions_np = self.positions_np[:original_total_num_scheduled_tokens]
+            original_positions_np = self.positions_np[:original_total_num_scheduled_tokens].copy()
             np.add(self.input_batch.num_computed_tokens_cpu[req_indices],
                    self.position_cp[:total_num_scheduled_tokens],
                    out=positions_np)
@@ -1858,15 +1860,14 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             update_attn_params(self.update_stream, forward_context,
                                positions.shape[0])
 
-        if get_forward_context().sp_enabled:
-            hidden_states = tensor_model_parallel_all_gather(hidden_states, 0)
-            pad_size = get_forward_context().pad_size
-            if pad_size > 0:
-                hidden_states = hidden_states[:-pad_size, :]
         if self.cp_size > 1 and with_prefill:
+            if isinstance(attn_metadata, dict):
+                cp_kv_recover_idx = list(attn_metadata.values())[0].prefill.cp_kv_recover_idx
+            else:
+                cp_kv_recover_idx = attn_metadata.prefill.cp_kv_recover_idx
             hidden_states = get_cp_group().all_gather(hidden_states, 0)
             hidden_states = torch.index_select(
-                hidden_states, 0, attn_metadata.prefill.cp_kv_recover_idx)
+                hidden_states, 0, cp_kv_recover_idx)
         return hidden_states
 
     def _build_attn_state(self, num_reqs, num_scheduled_tokens,

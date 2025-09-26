@@ -342,13 +342,13 @@ class AscendMLAMetadataBuilder:
         device = self.device
 
         block_table = (common_attn_metadata.block_table_tensor[:num_reqs])
-        if num_actual_tokens_cp_full is not None:
-            num_actual_tokens = num_actual_tokens_cp_full
-
-        slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens]
         input_positions = common_attn_metadata.positions[:
                                                          num_actual_tokens].long(
-                                                         )
+        )
+        if num_actual_tokens_cp_full is None:
+            num_actual_tokens_cp_full = num_actual_tokens
+
+        slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens_cp_full]
 
         if self.cos_cache is None:
             self.cos_cache = model.model.layers[
