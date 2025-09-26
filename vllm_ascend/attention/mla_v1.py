@@ -1408,6 +1408,7 @@ class AscendMLAImpl(MLAAttentionImpl):
 
 # TODO use update op to replace this
     def _update_out_and_lse(
+        self,
         out: torch.Tensor,
         lse: torch.Tensor,
         block_out: torch.Tensor,

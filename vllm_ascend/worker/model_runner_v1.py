@@ -1356,8 +1356,8 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             else:
                 long_seq_metadata = AscendCommonLongSequenceMetadata(
                     num_actual_tokens_cp_full=num_actual_tokens_cp_full,
-                    num_computed_tokens_of_cp_sp=self.input_batch.block_table.split_computed_tokens(
-                        self.input_batch.num_computed_tokens_cpu[:self.input_batch.num_reqs]),)
+                    num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
+                        self.input_batch.num_tokens[:self.input_batch.num_reqs]), )
         else:
             long_seq_metadata = None
             
@@ -1757,6 +1757,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
 
         # prepare cp meta data
         long_seq_metadata = self._generate_cp_metadata(total_num_scheduled_tokens, seq_lens_cpu, scheduler_output)
+        original_total_num_scheduled_tokens = sum(original_num_scheduled_tokens[:num_reqs])
         # Prepare the attention metadata for each KV cache group and make layers
         # in the same group share the same metadata.
         for kv_cache_group_id, kv_cache_group_spec in enumerate(
@@ -1764,9 +1765,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             blk_table = self.input_batch.block_table[kv_cache_group_id]
             blk_table_tensor = blk_table.get_device_tensor()
             slot_mapping = blk_table.slot_mapping_cpu[:
-                                                      total_num_scheduled_tokens]
-            self.slot_mapping[:total_num_scheduled_tokens].copy_(
-                slot_mapping[:total_num_scheduled_tokens],
+                                                      original_total_num_scheduled_tokens]
+            self.slot_mapping[:original_total_num_scheduled_tokens].copy_(
+                slot_mapping[:original_total_num_scheduled_tokens],
                 non_blocking=True,
             )
 
@@ -2369,7 +2370,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 max_gen_len = sampled_token_ids.shape[-1]
                 if max_gen_len == 1:
                     # No spec decode tokens.
-                    valid_sampled_token_ids = self._to_list(sampled_token_ids)
+                    valid_sampled_token_ids = sampled_token_ids.tolist()
                 else:
                     # Includes spec decode tokens.
                     valid_sampled_token_ids = self.rejection_sampler.parse_output(
@@ -3821,18 +3822,3 @@ class NPUModelRunner(LoRAModelRunnerMixin):
 
     def _build_drafter_prepare_inputs_torchair_param(self):
         return False
-
-    def _to_list(self, sampled_token_ids: torch.Tensor) -> list[list[int]]:
-        # This is a short term mitigation for issue mentioned in
-        # https://github.com/vllm-project/vllm/issues/22754.
-        # `tolist` would trigger a npu wise stream sync, which
-        # would block other copy ops from other npu streams.
-        # A npu event sync would avoid such a situation. Since
-        # this is in the critical path of every single model
-        # forward loop, this has caused perf issue for a disagg
-        # setup.
-        pinned = self.sampled_token_ids_pinned_cpu[:sampled_token_ids.shape[0]]
-        pinned.copy_(sampled_token_ids, non_blocking=True)
-        self.transfer_event.record()
-        self.transfer_event.synchronize()
-        return pinned.tolist()
