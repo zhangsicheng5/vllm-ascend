@@ -260,9 +260,11 @@ class MultiGroupBlockTable:
         # must be multiplied by dcp_world_size.
         try:
             dcp_world_size = get_dcp_group().world_size
+            cp_world_size = get_cp_group().world_size
         except AssertionError:
             # DCP might not be initialized in testing
             dcp_world_size = 1
+            cp_world_size = 1
 
         if kernel_sizes is None:
             kernel_sizes = [[0]] * len(block_sizes)
@@ -278,7 +280,7 @@ class MultiGroupBlockTable:
         self.block_tables = [
             BlockTable(
                 block_size, max_num_reqs,
-                max(cdiv(max_model_len, block_size * dcp_world_size),
+                max(cdiv(max_model_len, block_size * dcp_world_size * cp_world_size),
                     1 + num_speculative_tokens), max_num_batched_tokens,
                 pin_memory, device, kernel_size_list)
             for block_size, kernel_size_list in zip(block_sizes, kernel_sizes)
