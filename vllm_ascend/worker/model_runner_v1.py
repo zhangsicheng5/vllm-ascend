@@ -1131,236 +1131,6 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 mm_embeds.append(mm_embeds_item)
         return mm_embeds
 
-    def _num_scheduled_tokens_prefill_cp(self, num_tokens,
-                                         num_computed_tokens,
-                                         cp_kv_recover_idx):
-        num_scheduled_tokens = num_tokens - num_computed_tokens
-        num_cp_padded_scheduled_tokens = cdiv(
-            num_scheduled_tokens, 2 * self.cp_size) * (2 * self.cp_size
-                                                       )  # pad to 2*cp_size
-        cp_pad = num_cp_padded_scheduled_tokens - num_scheduled_tokens  # 给sample用
-        full_indices = list(
-            range(self.max_num_tokens * self.cp_size * self.dcp_size +
-                  self.cp_size * self.dcp_size * self.max_num_reqs))
-        chunk_size = num_cp_padded_scheduled_tokens // (2 * self.cp_size)
-
-        # split position_ids (and use split position_ids to split input_ids afterwards)
-        req_position_cp = []
-        req_position_cp.extend(
-            full_indices[self.cp_rank * chunk_size:(self.cp_rank + 1) *
-                                                   chunk_size])
-        req_position_cp.extend(
-            full_indices[num_cp_padded_scheduled_tokens - (self.cp_rank + 1) *
-                         chunk_size:num_cp_padded_scheduled_tokens -
-                                    self.cp_rank * chunk_size])
-
-        # used to recover kv order in cp prefill (after all-gather kv and before storing kv_cache)
-        num_added_recover_tokens = len(cp_kv_recover_idx[0]) * self.cp_size
-        for rank in range(self.cp_size):
-            cp_kv_recover_idx[rank].extend(
-                full_indices[rank * chunk_size +
-                             num_added_recover_tokens:(rank + 1) * chunk_size +
-                                                      num_added_recover_tokens])
-            cp_kv_recover_idx[rank].extend(full_indices[
-                                           num_cp_padded_scheduled_tokens - (rank + 1) * chunk_size +
-                                           num_added_recover_tokens:num_cp_padded_scheduled_tokens -
-                                                                    rank * chunk_size + num_added_recover_tokens])
-
-        return req_position_cp, num_cp_padded_scheduled_tokens, cp_pad
-
-    def _update_tokens_for_cp(self, tokens, scheduler_output: "SchedulerOutput"):
-        if not self.cp_size > 1:
-            return tokens
-        num_reqs = self.input_batch.num_reqs
-        self.num_cp_pads = np.empty(num_reqs, dtype=np.int32)
-        self.cp_kv_recover_idx: List[List[int]] = [[]
-                                              for _ in range(self.cp_size)
-                                              ]
-        self.position_cp = np.zeros(self.max_num_tokens, dtype=np.int32)
-        start_index = 0
-
-        for i, req_id in enumerate(self.input_batch.req_ids):
-            num_tokens = scheduler_output.num_scheduled_tokens[req_id]
-            is_prefill = num_tokens > 1  # todo: compare num prompt tokens and num tokens
-            if is_prefill:
-                # when cp > 1 & prefill, need to pad & split sequence here
-                req_position_cp, num_cp_padded_scheduled_tokens, self.num_cp_pads[
-                    i] = self._num_scheduled_tokens_prefill_cp(
-                    num_tokens,
-                    self.input_batch.num_computed_tokens_cpu[i],
-                    self.cp_kv_recover_idx)
-                num_tokens = len(req_position_cp)
-                self.position_cp[start_index:start_index +
-                                             num_tokens] = req_position_cp
-                start_index += num_tokens
-                tokens[i] = num_tokens
-            else:
-                self.num_cp_pads[i] = 0
-                self.position_cp[start_index:start_index +
-                                             num_tokens] = [idx for idx in range(num_tokens)]
-                start_index += num_tokens
-        return tokens
-
-    def _update_logits_indices_for_cp(self, cu_num_tokens, scheduler_output: "SchedulerOutput"):
-        # todo: find a better way to get is_prefill
-        is_prefill = list(
-            scheduler_output.num_scheduled_tokens.values())[0] > 1
-        num_reqs = self.input_batch.num_reqs
-        if self.cp_size > 1 and is_prefill:
-            # logits_indices = cu_num_tokens - num_cp_pads[:num_reqs] - 1 # if without all-gather and only sample on cp0
-            logits_indices = cu_num_tokens * self.cp_size - self.num_cp_pads[:
-                                                                        num_reqs] - 1
-        else:
-            logits_indices = cu_num_tokens - 1
-        return logits_indices
-
-    def _generate_cp_metadata(self, total_num_scheduled_tokens, seq_lens, scheduler_output: "SchedulerOutput"):
-        # TODO: find a better way to get is_prefill
-        is_prefill = list(
-            scheduler_output.num_scheduled_tokens.values())[0] > 1
-        num_actual_tokens_cp_full = total_num_scheduled_tokens * (
-            self.cp_size if is_prefill > 0 else 1)
-        long_seq_metadata = None
-        if self.cp_size > 1 and is_prefill > 0:
-            cp_kv_recover_idx = torch.zeros(num_actual_tokens_cp_full,
-                                            dtype=torch.int32,
-                                            device=self.device)
-            cp_kv_recover_idx.copy_(torch.tensor(
-                np.array(self.cp_kv_recover_idx).flatten().tolist()),
-                non_blocking=True)
-            self.cp_kv_recover_idx = cp_kv_recover_idx.to(
-                torch.float32).argsort().to(torch.int32)
-
-            q_head_idx, q_tail_idx = [], []
-            kv_with_q_head_nomask_idx, kv_with_q_head_mask_idx = [], []
-            kv_with_q_tail_nomask_idx, kv_with_q_tail_mask_idx = [], []
-            chunk_seqlens = []
-            kv_with_q_head_nomask_seqlens, kv_with_q_tail_nomask_seqlens = [], []
-            q_req_offset = 0
-            kv_req_offset = 0
-            q_head_chunk_id = self.cp_rank
-            q_tail_chunk_id = self.cp_size * 2 - 1 - self.cp_rank
-            for seq_len in seq_lens:
-                chunk_len = seq_len // 2
-                chunk_seqlens.append(chunk_len)
-                q_head_idx.extend(
-                    list(range(q_req_offset, q_req_offset + chunk_len)))
-                kv_with_q_head_nomask_idx.extend(
-                    list(
-                        range(kv_req_offset,
-                              kv_req_offset + chunk_len * q_head_chunk_id)))
-                kv_with_q_head_mask_idx.extend(
-                    list(
-                        range(
-                            kv_req_offset + chunk_len * q_head_chunk_id,
-                            kv_req_offset + chunk_len *
-                            (q_head_chunk_id + 1))))
-                kv_with_q_head_nomask_seqlens.append(chunk_len *
-                                                     q_head_chunk_id)
-
-                q_tail_idx.extend(
-                    list(
-                        range(q_req_offset + chunk_len,
-                              q_req_offset + chunk_len * 2)))
-                kv_with_q_tail_nomask_idx.extend(
-                    list(
-                        range(kv_req_offset,
-                              kv_req_offset + chunk_len * q_tail_chunk_id)))
-                kv_with_q_tail_mask_idx.extend(
-                    list(
-                        range(
-                            kv_req_offset + chunk_len * q_tail_chunk_id,
-                            kv_req_offset + chunk_len *
-                            (q_tail_chunk_id + 1))))
-                kv_with_q_tail_nomask_seqlens.append(chunk_len *
-                                                     q_tail_chunk_id)
-
-                q_req_offset += seq_len
-                kv_req_offset += seq_len * self.cp_size
-
-            # Convert lists to tensors and move to device
-            def _list_to_tensor(lst, device, dtype=torch.int32):
-                tensor_npu = torch.zeros(len(lst), dtype=dtype, device=device)
-                tensor_npu.copy_(torch.tensor(lst, dtype=dtype),
-                                 non_blocking=True)
-                return tensor_npu
-
-            q_head_idx_tensor = _list_to_tensor(q_head_idx, self.device)
-            q_tail_idx_tensor = _list_to_tensor(q_tail_idx, self.device)
-            self.q_head_idx_tensor = q_head_idx_tensor
-            self.q_tail_idx_tensor = q_tail_idx_tensor
-
-            q_full_idx = torch.cat([q_head_idx_tensor, q_tail_idx_tensor])
-            q_full_idx = q_full_idx.to(torch.float32).argsort().to(torch.int32)
-            self.q_full_idx = q_full_idx
-
-            self.kv_idx_names = {
-                'kv_with_q_head_nomask_idx_tensor': kv_with_q_head_nomask_idx,
-                'kv_with_q_head_mask_idx_tensor': kv_with_q_head_mask_idx,
-                'kv_with_q_tail_nomask_idx_tensor': kv_with_q_tail_nomask_idx,
-                'kv_with_q_tail_mask_idx_tensor': kv_with_q_tail_mask_idx
-            }
-            for key, value in self.kv_idx_names.items():
-                tensor_npu = _list_to_tensor(value, self.device)
-                self.kv_idx_names[key] = tensor_npu
-
-            attn_mask_seqlens = torch.tensor([chunk_seqlens, chunk_seqlens],
-                                             dtype=torch.int32)
-            head_attn_nomask_seqlens = torch.tensor(
-                [chunk_seqlens, kv_with_q_head_nomask_seqlens],
-                dtype=torch.int32)
-            tail_attn_nomask_seqlens = torch.tensor(
-                [chunk_seqlens, kv_with_q_tail_nomask_seqlens],
-                dtype=torch.int32)
-            if self.vllm_config.model_config.use_mla:
-                cp_prefill_mask = torch.triu(
-                    torch.ones(512, 512, device=self.device, dtype=self.dtype),
-                    1)
-            else:
-                max_seq_len = max(seq_lens, default=0)
-                cp_prefill_mask = torch.triu(
-                    torch.full((seq_lens.shape[0], max_seq_len, max_seq_len),
-                               True,
-                               device=self.device,
-                               dtype=torch.bool), 1)
-
-            self.extra_long_seq_kwargs = {
-                'attn_mask_seqlens': attn_mask_seqlens,
-                'head_attn_nomask_seqlens': head_attn_nomask_seqlens,
-                'tail_attn_nomask_seqlens': tail_attn_nomask_seqlens,
-                'cp_prefill_mask': cp_prefill_mask
-            }
-            long_seq_metadata = AscendCommonLongSequenceMetadata(
-                cp_kv_recover_idx=self.cp_kv_recover_idx,
-                num_actual_tokens_cp_full=num_actual_tokens_cp_full,
-                num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
-                    self.input_batch.num_computed_tokens_cpu[:self.input_batch.num_reqs]),
-                q_head_idx_tensor=self.q_head_idx_tensor,
-                q_tail_idx_tensor=self.q_tail_idx_tensor,
-                q_full_idx=self.q_full_idx,
-                kv_with_q_head_nomask_idx_tensor=self.
-                kv_idx_names['kv_with_q_head_nomask_idx_tensor'],
-                kv_with_q_head_mask_idx_tensor=self.
-                kv_idx_names['kv_with_q_head_mask_idx_tensor'],
-                kv_with_q_tail_nomask_idx_tensor=self.
-                kv_idx_names['kv_with_q_tail_nomask_idx_tensor'],
-                kv_with_q_tail_mask_idx_tensor=self.
-                kv_idx_names['kv_with_q_tail_mask_idx_tensor'],
-                attn_mask_seqlens=self.
-                extra_long_seq_kwargs['attn_mask_seqlens'],
-                head_attn_nomask_seqlens=self.
-                extra_long_seq_kwargs['head_attn_nomask_seqlens'],
-                tail_attn_nomask_seqlens=self.
-                extra_long_seq_kwargs['tail_attn_nomask_seqlens'],
-                cp_prefill_mask=self.extra_long_seq_kwargs['cp_prefill_mask'])
-        else:
-            long_seq_metadata = AscendCommonLongSequenceMetadata(
-                num_actual_tokens_cp_full=num_actual_tokens_cp_full,
-                num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
-                    self.input_batch.num_tokens[:self.input_batch.num_reqs]), )
-
-        return long_seq_metadata
-
     def _get_cumsum_and_arange(
         self,
         num_tokens: np.ndarray,
@@ -3820,3 +3590,231 @@ class NPUModelRunner(LoRAModelRunnerMixin):
 
     def _build_drafter_prepare_inputs_torchair_param(self):
         return False
+
+    def _num_scheduled_tokens_prefill_cp(self, num_tokens,
+                                         num_computed_tokens,
+                                         cp_kv_recover_idx):
+        num_scheduled_tokens = num_tokens - num_computed_tokens
+        num_cp_padded_scheduled_tokens = cdiv(
+            num_scheduled_tokens, 2 * self.cp_size) * (2 * self.cp_size
+                                                       )  # pad to 2*cp_size
+        cp_pad = num_cp_padded_scheduled_tokens - num_scheduled_tokens  # 给sample用
+        full_indices = list(
+            range(self.max_num_tokens * self.cp_size * self.dcp_size +
+                  self.cp_size * self.dcp_size * self.max_num_reqs))
+        chunk_size = num_cp_padded_scheduled_tokens // (2 * self.cp_size)
+
+        # split position_ids (and use split position_ids to split input_ids afterwards)
+        req_position_cp = []
+        req_position_cp.extend(
+            full_indices[self.cp_rank * chunk_size:(self.cp_rank + 1) *
+                                                   chunk_size])
+        req_position_cp.extend(
+            full_indices[num_cp_padded_scheduled_tokens - (self.cp_rank + 1) *
+                         chunk_size:num_cp_padded_scheduled_tokens -
+                                    self.cp_rank * chunk_size])
+
+        # used to recover kv order in cp prefill (after all-gather kv and before storing kv_cache)
+        num_added_recover_tokens = len(cp_kv_recover_idx[0]) * self.cp_size
+        for rank in range(self.cp_size):
+            cp_kv_recover_idx[rank].extend(
+                full_indices[rank * chunk_size +
+                             num_added_recover_tokens:(rank + 1) * chunk_size +
+                                                      num_added_recover_tokens])
+            cp_kv_recover_idx[rank].extend(full_indices[
+                                           num_cp_padded_scheduled_tokens - (rank + 1) * chunk_size +
+                                           num_added_recover_tokens:num_cp_padded_scheduled_tokens -
+                                                                    rank * chunk_size + num_added_recover_tokens])
+
+        return req_position_cp, num_cp_padded_scheduled_tokens, cp_pad
+
+    def _update_tokens_for_cp(self, tokens, scheduler_output: "SchedulerOutput"):
+        if not self.cp_size > 1:
+            return tokens
+        num_reqs = self.input_batch.num_reqs
+        self.num_cp_pads = np.empty(num_reqs, dtype=np.int32)
+        self.cp_kv_recover_idx: List[List[int]] = [[]
+                                              for _ in range(self.cp_size)
+                                              ]
+        self.position_cp = np.zeros(self.max_num_tokens, dtype=np.int32)
+        start_index = 0
+
+        for i, req_id in enumerate(self.input_batch.req_ids):
+            num_tokens = scheduler_output.num_scheduled_tokens[req_id]
+            is_prefill = num_tokens > 1
+            if is_prefill:
+                # when cp > 1 & prefill, need to pad & split sequence here
+                req_position_cp, num_cp_padded_scheduled_tokens, self.num_cp_pads[
+                    i] = self._num_scheduled_tokens_prefill_cp(
+                    num_tokens,
+                    self.input_batch.num_computed_tokens_cpu[i],
+                    self.cp_kv_recover_idx)
+                num_tokens = len(req_position_cp)
+                self.position_cp[start_index:start_index +
+                                             num_tokens] = req_position_cp
+                start_index += num_tokens
+                tokens[i] = num_tokens
+            else:
+                self.num_cp_pads[i] = 0
+                self.position_cp[start_index:start_index +
+                                             num_tokens] = [idx for idx in range(num_tokens)]
+                start_index += num_tokens
+        return tokens
+
+    def _update_logits_indices_for_cp(self, cu_num_tokens, scheduler_output: "SchedulerOutput"):
+        is_prefill = list(
+            scheduler_output.num_scheduled_tokens.values())[0] > 1
+        num_reqs = self.input_batch.num_reqs
+        if self.cp_size > 1 and is_prefill:
+            # logits_indices = cu_num_tokens - num_cp_pads[:num_reqs] - 1 # if without all-gather and only sample on cp0
+            logits_indices = cu_num_tokens * self.cp_size - self.num_cp_pads[:
+                                                                        num_reqs] - 1
+        else:
+            logits_indices = cu_num_tokens - 1
+        return logits_indices
+
+    def _generate_cp_metadata(self, total_num_scheduled_tokens, seq_lens, scheduler_output: "SchedulerOutput"):
+        is_prefill = list(
+            scheduler_output.num_scheduled_tokens.values())[0] > 1
+        num_actual_tokens_cp_full = total_num_scheduled_tokens * (
+            self.cp_size if is_prefill > 0 else 1)
+        long_seq_metadata = None
+        if self.cp_size > 1 and is_prefill > 0:
+            cp_kv_recover_idx = torch.zeros(num_actual_tokens_cp_full,
+                                            dtype=torch.int32,
+                                            device=self.device)
+            cp_kv_recover_idx.copy_(torch.tensor(
+                np.array(self.cp_kv_recover_idx).flatten().tolist()),
+                non_blocking=True)
+            self.cp_kv_recover_idx = cp_kv_recover_idx.to(
+                torch.float32).argsort().to(torch.int32)
+
+            q_head_idx, q_tail_idx = [], []
+            kv_with_q_head_nomask_idx, kv_with_q_head_mask_idx = [], []
+            kv_with_q_tail_nomask_idx, kv_with_q_tail_mask_idx = [], []
+            chunk_seqlens = []
+            kv_with_q_head_nomask_seqlens, kv_with_q_tail_nomask_seqlens = [], []
+            q_req_offset = 0
+            kv_req_offset = 0
+            q_head_chunk_id = self.cp_rank
+            q_tail_chunk_id = self.cp_size * 2 - 1 - self.cp_rank
+            for seq_len in seq_lens:
+                chunk_len = seq_len // 2
+                chunk_seqlens.append(chunk_len)
+                q_head_idx.extend(
+                    list(range(q_req_offset, q_req_offset + chunk_len)))
+                kv_with_q_head_nomask_idx.extend(
+                    list(
+                        range(kv_req_offset,
+                              kv_req_offset + chunk_len * q_head_chunk_id)))
+                kv_with_q_head_mask_idx.extend(
+                    list(
+                        range(
+                            kv_req_offset + chunk_len * q_head_chunk_id,
+                            kv_req_offset + chunk_len *
+                            (q_head_chunk_id + 1))))
+                kv_with_q_head_nomask_seqlens.append(chunk_len *
+                                                     q_head_chunk_id)
+
+                q_tail_idx.extend(
+                    list(
+                        range(q_req_offset + chunk_len,
+                              q_req_offset + chunk_len * 2)))
+                kv_with_q_tail_nomask_idx.extend(
+                    list(
+                        range(kv_req_offset,
+                              kv_req_offset + chunk_len * q_tail_chunk_id)))
+                kv_with_q_tail_mask_idx.extend(
+                    list(
+                        range(
+                            kv_req_offset + chunk_len * q_tail_chunk_id,
+                            kv_req_offset + chunk_len *
+                            (q_tail_chunk_id + 1))))
+                kv_with_q_tail_nomask_seqlens.append(chunk_len *
+                                                     q_tail_chunk_id)
+
+                q_req_offset += seq_len
+                kv_req_offset += seq_len * self.cp_size
+
+            # Convert lists to tensors and move to device
+            def _list_to_tensor(lst, device, dtype=torch.int32):
+                tensor_npu = torch.zeros(len(lst), dtype=dtype, device=device)
+                tensor_npu.copy_(torch.tensor(lst, dtype=dtype),
+                                 non_blocking=True)
+                return tensor_npu
+
+            q_head_idx_tensor = _list_to_tensor(q_head_idx, self.device)
+            q_tail_idx_tensor = _list_to_tensor(q_tail_idx, self.device)
+            self.q_head_idx_tensor = q_head_idx_tensor
+            self.q_tail_idx_tensor = q_tail_idx_tensor
+
+            q_full_idx = torch.cat([q_head_idx_tensor, q_tail_idx_tensor])
+            q_full_idx = q_full_idx.to(torch.float32).argsort().to(torch.int32)
+            self.q_full_idx = q_full_idx
+
+            self.kv_idx_names = {
+                'kv_with_q_head_nomask_idx_tensor': kv_with_q_head_nomask_idx,
+                'kv_with_q_head_mask_idx_tensor': kv_with_q_head_mask_idx,
+                'kv_with_q_tail_nomask_idx_tensor': kv_with_q_tail_nomask_idx,
+                'kv_with_q_tail_mask_idx_tensor': kv_with_q_tail_mask_idx
+            }
+            for key, value in self.kv_idx_names.items():
+                tensor_npu = _list_to_tensor(value, self.device)
+                self.kv_idx_names[key] = tensor_npu
+
+            attn_mask_seqlens = torch.tensor([chunk_seqlens, chunk_seqlens],
+                                             dtype=torch.int32)
+            head_attn_nomask_seqlens = torch.tensor(
+                [chunk_seqlens, kv_with_q_head_nomask_seqlens],
+                dtype=torch.int32)
+            tail_attn_nomask_seqlens = torch.tensor(
+                [chunk_seqlens, kv_with_q_tail_nomask_seqlens],
+                dtype=torch.int32)
+            if self.vllm_config.model_config.use_mla:
+                cp_prefill_mask = torch.triu(
+                    torch.ones(512, 512, device=self.device, dtype=self.dtype),
+                    1)
+            else:
+                max_seq_len = max(seq_lens, default=0)
+                cp_prefill_mask = torch.triu(
+                    torch.full((seq_lens.shape[0], max_seq_len, max_seq_len),
+                               True,
+                               device=self.device,
+                               dtype=torch.bool), 1)
+
+            self.extra_long_seq_kwargs = {
+                'attn_mask_seqlens': attn_mask_seqlens,
+                'head_attn_nomask_seqlens': head_attn_nomask_seqlens,
+                'tail_attn_nomask_seqlens': tail_attn_nomask_seqlens,
+                'cp_prefill_mask': cp_prefill_mask
+            }
+            long_seq_metadata = AscendCommonLongSequenceMetadata(
+                cp_kv_recover_idx=self.cp_kv_recover_idx,
+                num_actual_tokens_cp_full=num_actual_tokens_cp_full,
+                num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
+                    self.input_batch.num_computed_tokens_cpu[:self.input_batch.num_reqs]),
+                q_head_idx_tensor=self.q_head_idx_tensor,
+                q_tail_idx_tensor=self.q_tail_idx_tensor,
+                q_full_idx=self.q_full_idx,
+                kv_with_q_head_nomask_idx_tensor=self.
+                kv_idx_names['kv_with_q_head_nomask_idx_tensor'],
+                kv_with_q_head_mask_idx_tensor=self.
+                kv_idx_names['kv_with_q_head_mask_idx_tensor'],
+                kv_with_q_tail_nomask_idx_tensor=self.
+                kv_idx_names['kv_with_q_tail_nomask_idx_tensor'],
+                kv_with_q_tail_mask_idx_tensor=self.
+                kv_idx_names['kv_with_q_tail_mask_idx_tensor'],
+                attn_mask_seqlens=self.
+                extra_long_seq_kwargs['attn_mask_seqlens'],
+                head_attn_nomask_seqlens=self.
+                extra_long_seq_kwargs['head_attn_nomask_seqlens'],
+                tail_attn_nomask_seqlens=self.
+                extra_long_seq_kwargs['tail_attn_nomask_seqlens'],
+                cp_prefill_mask=self.extra_long_seq_kwargs['cp_prefill_mask'])
+        else:
+            long_seq_metadata = AscendCommonLongSequenceMetadata(
+                num_actual_tokens_cp_full=num_actual_tokens_cp_full,
+                num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
+                    self.input_batch.num_tokens[:self.input_batch.num_reqs]), )
+
+        return long_seq_metadata

@@ -321,7 +321,7 @@ class MultiGroupBlockTable:
         self.cp_world_size = get_cp_group().world_size if context_parallel_enable() else 1
         self.dcp_world_size = get_dcp_group().world_size
         num_requests = len(num_computed_tokens)
-        num_computed_tokens_of_dcp_sp = [[
+        num_computed_tokens_of_cp_dcp = [[
             [0] * self.dcp_world_size for _ in range(self.cp_world_size)
         ] for _ in range(num_requests)]
         total_ranks = self.cp_world_size * self.dcp_world_size
@@ -334,10 +334,10 @@ class MultiGroupBlockTable:
             for rank_idx in range(total_ranks):
                 cp_idx = rank_idx // self.dcp_world_size
                 sp_idx = rank_idx % self.dcp_world_size
-                num_computed_tokens_of_dcp_sp[req_idx][cp_idx][sp_idx] = base
+                num_computed_tokens_of_cp_dcp[req_idx][cp_idx][sp_idx] = base
                 if rank_idx < remainder:
-                    num_computed_tokens_of_dcp_sp[req_idx][cp_idx][sp_idx] += 1
-        return num_computed_tokens_of_dcp_sp
+                    num_computed_tokens_of_cp_dcp[req_idx][cp_idx][sp_idx] += 1
+        return num_computed_tokens_of_cp_dcp
 
     def clear(self) -> None:
         for block_table in self.block_tables:

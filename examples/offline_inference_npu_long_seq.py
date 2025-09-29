@@ -5,6 +5,7 @@ import argparse
 from vllm import LLM, SamplingParams
 
 os.environ["VLLM_USE_MODELSCOPE"] = "True"
+os.environ["VLLM_ASCEND_ENABLE_CP"] = "1"
 os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
 
 if __name__ == "__main__":
@@ -16,7 +17,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_path', type=str, default="deepseek-ai/DeepSeek-V2-Lite")
     parser.add_argument('--tp', type=int, default=2)
     parser.add_argument('--cp', type=int, default=2)
-    parser.add_argument('--dcp', type=int, default=2)
+    parser.add_argument('--dcp', type=int, default=1)
     parser.add_argument('--iter_times', type=int, default=1)
 
     args = parser.parse_args()
@@ -25,7 +26,7 @@ if __name__ == "__main__":
         "The capital of France is",
         "Hello, my name is Tom, I am",
         "The president of United States is",
-        "AI future is? What do you think about it? Can you give me some information or any thing you want?"
+        "AI future is"
     ]
 
     sampling_params = SamplingParams(temperature = 0.8, top_p = 0.95, max_tokens=args.output_len)
@@ -39,9 +40,9 @@ if __name__ == "__main__":
         enable_prefix_caching=False,
         enable_expert_parallel=True,
         enable_chunked_prefill=False,
-        max_num_batched_tokens=args.input_len + 138,
-        max_model_len=args.input_len + args.output_len + 138,
-        additional_config={"ascend_scheduler_config": {"enabled": True}},
+        max_num_batched_tokens=2048,
+        max_model_len=1024,
+        additional_config={"ascend_scheduler_config": {"enabled": False}},
         max_num_seqs=1,
         block_size=128,
         gpu_memory_utilization=0.9

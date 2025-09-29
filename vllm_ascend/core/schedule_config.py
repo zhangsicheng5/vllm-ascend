@@ -19,7 +19,6 @@ from dataclasses import dataclass, fields
 from typing import Type, Union
 
 from vllm.config import SchedulerConfig
-from vllm.distributed import get_dcp_group
 
 
 @dataclass
