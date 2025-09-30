@@ -21,7 +21,7 @@ from typing import Any, Callable, Optional
 import torch
 import torch_npu
 from vllm.config import get_current_vllm_config
-from vllm.distributed import get_tensor_model_parallel_world_size
+from vllm.distributed import (get_tensor_model_parallel_world_size, get_context_model_parallel_world_size)
 from vllm.distributed.parallel_state import (get_dp_group, get_ep_group,
                                              get_tp_group)
 from vllm.forward_context import get_forward_context
@@ -162,6 +162,7 @@ class AscendFusedMoE(FusedMoE):
         tp_size: Optional[int] = None,
         ep_size: Optional[int] = None,
         dp_size: Optional[int] = None,
+        cp_size: Optional[int] = None,
         prefix: str = "",
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
@@ -206,6 +207,8 @@ class AscendFusedMoE(FusedMoE):
                       get_tensor_model_parallel_world_size()),
             dp_size_=(dp_size
                       if dp_size is not None else get_dp_group().world_size),
+            cp_size_=(cp_size if cp_size is not None else
+                      get_context_model_parallel_world_size()),
             vllm_parallel_config=vllm_config.parallel_config)
 
         self.top_k = top_k
