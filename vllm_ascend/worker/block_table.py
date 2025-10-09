@@ -260,7 +260,7 @@ class MultiGroupBlockTable:
         # must be multiplied by dcp_world_size.
         try:
             dcp_world_size = get_dcp_group().world_size
-            cp_world_size = get_cp_group().world_size
+            cp_world_size = get_cp_group().world_size if context_parallel_enable() else 1
         except AssertionError:
             # DCP might not be initialized in testing
             dcp_world_size = 1
