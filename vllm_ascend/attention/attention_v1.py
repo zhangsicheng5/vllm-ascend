@@ -936,7 +936,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
             # TODO: Remove this contiguous in the future.
             value = value.contiguous()
 
-            if self.cp_size > 1 and attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
+            if self.cp_size > 1 and attn_metadata.num_prefills > 0:
                 kv = torch.cat([key, value], dim=-1)  # []
                 kv_list = [torch.empty_like(kv) for _ in range(self.cp_size)]
                 dist.all_gather(kv_list, kv, self.cp_group)
@@ -958,23 +958,22 @@ class AscendAttentionBackendImpl(AttentionImpl):
                     value_cache=self.value_cache,
                     slot_indices=slots)
 
+
+            if self.cp_size > 1 and attn_metadata.num_prefills > 0:
+                output = self._forward_prefill_cp(query, key, value,
+                                                  attn_metadata)
+            elif self.cp_size * self.dcp_size > 1 and attn_metadata.num_prefills == 0:
+                output = self._forward_decode_dcp_cp(query, attn_metadata)
             # V0-Style scheduler situation.
-            if attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
-                if self.cp_size > 1:
-                    output = self._forward_prefill_cp(query, key, value,
-                                                      attn_metadata)
-                else:
-                    output = self._forward_prefill_no_cache(
-                        query, key, value, attn_metadata, output, num_tokens)
+            elif attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
+                output = self._forward_prefill_no_cache(
+                    query, key, value, attn_metadata, output, num_tokens)
             elif attn_metadata.attn_state == \
                 AscendAttentionState.PrefillCacheHit:
                 output = self._forward_prefill_cache_hit(
                     query, attn_metadata, output)
             elif attn_metadata.attn_state == AscendAttentionState.DecodeOnly:
-                if self.cp_size * self.dcp_size > 1:
-                    output = self._forward_decode_dcp_cp(query, attn_metadata)
-                else:
-                    output = self._forward_decode_only(query, attn_metadata,
+                output = self._forward_decode_only(query, attn_metadata,
                                                        output)
             # Normal V1 situation.
             else:
