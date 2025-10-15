@@ -143,6 +143,7 @@ class AscendMLAMetadata:
     # |-------------------- seq_len ---------------------|
     #                                   |-- query_len ---|
 
+    num_actual_tokens_cp_full: int
     num_actual_tokens: int  # Number of tokens excluding padding.
     slot_mapping: torch.Tensor
     query_start_loc: torch.Tensor
@@ -412,6 +413,7 @@ class AscendMLAMetadataBuilder:
                     chunk_seq_lens=chunk_seq_lens,
                     workspace=self.chunked_prefill_workspace,
                 )
+            self.cp_rank = get_context_model_parallel_rank()
             prefill_input_positions = input_positions[tokens_start:]
             cos = self.cos_cache[
                 prefill_input_positions].unsqueeze(  # type: ignore
@@ -455,7 +457,6 @@ class AscendMLAMetadataBuilder:
             input_positions = input_positions[:num_decode_tokens]
             block_table = block_table[:num_decodes, ...]
             seq_lens_list = seq_lens.tolist()
-
             cos = self.cos_cache[input_positions].unsqueeze(  # type: ignore
                 1).unsqueeze(2)
             sin = self.sin_cache[input_positions].unsqueeze(  # type: ignore
@@ -474,6 +475,7 @@ class AscendMLAMetadataBuilder:
                 num_computed_tokens_of_cp_sp=num_computed_tokens_of_cp_sp)
 
         return self.metadata_cls(  # type: ignore
+            num_actual_tokens_cp_full=num_actual_tokens_cp_full,
             num_actual_tokens=num_actual_tokens,
             query_lens=query_lens.tolist(),
             slot_mapping=slot_mapping,
@@ -988,7 +990,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                 decode_ql_nope, decode_q_pe = decode_q_no_split.split(
                     [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
             decode_q_pe = self.rope_single(decode_q_pe, cos, sin)
-            decode_slots = attn_metadata.slot_mapping[:num_decode_tokens]
+            decode_slots = attn_metadata.slot_mapping[:num_decode_tokens*self.cp_size:self.cp_size]
             decode_kv_no_split = kv_no_split[:num_decode_tokens]
             decode_k_pe, decode_k_nope = self.exec_kv_decode(
                 decode_kv_no_split, cos, sin, kv_cache, decode_slots)
@@ -996,6 +998,8 @@ class AscendMLAImpl(MLAAttentionImpl):
                 decode_ql_nope, decode_q_pe, decode_k_nope, decode_k_pe)
         # Preprocess for prefill tokens
         if has_prefill:
+            if self.cp_size > 1:
+                num_actual_tokens = (attn_metadata.num_actual_tokens_cp_full -  self.cp_size * num_decode_tokens) // self.cp_size + num_decode_tokens
             prefill_kv_no_split = kv_no_split[
                 num_decode_tokens:num_actual_tokens]
             prefill_q_c = q_c[num_decode_tokens:num_actual_tokens]
@@ -1003,8 +1007,12 @@ class AscendMLAImpl(MLAAttentionImpl):
                 .view(-1, self.num_heads, self.qk_head_dim)
             prefill_q_pe = prefill_q[..., self.qk_nope_head_dim:]
             prefill_q_nope = prefill_q[..., :self.qk_nope_head_dim]
-            cos = attn_metadata.prefill.cos
-            sin = attn_metadata.prefill.sin
+            if self.cp_size > 1:
+                cos = attn_metadata.prefill.cos[:num_actual_tokens - num_decode_tokens]
+                sin = attn_metadata.prefill.sin[:num_actual_tokens - num_decode_tokens]
+            else:
+                cos = attn_metadata.prefill.cos
+                sin = attn_metadata.prefill.sin
             prefill_slots = attn_metadata.slot_mapping[
                 num_decode_tokens:num_actual_tokens]
             prefill_q_pe = self.rope_single(prefill_q_pe, cos, sin)
@@ -1016,12 +1024,11 @@ class AscendMLAImpl(MLAAttentionImpl):
                     kv_cache
                 ) > 1, "the number of kv cache should be greater than 1, namely (nope_cache and rope_cache)"
                 kv_c_normed = kv_c_normed.view(
-                    [num_actual_tokens, self.num_kv_heads, -1])
+                    [num_actual_tokens - num_decode_tokens, self.num_kv_heads, -1])
                 k_pe = k_pe.unsqueeze(1)
-                prefill_k_pe = k_pe[num_decode_tokens:]
+                prefill_k_pe = k_pe
                 prefill_k_pe = self.rope_single(prefill_k_pe, cos, sin)
-                prefill_k_c_normed = kv_c_normed[num_decode_tokens:]
-
+                prefill_k_c_normed = kv_c_normed
                 prefill_kv_c_k_pe = torch.cat(
                     [prefill_k_c_normed, prefill_k_pe], dim=-1)
                 prefill_kv_c_k_pe = get_cp_group().all_gather(
@@ -1033,12 +1040,13 @@ class AscendMLAImpl(MLAAttentionImpl):
                     [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
                 kv_c_normed, k_pe = prefill_k_c_normed, prefill_k_pe
                 prefill_k_c_normed = prefill_k_c_normed.squeeze()
+                slot_mapping = attn_metadata.slot_mapping[self.cp_size * num_decode_tokens :]
                 torch_npu._npu_reshape_and_cache(
                     key=kv_c_normed,
                     value=k_pe,
                     key_cache=kv_cache[0],
                     value_cache=kv_cache[1],
-                    slot_indices=attn_metadata.slot_mapping)
+                    slot_indices=slot_mapping)
             else:
                 prefill_k_pe, prefill_k_c_normed = self.exec_kv_prefill(
                     prefill_kv_no_split, cos, sin, kv_cache, prefill_slots)
@@ -1070,7 +1078,8 @@ class AscendMLAImpl(MLAAttentionImpl):
         if attn_metadata is None:
             # Profiling run.
             return output
-        num_actual_tokens = attn_metadata.num_actual_tokens
+        if self.cp_size > 0:
+            num_actual_tokens = attn_metadata.num_actual_tokens_cp_full // self.cp_size
         assert attn_metadata.num_decodes is not None and \
         attn_metadata.num_prefills is not None and \
         attn_metadata.num_decode_tokens is not None
@@ -1312,10 +1321,9 @@ class AscendMLAImpl(MLAAttentionImpl):
                          self.qk_rope_head_dim)
         q_nope = q_nope.view(num_tokens, num_heads, -1)
         q_pe = q_pe.view(num_tokens, num_heads, -1)
-
         # use cp & sp split computed token nums from scheduler to compute actual seq_len and seq_mask
         num_computed_tokens_of_cp_sp = np.array(
-            decode_meta.num_computed_tokens_of_cp_sp)  # [bs, cp_size, sp_size]
+            decode_meta.num_computed_tokens_of_cp_sp)[:attn_metadata.num_decodes]  # [bs, cp_size, sp_size]
         seq_mask_cp = torch.where(
             torch.tensor(num_computed_tokens_of_cp_sp.sum(2)) == 0, 0,
             1).to(torch.uint8).to(q_pe.device)
