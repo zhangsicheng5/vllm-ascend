@@ -1017,6 +1017,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                 num_decode_tokens:num_actual_tokens]
             prefill_q_pe = self.rope_single(prefill_q_pe, cos, sin)
             if self.cp_size > 1:
+                prefill_kv_no_split = kv_no_split[:num_actual_tokens]
                 kv_c, k_pe = prefill_kv_no_split.split(
                     [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
                 kv_c_normed = self.kv_a_layernorm(kv_c.contiguous())
@@ -1024,11 +1025,13 @@ class AscendMLAImpl(MLAAttentionImpl):
                     kv_cache
                 ) > 1, "the number of kv cache should be greater than 1, namely (nope_cache and rope_cache)"
                 kv_c_normed = kv_c_normed.view(
-                    [num_actual_tokens - num_decode_tokens, self.num_kv_heads, -1])
+                    [num_actual_tokens, self.num_kv_heads, -1])
                 k_pe = k_pe.unsqueeze(1)
                 prefill_k_pe = k_pe
-                prefill_k_pe = self.rope_single(prefill_k_pe, cos, sin)
-                prefill_k_c_normed = kv_c_normed
+                prefill_k_pe[
+                num_decode_tokens:num_actual_tokens] = self.rope_single(prefill_k_pe[
+                num_decode_tokens:num_actual_tokens], cos, sin)
+                prefill_k_c_normed = kv_c_normed[:num_actual_tokens]
                 prefill_kv_c_k_pe = torch.cat(
                     [prefill_k_c_normed, prefill_k_pe], dim=-1)
                 prefill_kv_c_k_pe = get_cp_group().all_gather(
@@ -1036,6 +1039,7 @@ class AscendMLAImpl(MLAAttentionImpl):
                 prefill_kv_c_k_pe = torch.index_select(
                     prefill_kv_c_k_pe, 0,
                     attn_metadata.prefill.cp_kv_recover_idx)
+                prefill_kv_c_k_pe = prefill_kv_c_k_pe[num_decode_tokens * self.cp_size:]
                 prefill_k_c_normed, prefill_k_pe = prefill_kv_c_k_pe.split(
                     [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
                 kv_c_normed, k_pe = prefill_k_c_normed, prefill_k_pe
