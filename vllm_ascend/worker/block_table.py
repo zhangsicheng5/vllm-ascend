@@ -133,7 +133,7 @@ class BlockTable:
         self.block_table_np[[src, tgt]] = self.block_table_np[[tgt, src]]
 
     def compute_slot_mapping(self, req_indices: np.ndarray,
-                             positions: np.ndarray) -> None:
+                             positions: np.ndarray, cp_kv_cache_interleave_size: int = 1) -> None:
         # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
         # -> [0, 0, K, K, K + 1, K + 1, K + 2, 2 * K, 2 * K, 2 * K + 1]
         # where K is the max_num_blocks_per_req and the block size is 2.
@@ -167,10 +167,12 @@ class BlockTable:
             # tokens.
             virtual_block_offsets = positions % virtual_block_size
             self.current_rank = self.dcp_world_size * self.cp_rank + self.dcp_rank
-            mask = (virtual_block_offsets %
+            mask = (virtual_block_offsets // cp_kv_cache_interleave_size %
                     (self.dcp_world_size * self.cp_world_size) == self.current_rank)
             # Calculate local block_offsets
-            block_offsets = virtual_block_offsets // (self.dcp_world_size * self.cp_world_size)
+            block_offsets = virtual_block_offsets \
+                // (self.dcp_world_size * self.cp_world_size * cp_kv_cache_interleave_size) \
+                * cp_kv_cache_interleave_size + virtual_block_offsets % cp_kv_cache_interleave_size
             # Calculate slot_mapping
             slot_mapping = block_numbers * self.block_size + block_offsets
             # Write final slots, use -1 for not-local
@@ -304,9 +306,9 @@ class MultiGroupBlockTable:
             block_table.swap_row(src, tgt)
 
     def compute_slot_mapping(self, req_indices: np.ndarray,
-                             positions: np.ndarray) -> None:
+                             positions: np.ndarray, cp_kv_cache_interleave_size: int = 1) -> None:
         for block_table in self.block_tables:
-            block_table.compute_slot_mapping(req_indices, positions)
+            block_table.compute_slot_mapping(req_indices, positions, cp_kv_cache_interleave_size)
 
     def commit_block_table(self, num_reqs: int) -> None:
         for block_table in self.block_tables:
