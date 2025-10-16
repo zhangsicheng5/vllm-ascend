@@ -174,8 +174,11 @@ class AscendMetadata:
     attn_state: AscendAttentionState = AscendAttentionState.ChunkedPrefill
 
     # Number of tokens excluding padding.
+    num_actual_tokens_cp_full: int = 0
     num_actual_tokens: int = 0
+    num_decode_tokens: int = 0
     num_prefills: int = 0
+    num_decodes: int = 0
 
     # The sequence length per sequence. Sequence length means the computed
     # tokens + new tokens (is None if it is a decoding).
@@ -321,6 +324,8 @@ class AscendAttentionMetadataBuilder:
 
         attn_metadata = AscendMetadata(
             num_actual_tokens=num_actual_tokens,
+            num_decode_tokens=num_decode_tokens,
+            num_actual_tokens_cp_full=num_actual_tokens_cp_full,
             block_tables=block_table,
             query_start_loc=query_start_loc,
             query_lens=query_lens,
@@ -331,6 +336,7 @@ class AscendAttentionMetadataBuilder:
             attn_state=attn_state,
             enable_dbo_across_dp=common_attn_metadata.enable_dbo_across_dp,
             num_prefills=num_prefills,
+            num_decodes=num_decodes,
             prefill=prefill_metadata,
             decode=decode_metadata)
         return attn_metadata
@@ -426,7 +432,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
                                        key=key,
                                        value=value,
                                        mask=mask,
-                                       seq_len=attn_metadata.seq_lens,
+                                       seq_len=attn_metadata.seq_lens[attn_metadata.num_decode_tokens:],
                                        scale_value=self.scale,
                                        num_heads=self.num_heads,
                                        num_kv_heads=self.num_kv_heads,
@@ -922,6 +928,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
             if attn_metadata is None:
                 return output.view(num_tokens, self.hidden_size)
             num_actual_tokens = attn_metadata.num_actual_tokens
+            num_decode_tokens = attn_metadata.num_decode_tokens
+            has_decode = attn_metadata.num_decodes > 0
+            has_prefill = attn_metadata.num_prefills > 0
+
             assert layer._k_scale_float == 1.0 and layer._v_scale_float == 1.0
             attn_type = self.attn_type
             if attn_type != AttentionType.DECODER:
@@ -936,34 +946,37 @@ class AscendAttentionBackendImpl(AttentionImpl):
             # TODO: Remove this contiguous in the future.
             value = value.contiguous()
 
-            if self.cp_size > 1 and attn_metadata.num_prefills > 0:
-                kv = torch.cat([key, value], dim=-1)  # []
-                kv_list = [torch.empty_like(kv) for _ in range(self.cp_size)]
-                dist.all_gather(kv_list, kv, self.cp_group)
-                all_kv = torch.cat(kv_list, dim=0)
-                cp_kv_recover_idx = attn_metadata.prefill.cp_kv_recover_idx if attn_metadata.prefill else None
-                all_kv = torch.index_select(all_kv, 0, cp_kv_recover_idx)
-                key, value = all_kv.split([self.head_size, self.head_size],
-                                          dim=-1)
-
             if len(kv_cache) > 1:
                 if self.key_cache is None:
                     self.key_cache, self.value_cache = kv_cache[0], kv_cache[1]
-                slots = attn_metadata.slot_mapping
-                torch_npu._npu_reshape_and_cache(
-                    key=key if self.cp_size > 1 else key[:num_actual_tokens],
-                    value=value
-                    if self.cp_size > 1 else value[:num_actual_tokens],
-                    key_cache=self.key_cache,
-                    value_cache=self.value_cache,
-                    slot_indices=slots)
 
+                if has_decode:
+                    slot_mapping = attn_metadata.slot_mapping[:num_decode_tokens * self.cp_size: self.cp_size] \
+                        if self.cp_size * self.dcp_size > 1 else attn_metadata.slot_mapping[:num_decode_tokens]
+                    torch_npu._npu_reshape_and_cache(
+                        key=key[:num_decode_tokens],
+                        value=value[:num_decode_tokens],
+                        key_cache=self.key_cache,
+                        value_cache=self.value_cache,
+                        slot_indices=slot_mapping)
 
-            if self.cp_size > 1 and attn_metadata.num_prefills > 0:
-                output = self._forward_prefill_cp(query, key, value,
-                                                  attn_metadata)
-            elif self.cp_size * self.dcp_size > 1 and attn_metadata.num_prefills == 0:
-                output = self._forward_decode_dcp_cp(query, attn_metadata)
+                if has_prefill:
+                    if self.cp_size > 1:
+                        kv = torch.cat([key, value], dim=-1)
+                        all_kv = get_cp_group().all_gather(kv, dim=0)
+                        cp_kv_recover_idx = attn_metadata.prefill.cp_kv_recover_idx if attn_metadata.prefill else None
+                        all_kv = torch.index_select(all_kv, 0, cp_kv_recover_idx)
+                        key, value = all_kv.split([self.head_size, self.head_size], dim=-1)
+
+                    torch_npu._npu_reshape_and_cache(
+                        key=key[self.cp_size * num_decode_tokens:],
+                        value=value[self.cp_size * num_decode_tokens:],
+                        key_cache=self.key_cache,
+                        value_cache=self.value_cache,
+                        slot_indices=attn_metadata.slot_mapping[self.cp_size * num_decode_tokens:])
+
+            if self.cp_size * self.dcp_size > 1:
+                output = self._forward_pcp_dcp(query, key, value, attn_metadata, output)
             # V0-Style scheduler situation.
             elif attn_metadata.attn_state == AscendAttentionState.PrefillNoCache:
                 output = self._forward_prefill_no_cache(
@@ -990,6 +1003,41 @@ class AscendAttentionBackendImpl(AttentionImpl):
             output = output.view(num_tokens, self.num_heads, self.head_size)
         ori_output[:num_tokens, :, :] = output[:num_tokens, :, :]
         return output.view(num_tokens, self.hidden_size)
+
+    def _forward_pcp_dcp(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_metadata: AscendMetadata,
+        output: Optional[torch.Tensor]
+    ) -> torch.Tensor:
+        assert attn_metadata is not None
+        has_decode = attn_metadata.num_decodes > 0
+        has_prefill = attn_metadata.num_prefills > 0
+        num_decode_tokens = attn_metadata.num_decode_tokens
+        if has_decode:
+            decode_query = query[:num_decode_tokens]
+            output_decode = self._forward_decode_dcp_cp(decode_query, attn_metadata)
+            output[:num_decode_tokens] = output_decode
+        if has_prefill:
+            prefill_query = query[num_decode_tokens:]
+            key = key[self.cp_size * num_decode_tokens:]
+            value = value[self.cp_size * num_decode_tokens:]
+            if self.cp_size > 1:
+                output_prefill = self._forward_prefill_cp(prefill_query, key, value, attn_metadata)
+            else:
+                max_prefill_seq_len = attn_metadata.seq_lens[attn_metadata.num_decode_tokens:].max().item()
+                attn_metadata.attn_mask = attn_metadata.attn_mask[:max_prefill_seq_len, :max_prefill_seq_len]
+                output_prefill = self._forward_prefill_no_cache(
+                    prefill_query,
+                    key,
+                    value,
+                    attn_metadata,
+                    output[num_decode_tokens:],
+                    prefill_query.shape[0])
+            output[num_decode_tokens:] = output_prefill
+        return output
 
 
 def unified_ascend_attention_with_output(
