@@ -257,6 +257,15 @@ class NPUPlatform(Platform):
                 ascend_config.ascend_scheduler_config)
             vllm_config.scheduler_config = ascend_scheduler_config
 
+        if vllm_config.kv_transfer_config is not None and \
+            cache_config.block_size != parallel_config.cp_kv_cache_interleave_size and \
+            parallel_config.decode_context_parallel_size * parallel_config.context_parallel_size > 1:
+            raise AssertionError(
+                f"cp_kv_cache_interleave_size({parallel_config.cp_kv_cache_interleave_size}) "
+                f"and block_size({cache_config.block_size}) "
+                "needs to be equal if use cp or dcp > 1 in P/D disaggregate scenario."
+            )
+
     @classmethod
     def get_attn_backend_cls(cls,
                              selected_backend,

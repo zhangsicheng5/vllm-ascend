@@ -20,7 +20,8 @@ class BlockTable:
                  max_num_batched_tokens: int,
                  pin_memory: bool,
                  device: torch.device,
-                 kernel_sizes: Union[list[int], None] = None):
+                 kernel_sizes: Union[list[int], None] = None,
+                 cp_kv_cache_interleave_size: int = 1):
         self.max_num_reqs = max_num_reqs
         self.max_num_blocks_per_req = max_num_blocks_per_req
         self.max_num_batched_tokens = max_num_batched_tokens
@@ -96,6 +97,7 @@ class BlockTable:
             self.cp_world_size = 1
             self.cp_rank = 0
         self.kernel_sizes = kernel_sizes
+        self.cp_kv_cache_interleave_size = cp_kv_cache_interleave_size
 
     def append_row(
         self,
@@ -167,10 +169,12 @@ class BlockTable:
             # tokens.
             virtual_block_offsets = positions % virtual_block_size
             self.current_rank = self.dcp_world_size * self.cp_rank + self.dcp_rank
-            mask = (virtual_block_offsets %
+            mask = (virtual_block_offsets // self.cp_kv_cache_interleave_size %
                     (self.dcp_world_size * self.cp_world_size) == self.current_rank)
             # Calculate local block_offsets
-            block_offsets = virtual_block_offsets // (self.dcp_world_size * self.cp_world_size)
+            block_offsets = virtual_block_offsets \
+                // (self.dcp_world_size * self.cp_world_size * self.cp_kv_cache_interleave_size) \
+                * self.cp_kv_cache_interleave_size + virtual_block_offsets % self.cp_kv_cache_interleave_size
             # Calculate slot_mapping
             slot_mapping = block_numbers * self.block_size + block_offsets
             # Write final slots, use -1 for not-local
@@ -253,7 +257,8 @@ class MultiGroupBlockTable:
                  device: torch.device,
                  block_sizes: list[int],
                  num_speculative_tokens: int = 0,
-                 kernel_sizes: Optional[list[list[int]]] = None) -> None:
+                 kernel_sizes: Optional[list[list[int]]] = None,
+                 cp_kv_cache_interleave_size: int = 1) -> None:
         # Note(hc): each dcp rank only store
         # (max_model_len//dcp_world_size) tokens in kvcache,
         # so the block_size which used for calc max_num_blocks_per_req
@@ -282,7 +287,7 @@ class MultiGroupBlockTable:
                 block_size, max_num_reqs,
                 max(cdiv(max_model_len, block_size * dcp_world_size * cp_world_size),
                     1 + num_speculative_tokens), max_num_batched_tokens,
-                pin_memory, device, kernel_size_list)
+                pin_memory, device, kernel_size_list, cp_kv_cache_interleave_size)
             for block_size, kernel_size_list in zip(block_sizes, kernel_sizes)
         ]
 
