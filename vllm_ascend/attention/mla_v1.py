@@ -413,7 +413,6 @@ class AscendMLAMetadataBuilder:
                     chunk_seq_lens=chunk_seq_lens,
                     workspace=self.chunked_prefill_workspace,
                 )
-            self.cp_rank = get_context_model_parallel_rank()
             prefill_input_positions = input_positions[tokens_start:]
             cos = self.cos_cache[
                 prefill_input_positions].unsqueeze(  # type: ignore
