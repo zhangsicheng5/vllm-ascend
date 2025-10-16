@@ -1082,8 +1082,10 @@ class AscendMLAImpl(MLAAttentionImpl):
         if attn_metadata is None:
             # Profiling run.
             return output
-        if self.cp_size > 0:
+        if self.cp_size > 1:
             num_actual_tokens = attn_metadata.num_actual_tokens_cp_full // self.cp_size
+        else:
+            num_actual_tokens = attn_metadata.num_actual_tokens
         assert attn_metadata.num_decodes is not None and \
         attn_metadata.num_prefills is not None and \
         attn_metadata.num_decode_tokens is not None
@@ -1337,6 +1339,10 @@ class AscendMLAImpl(MLAAttentionImpl):
             0, 1).to(torch.uint8).to(q_pe.device)
         seq_len = num_computed_tokens_of_cp_sp[:, self.cp_rank, self.dcp_rank]
         seq_len = torch.tensor(seq_len, dtype=torch.int32)
+        # npu_multi_head_latent_attention does not support seq_len = 0,
+        # update where seq_len == 0 to 1.
+        # This will not influence result, since we will use seq_mask to update lse.
+        seq_len = torch.where(seq_len == 0, 1, seq_len)
 
         if torch.sum(seq_len).item() == 0:
             # Case that no kv_cache has been stored on this rank, no need to do following computation.

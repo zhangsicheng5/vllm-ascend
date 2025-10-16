@@ -72,7 +72,7 @@ from vllm.utils import (STR_DTYPE_TO_TORCH_DTYPE, DeviceMemoryProfiler,
 from vllm.utils.jsontree import json_map_leaves
 from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadataBuilder
 from vllm.v1.attention.backends.utils import (
-    AttentionCGSupport, reorder_batch_to_split_decodes_and_prefills)
+    AttentionCGSupport, reorder_batch_to_split_decodes_and_prefills, get_cp_local_seq_lens)
 from vllm.v1.cudagraph_dispatcher import CudagraphDispatcher
 # yapf conflicts with isort for this block
 # yapf: disable
@@ -507,6 +507,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                 self.vllm_config.model_config.logits_processors),
             is_pooling_model=self.is_pooling_model,
             kernel_block_sizes=[[self.vllm_config.cache_config.block_size]],
+            cp_kv_cache_interleave_size=self.parallel_config.cp_kv_cache_interleave_size,
         )
         self.num_accepted_tokens = self._make_buffer(self.max_num_reqs,
                                                      dtype=torch.int64)
@@ -3672,8 +3673,13 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         if self.cp_size * self.dcp_size > 1:
             long_seq_metadata = AscendCommonLongSequenceMetadata(
                 num_actual_tokens_cp_full=num_actual_tokens_cp_full,
-                num_computed_tokens_of_cp_sp=self.input_batch.block_table.get_split_computed_tokens(
-                    self.input_batch.num_tokens[:self.input_batch.num_reqs]))
+                num_computed_tokens_of_cp_sp=get_cp_local_seq_lens(
+                    seq_lens,
+                    self.cp_size,
+                    self.dcp_size,
+                    self.parallel_config.cp_kv_cache_interleave_size,
+                ).numpy(),
+            )
             if self.cp_size > 1:
                 q_head_idx, q_tail_idx = [], []
                 kv_with_q_head_nomask_idx, kv_with_q_head_mask_idx = [], []
