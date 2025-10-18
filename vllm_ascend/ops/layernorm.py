@@ -15,12 +15,14 @@
 # This file is a part of the vllm-ascend project.
 #
 
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, cast
 
 import torch
 from vllm.config import get_current_vllm_config
 from vllm.forward_context import get_forward_context
 from vllm.model_executor.layers.layernorm import GemmaRMSNorm, RMSNorm
+
+from vllm_ascend.utils import version_check
 
 
 def _addrmsnorm_forward_oot(
@@ -34,15 +36,25 @@ def _addrmsnorm_forward_oot(
 
     from vllm_ascend.utils import is_310p
 
+    torch_npu_check = version_check()
     if layer is not None and not is_310p():
-        x, _, residual = torch_npu.npu_add_rms_norm_quant(
-            x,
-            residual,
-            self.weight,
-            layer.aclnn_input_scale,
-            layer.aclnn_input_offset,
-            beta=bias,
-            epsilon=self.variance_epsilon)
+        if torch_npu_check:
+            x, _, residual = torch_npu.npu_add_rms_norm_quant(
+                x,
+                residual,
+                self.weight,
+                layer.aclnn_input_scale,
+                layer.aclnn_input_offset,
+                beta=bias,
+                epsilon=self.variance_epsilon)
+        else:
+            x, _, residual = torch_npu.npu_add_rms_norm_quant(
+                x,
+                residual,
+                self.weight,
+                layer.aclnn_input_scale,
+                layer.aclnn_input_offset,
+                epsilon=self.variance_epsilon)
     else:
         if is_310p():
             orig_dtype = residual.dtype
@@ -53,7 +65,7 @@ def _addrmsnorm_forward_oot(
         else:
             x, _, residual = torch_npu.npu_add_rms_norm(
                 x, residual, self.weight, self.variance_epsilon)
-        if bias is not None:
+        if torch_npu_check and bias is not None:
             x.add_(bias)
     torch.ops.vllm.maybe_wait_prefetch_done(x)
     return x, residual
@@ -72,8 +84,9 @@ class AscendRMSNorm(RMSNorm):
         super().__init__(hidden_size, eps, var_hidden_size, has_weight, dtype)
         vllm_config = get_current_vllm_config()
         self.bias = None
+        self.torch_npu_check = version_check()
         # quantization with anti_method m4 will generate none-zero norm bias
-        if vllm_config is not None and vllm_config.quant_config is not None and \
+        if self.torch_npu_check and vllm_config.quant_config is not None and \
                 any("norm.bias" in name for name in vllm_config.quant_config.quant_description.keys()):
             self.bias = torch.nn.Parameter(torch.zeros(hidden_size),
                                            requires_grad=False)
@@ -94,7 +107,7 @@ class AscendRMSNorm(RMSNorm):
             return x, residual
         x, residual = torch_npu.npu_rms_norm(x, self.weight,
                                              self.variance_epsilon)
-        if self.bias is not None:
+        if self.torch_npu_check and self.bias is not None:
             x.add_(self.bias)
         return x
 
@@ -137,6 +150,31 @@ class AscendRMSNorm(RMSNorm):
             not isinstance(next_linear.quant_method.quant_method, AscendW8A8LinearMethod):
             next_linear = None
         return next_linear
+
+
+class AscendQuantRMSNorm(AscendRMSNorm):
+
+    def __init__(
+        self,
+        hidden_size: int,
+        eps: float = 1e-6,
+        var_hidden_size: Optional[int] = None,
+        has_weight: bool = True,
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(hidden_size, eps, var_hidden_size, has_weight, dtype)
+        self.bias = torch.nn.Parameter(torch.zeros(hidden_size),
+                                       requires_grad=False)
+
+    def forward_oot(
+        self,
+        x: torch.Tensor,
+        residual: Optional[torch.Tensor] = None,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if residual is not None:
+            x, residual = super().forward_oot(x, residual)
+            return x.add_(self.bias), residual
+        return cast(torch.Tensor, super().forward_oot(x)).add_(self.bias)
 
 
 class AscendGemmaRMSNorm(GemmaRMSNorm):
