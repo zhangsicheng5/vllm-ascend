@@ -484,7 +484,8 @@ class AscendMLAMetadataBuilder:
                     attn_mask=common_attn_metadata.spec_attn_mask,
                     actual_seq_lengths_q=actual_seq_lengths_q,
                     sin=sin,
-                    cos=cos)
+                    cos=cos,
+                    num_computed_tokens_of_cp_sp=num_computed_tokens_of_cp_sp)
             else:
                 cos[:num_decode_tokens,
                     ...] = self.cos_cache[input_positions].unsqueeze(
