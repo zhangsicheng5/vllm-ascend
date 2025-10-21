@@ -629,7 +629,7 @@ def shared_expert_dp_enabled() -> bool:
 
 
 def prefill_context_parallel_enable() -> bool:
-    return envs_ascend.VLLM_ASCEND_ENABLE_PCP
+    return envs_ascend.VLLM_ASCEND_ENABLE_CONTEXT_PARALLEL
 
 
 def is_moe_model(vllm_config: VllmConfig):

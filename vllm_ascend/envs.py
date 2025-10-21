@@ -173,8 +173,8 @@ env_variables: Dict[str, Callable[[], Any]] = {
     "VLLM_ASCEND_ENABLE_NZ":
     lambda: int(os.getenv("VLLM_ASCEND_ENABLE_NZ", 1)),
     # Decide whether we should enable CP parallelism.
-    "VLLM_ASCEND_ENABLE_PCP":
-    lambda: bool(int(os.getenv("VLLM_ASCEND_ENABLE_PCP", '0')))
+    "VLLM_ASCEND_ENABLE_CONTEXT_PARALLEL":
+    lambda: bool(int(os.getenv("VLLM_ASCEND_ENABLE_CONTEXT_PARALLEL", '0')))
 }
 
 # end-env-vars-definition
