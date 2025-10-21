@@ -276,8 +276,7 @@ class AscendAttentionMetadataBuilder:
         if num_actual_tokens_pcp_padded is None:
             num_actual_tokens_pcp_padded = num_actual_tokens
 
-        slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens_pcp_padded].to(self.device,
-                                                                                        non_blocking=True)
+        slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens_pcp_padded]
         # slot_mapping = common_attn_metadata.slot_mapping[:num_actual_tokens]
         attn_mask = common_attn_metadata.attn_mask
         attn_state = common_attn_metadata.attn_state
@@ -1022,11 +1021,11 @@ class AscendAttentionBackendImpl(AttentionImpl):
                         key, value = all_kv.split([self.head_size, self.head_size], dim=-1)
 
                     torch_npu._npu_reshape_and_cache(
-                        key=key[self.pcp_size * num_decode_tokens:],
-                        value=value[self.pcp_size * num_decode_tokens:],
+                        key=key[self.pcp_size * num_decode_tokens:attn_metadata.num_actual_tokens_pcp_padded],
+                        value=value[self.pcp_size * num_decode_tokens:attn_metadata.num_actual_tokens_pcp_padded],
                         key_cache=self.key_cache,
                         value_cache=self.value_cache,
-                        slot_indices=attn_metadata.slot_mapping[self.pcp_size * num_decode_tokens:])
+                        slot_indices=attn_metadata.slot_mapping[self.pcp_size * num_decode_tokens:attn_metadata.num_actual_tokens_pcp_padded])
 
             if self.pcp_size * self.dcp_size > 1:
                 output = self._forward_pcp_dcp(query, key, value, attn_metadata, output)
