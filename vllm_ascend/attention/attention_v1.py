@@ -1086,6 +1086,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
         has_decode = attn_metadata.num_decodes > 0
         has_prefill = attn_metadata.num_prefills > 0
         num_decode_tokens = attn_metadata.num_decode_tokens
+        if output is None: raise ValueError("Output buffer is required")
         if has_decode:
             decode_query = query[:num_decode_tokens]
             output_decode = self._forward_decode_pcp_dcp(decode_query, attn_metadata)
@@ -1098,7 +1099,10 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 output_prefill = self._forward_prefill_cp(prefill_query, key, value, attn_metadata)
             else:
                 max_prefill_seq_len = attn_metadata.seq_lens[attn_metadata.num_decode_tokens:].max().item()
-                attn_metadata.attn_mask = attn_metadata.attn_mask[:max_prefill_seq_len, :max_prefill_seq_len]
+                if attn_metadata.attn_mask is not None:
+                    attn_metadata.attn_mask = attn_metadata.attn_mask[:max_prefill_seq_len, :max_prefill_seq_len]
+                else:
+                    ValueError("Attn_metadata.attn_mask is required")
                 output_prefill = self._forward_prefill_no_cache(
                     prefill_query,
                     key,
