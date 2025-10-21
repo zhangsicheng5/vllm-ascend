@@ -910,6 +910,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                              attn_state) -> torch.Tensor:
         if self.pcp_size > 1:
             return None
+        if self.attn_mask_builder is None: raise ValueError("Attn mask builder is None")
         # Pooling situation.
         if self.model_config.runner_type == "pooling" and self.model_config.pooler_config.pooling_type == "CLS":
             return self.attn_mask_builder.get_pooling_mask(self.device)
@@ -3773,9 +3774,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         all_positions = [get_current_rank_positions(cu_padded_tokens,
                                                     rank_i)
                          for rank_i in range(self.pcp_size)]
-        all_positions = torch.from_numpy(np.concatenate(all_positions))
-        self.pcp_allgather_restore_idx[:all_positions.shape[0]].copy_(
-            all_positions.float().argsort().long(),
+        all_positions_tensor = torch.from_numpy(np.concatenate(all_positions))
+        self.pcp_allgather_restore_idx[:all_positions_tensor.shape[0]].copy_(
+            all_positions_tensor.float().argsort().long(),
             non_blocking=True)
         pcp_tokens[:num_decode_reqs] = 1
         return pcp_tokens, positions, unpad_mask
