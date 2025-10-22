@@ -46,6 +46,7 @@ from vllm.compilation.counter import compilation_counter
 from vllm.compilation.monitor import set_cudagraph_capturing_enabled
 from vllm.config import (CompilationLevel, CUDAGraphMode, VllmConfig,
                          get_layers_from_vllm_config)
+from vllm.distributed import tensor_model_parallel_all_gather
 from vllm.distributed.kv_transfer import (get_kv_transfer_group,
                                           has_kv_transfer_group)
 from vllm.distributed.kv_transfer.kv_connector.v1 import KVConnectorBase_V1
@@ -1658,7 +1659,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
             hidden_states = tensor_model_parallel_all_gather(hidden_states, 0)
             pad_size = get_forward_context().pad_size
             if pad_size > 0:
-                hidden_size = hidden_size[:-pad_size, :]
+                hidden_states = hidden_states[:-pad_size, :]
 
         if self.pcp_size > 1:
             hidden_states = get_pcp_group().all_gather(hidden_states, 0)
