@@ -955,7 +955,6 @@ class AscendAttentionBackendImpl(AttentionImpl):
         else:
             if attn_metadata is None:
                 return output.view(num_tokens, self.hidden_size)
-            num_actual_tokens = attn_metadata.num_actual_tokens
             num_decode_tokens = attn_metadata.num_decode_tokens
             has_decode = attn_metadata.num_decodes > 0
             has_prefill = attn_metadata.num_prefills > 0
@@ -1065,7 +1064,8 @@ class AscendAttentionBackendImpl(AttentionImpl):
         has_decode = attn_metadata.num_decodes > 0
         has_prefill = attn_metadata.num_prefills > 0
         num_decode_tokens = attn_metadata.num_decode_tokens
-        if output is None: raise ValueError("Output buffer is required")
+        if output is None:
+            raise ValueError("Output buffer is required")
         if has_decode:
             decode_query = query[:num_decode_tokens]
             output_decode = self._forward_decode_pcp_dcp(

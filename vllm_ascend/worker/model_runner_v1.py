@@ -3834,7 +3834,6 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         num_reqs = self.input_batch.num_reqs
         num_decodes = sum(self.input_batch.num_computed_tokens_cpu[:num_reqs]
                           >= self.input_batch.num_prompt_tokens[:num_reqs])
-        num_prefills = num_reqs - num_decodes
         num_actual_tokens_pcp_padded = total_num_scheduled_tokens * self.pcp_size
         long_seq_metadata = None
         if self.pcp_size * self.dcp_size > 1:
