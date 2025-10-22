@@ -3928,12 +3928,9 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                         torch.ones(512, 512, device=self.device, dtype=self.dtype),
                         1)
                 else:
-                    max_seq_len = max(seq_lens, default=0)
                     pcp_prefill_mask = torch.triu(
-                        torch.full((num_prefills, max_seq_len, max_seq_len),
-                                   True,
-                                   device=self.device,
-                                   dtype=torch.bool), 1)
+                        torch.full((2048, 2048),True,device=self.device,dtype=torch.bool), 
+                        1)
 
                 self.extra_long_seq_kwargs = {
                     'attn_mask_seqlens': attn_mask_seqlens,
