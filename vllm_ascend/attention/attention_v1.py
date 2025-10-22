@@ -707,7 +707,7 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 scale_value=self.scale,
                 out=output)
         return output
-    
+
     def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor,
                          lengths: List[int]) -> torch.Tensor:
         max_len = max(lengths)
