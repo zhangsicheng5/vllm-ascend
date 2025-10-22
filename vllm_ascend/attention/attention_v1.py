@@ -701,28 +701,6 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 out=output)
         return output
 
-    def _pack_tnd_2_bsnd(self, tensor_tnd: torch.Tensor,
-                         lengths: List[int]) -> torch.Tensor:
-        max_len = max(lengths)
-        splits = torch.split(tensor_tnd, lengths, dim=0)
-
-        padded = []
-        for s in splits:
-            pad_len = max_len - s.shape[0]
-            s_pad = F.pad(s, (0, 0, 0, 0, 0, pad_len))
-            padded.append(s_pad)
-
-        tensor_bsnd = torch.stack(padded, dim=0)
-        return tensor_bsnd
-
-    def _unpack_bsnd_2_tnd(self, tensor_bsnd: torch.Tensor,
-                           lengths: List[int]) -> torch.Tensor:
-        slices = []
-        for i, length in enumerate(lengths):
-            slices.append(tensor_bsnd[i, :length])
-        tensor_tnd = torch.cat(slices, dim=0)
-        return tensor_tnd
-
     def _attention_with_nomask_and_mask(self, q: torch.Tensor,
                                         q_seqlens: List[int],
                                         k_nomask: torch.Tensor,
@@ -732,17 +710,16 @@ class AscendAttentionBackendImpl(AttentionImpl):
                                         v_mask: torch.Tensor,
                                         kv_seqlens_mask: List[int],
                                         mask: torch.Tensor) -> torch.Tensor:
-        q = self._pack_tnd_2_bsnd(q, q_seqlens)
 
         # nomask Attention
         if k_nomask is not None:
             attn_out_nomask, attn_lse_nomask = torch.ops.npu.npu_fused_infer_attention_score(
                 q,
-                self._pack_tnd_2_bsnd(k_nomask, kv_seqlens_nomask),
-                self._pack_tnd_2_bsnd(v_nomask, kv_seqlens_nomask),
+                k_nomask,
+                v_nomask,
                 num_heads=self.num_heads,
                 num_key_value_heads=self.num_kv_heads,
-                input_layout="BSND",
+                input_layout="TND",
                 atten_mask=None,
                 scale=self.scale,
                 sparse_mode=0,
@@ -751,31 +728,23 @@ class AscendAttentionBackendImpl(AttentionImpl):
                 softmax_lse_flag=True,
                 actual_seq_lengths_kv=kv_seqlens_nomask,
                 actual_seq_lengths=q_seqlens)
-            attn_out_nomask = self._unpack_bsnd_2_tnd(attn_out_nomask,
-                                                      q_seqlens)
-            # (B, N, Q_S, 1) -> (B, Q_S, N, 1) -> (T, N, 1)
-            attn_lse_nomask = self._unpack_bsnd_2_tnd(
-                attn_lse_nomask.permute([0, 2, 1, 3]), q_seqlens)
 
         # mask Attention
         attn_out_mask, attn_lse_mask = torch.ops.npu.npu_fused_infer_attention_score(
             q,
-            self._pack_tnd_2_bsnd(k_mask, kv_seqlens_mask),
-            self._pack_tnd_2_bsnd(v_mask, kv_seqlens_mask),
+            k_mask,
+            v_mask,
             num_heads=self.num_heads,
             num_key_value_heads=self.num_kv_heads,
-            input_layout="BSND",
+            input_layout="TND",
             atten_mask=mask,
             scale=self.scale,
-            sparse_mode=0,
+            sparse_mode=3,
             antiquant_mode=0,
             antiquant_scale=None,
             softmax_lse_flag=True,
             actual_seq_lengths_kv=kv_seqlens_mask,
             actual_seq_lengths=q_seqlens)
-        attn_out_mask = self._unpack_bsnd_2_tnd(attn_out_mask, q_seqlens)
-        attn_lse_mask = self._unpack_bsnd_2_tnd(
-            attn_lse_mask.permute([0, 2, 1, 3]), q_seqlens)
 
         # update
         output = attn_out_mask
