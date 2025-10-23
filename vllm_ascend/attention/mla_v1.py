@@ -1257,9 +1257,9 @@ class AscendMLAImpl(MLAAttentionImpl):
 
         # Process for Flash Comm V1
         q_c = torch.ops.vllm.maybe_all_gather_and_maybe_unpad(
-            q_c, need_gather_q_kv)
+            q_c.contiguous(), need_gather_q_kv)
         kv_no_split = torch.ops.vllm.maybe_all_gather_and_maybe_unpad(
-            kv_no_split, need_gather_q_kv)
+            kv_no_split.contiguous(), need_gather_q_kv)
 
         decode_preprocess_res = None
         prefill_preprocess_res = None
