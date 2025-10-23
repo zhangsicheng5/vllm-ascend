@@ -348,7 +348,7 @@ class AscendAttentionMetadataBuilder:
                 pcp_allgather_restore_idx=common_long_seq_metadata.
                 pcp_allgather_restore_idx
                 if common_long_seq_metadata is not None else None)
-        # TODO
+
         decode_metadata = None
         if num_decodes > 0:
             common_long_seq_metadata = common_attn_metadata.prefill_context_parallel_metadata
@@ -360,25 +360,40 @@ class AscendAttentionMetadataBuilder:
                     num_computed_tokens_of_pcp_dcp=
                     num_computed_tokens_of_pcp_dcp)
 
-        attn_metadata = AscendMetadata(
-            num_actual_tokens=num_actual_tokens,
-            num_decode_tokens=num_decode_tokens,
-            num_actual_tokens_pcp_padded=num_actual_tokens_pcp_padded,
-            block_tables=block_table,
-            query_start_loc=query_start_loc,
-            query_lens=query_lens,
-            seq_lens=seq_lens,
-            seq_lens_list=seq_lens.tolist(),
-            max_query_len=common_attn_metadata.max_query_len,
-            actual_seq_lengths_q=query_start_loc_cpu[1:].tolist(),
-            slot_mapping=slot_mapping,
-            attn_mask=attn_mask,
-            attn_state=attn_state,
-            enable_dbo_across_dp=common_attn_metadata.enable_dbo_across_dp,
-            num_prefills=num_prefills,
-            num_decodes=num_decodes,
-            prefill=prefill_metadata,
-            decode_meta=decode_metadata)
+        if prefill_context_parallel_enable():
+            attn_metadata = AscendMetadata(
+                num_actual_tokens=num_actual_tokens,
+                num_decode_tokens=num_decode_tokens,
+                num_actual_tokens_pcp_padded=num_actual_tokens_pcp_padded,
+                block_tables=block_table,
+                query_start_loc=query_start_loc,
+                query_lens=query_lens,
+                seq_lens=seq_lens,
+                seq_lens_list=seq_lens.tolist(),
+                max_query_len=common_attn_metadata.max_query_len,
+                actual_seq_lengths_q=query_start_loc_cpu[1:].tolist(),
+                slot_mapping=slot_mapping,
+                attn_mask=attn_mask,
+                attn_state=attn_state,
+                enable_dbo_across_dp=common_attn_metadata.enable_dbo_across_dp,
+                num_prefills=num_prefills,
+                num_decodes=num_decodes,
+                prefill=prefill_metadata,
+                decode_meta=decode_metadata)
+        else:
+            attn_metadata = AscendMetadata(
+                num_actual_tokens=num_actual_tokens,
+                block_tables=block_table,
+                query_start_loc=query_start_loc,
+                query_lens=query_lens,
+                seq_lens=seq_lens,
+                seq_lens_list=seq_lens.tolist(),
+                max_query_len=common_attn_metadata.max_query_len,
+                actual_seq_lengths_q=query_start_loc_cpu[1:].tolist(),
+                slot_mapping=slot_mapping,
+                attn_mask=attn_mask,
+                attn_state=attn_state,
+                enable_dbo_across_dp=common_attn_metadata.enable_dbo_across_dp)
         return attn_metadata
 
     def build_for_graph_capture(
