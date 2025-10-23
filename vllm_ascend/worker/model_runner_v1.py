@@ -2411,7 +2411,7 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         forward_context = get_forward_context()
         assert forward_context is not None
         if forward_context.cudagraph_runtime_mode == CUDAGraphMode.FULL and \
-            not forward_context.capturing and forward_context.attn_metadata is not None:
+            not forward_context.capturing:
             if self.vllm_config.model_config.use_mla:
                 # FIXME: Try using `auto_dispatch_capture=True`
                 update_mla_attn_params(self.update_stream, forward_context,
@@ -2499,17 +2499,6 @@ class NPUModelRunner(LoRAModelRunnerMixin):
         if self.is_kv_producer and not self.is_kv_consumer:
             with_prefill = True
 
-        # TODO(Mengqing): Set create_mixed_batch to False since it's only used in FI warmup
-        # and not supported in ASCEND now. We could remove it in the future.
-        attn_metadata = self._build_dummy_attn_metadata(
-            False,
-            num_reqs=num_reqs,
-            num_tokens=num_tokens,
-            max_query_len=max_query_len,
-            aclgraph_runtime_mode=aclgraph_runtime_mode,
-            force_attention=force_attention,
-        )
-
         if not self.in_profile_run and self.dynamic_eplb:
             self.eplb_updator.forward_before()
 
@@ -2555,6 +2544,17 @@ class NPUModelRunner(LoRAModelRunnerMixin):
                     f"Expected {_ag_mode}, but got {aclgraph_runtime_mode}.")
             else:
                 aclgraph_runtime_mode = _ag_mode
+
+            # TODO(Mengqing): Set create_mixed_batch to False since it's only used in FI warmup
+            # and not supported in ASCEND now. We could remove it in the future.
+            attn_metadata = self._build_dummy_attn_metadata(
+                False,
+                num_reqs=num_reqs,
+                num_tokens=num_tokens,
+                max_query_len=max_query_len,
+                aclgraph_runtime_mode=aclgraph_runtime_mode,
+                force_attention=force_attention,
+            )
 
             need_dummy_logits = (not self.in_profile_run
                                  and lmhead_tp_enable())
