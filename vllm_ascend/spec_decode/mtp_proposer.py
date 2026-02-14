@@ -501,7 +501,10 @@ class MtpProposer(EagleProposer):
                     self.runner.parallel_config.cp_kv_cache_interleave_size,
                 )
                 cp_seq_len = num_computed_tokens_of_pcp_dcp[:, self.pcp_rank, self.dcp_rank]
-                attn_metadata_i.decode.cp_seq_len = cp_seq_len
+                if mla:
+                    attn_metadata_i.decode.cp_seq_len = cp_seq_len
+                elif gqa:
+                    attn_metadata.decode_meta.num_computed_tokens_of_pcp_dcp = cp_seq_len
                 # update slot_mapping
                 slot_indices += self.pcp_size
                 slot_mapping = mtp_slot_mapping[slot_indices]

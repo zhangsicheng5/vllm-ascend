@@ -654,6 +654,12 @@ class AscendMlaCPImpl(AscendMLAImpl):
             "actual_seq_lengths_kv": decode_meta.cp_seq_len,
             "softmax_lse_flag": True,
         }
+        # without mtp:
+        # q: [1, hidden], block_table: [1, max_block_num], actual_seq_lengths_kv: [1, xxx]
+        # mtp without cp:
+        # q: [4, hidden], block_table: [1, max_block_num], actual_seq_lengths_kv: [1, xxx]
+        # mtp with cp:
+        # q: [4, hidden], block_table: [4, max_block_num], actual_seq_lengths_kv: [4, xxx]
 
         forward_context: ForwardContext = get_forward_context()
         if forward_context.is_draft_model:
