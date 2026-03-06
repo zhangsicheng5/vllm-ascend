@@ -498,6 +498,8 @@ class NPUModelRunner(GPUModelRunner):
         # Get the number of scheduled tokens for each request.
         req_ids = self.input_batch.req_ids
         tokens = [scheduler_output.num_scheduled_tokens[i] for i in req_ids]
+        if torch.distributed.get_rank() == 0:
+            logger.info(f'>>>>> input tokens = {tokens}')
         num_scheduled_tokens = np.array(tokens, dtype=np.int32)
 
         req_indices = np.repeat(self.arange_np[:num_reqs],
@@ -2497,8 +2499,10 @@ class NPUModelRunner(GPUModelRunner):
                                 dsa_k_cache_tensor,
                                 alignment)[:dsa_k_cache_size]
                     # 12 25
-                    REUSE = 3
-                    reuse_kvcache_layers = [REUSE + i for i in range(24)]
+                    REUSE = 13
+                    reuse_kvcache_layers = [REUSE + i for i in range(27)]
+                    # REUSE = 30
+                    # reuse_kvcache_layers = [REUSE + i for i in range(61)]
 
                     # REUSE = 13
                     # reuse_kvcache_layers = [REUSE + i for i in range(REUSE)]

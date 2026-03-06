@@ -73,3 +73,5 @@ class MemcacheBackend(Backend):
                 #     logger.info(f"Successfully save key {key},res:{res}")
         except Exception as e:
             logger.error(f"Failed to put key {key},error:{e}")
+    # kv connector -> pool_scheduler/worker -> send/recv thread (vllm framework) | -> memcache (kv_cache, block addr/size/key) -> memfabric
+    # host transfer_buffer [2048] -> device transfer_buffer [2048]
