@@ -1,6 +1,7 @@
 from collections.abc import Iterable
+import copy
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import torch
 from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorMetadata
@@ -130,7 +131,7 @@ class ChunkedTokenDatabase:
         size_list = []
         length = len(self.block_len)
         for i in range(length):
-            addr = self.kv_caches_base_addr[layer_id * length] + block_id * self.block_len[i]
+            addr = self.kv_caches_base_addr[layer_id * length + i] + block_id * self.block_len[i]
             size = int(self.block_len[i] / self.block_size * (end - start))
             addr_list.append(addr)
             size_list.append(size)
@@ -236,6 +237,8 @@ class RequestTracker:
     # NOTE: This field will only be used when you enable kv-event
     token_ids: list[int] | None = None
 
+    key_gva_mapping: Optional[Dict[str, Any]] = None
+
     @staticmethod
     def from_new_request(
         new_request: "NewRequestData",
@@ -272,7 +275,7 @@ class RequestTracker:
         """Update the request tracker when a running request is
         scheduled again
         """
-        if len(new_block_ids) == 0:
+        if new_block_ids is None or len(new_block_ids) == 0:
             new_block_ids = []
         elif isinstance(new_block_ids, tuple):
             new_block_ids = new_block_ids[0]
@@ -307,6 +310,10 @@ class ReqMeta:
     token_ids: list[int] | None = None
     original_block_size: int | None = None
 
+    key_gva_mapping: Dict[str, Any] = None
+
+    need_save: bool = True
+
     @staticmethod
     def from_request_tracker(
         tracker: RequestTracker,
@@ -317,6 +324,7 @@ class ReqMeta:
         is_last_chunk: bool | None = None,
         discard_partial_chunks: bool = True,
         original_block_size: int | None = None,
+        need_save: bool = True,
     ) -> Optional["ReqMeta"]:
         """Create the request metadata from a request tracker.
 
@@ -373,20 +381,26 @@ class ReqMeta:
             req_id=tracker.req_id,
             token_len_chunk=num_tokens_to_save,
             block_ids=tracker.allocated_block_ids,
+            key_gva_mapping=copy.deepcopy(tracker.key_gva_mapping),
             can_save=not skip_save,
             load_spec=load_spec,
             block_hashes=block_hashes,
             is_last_chunk=is_last_chunk,
             token_ids=token_ids,
             original_block_size=original_block_size,
+            need_save=need_save,
         )
 
 
 class AscendConnectorMetadata(KVConnectorMetadata):
     def __init__(self, unfinished_request_ids, preempted_req_ids):
-        self.requests = []
+        self.requests: list[ReqMeta] = []
         self.unfinished_request_ids = unfinished_request_ids
         self.preempted_req_ids = preempted_req_ids
+
+        # containes reqs which may not in self.requests
+        # for example, cached reqs without new blocks
+        self.req_block_hashes: dict[str, list[BlockHash]] = {}
 
     def add_request(self, req_meta: ReqMeta) -> None:
         """Add a request to the metadata.

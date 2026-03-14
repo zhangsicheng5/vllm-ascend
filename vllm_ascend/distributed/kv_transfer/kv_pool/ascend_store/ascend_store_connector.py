@@ -10,7 +10,7 @@ from vllm.distributed.kv_events import (
     KVConnectorKVEvents,
     KVEventAggregator,
 )
-from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole
+from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole, SupportsHMA
 from vllm.forward_context import ForwardContext
 from vllm.logger import logger
 from vllm.utils.network_utils import make_zmq_socket
@@ -63,7 +63,7 @@ class AscendStoreKVEvents(KVConnectorKVEvents):
         return f"<AscendStoreKVEvents events={self.get_all_events()}>"
 
 
-class AscendStoreConnector(KVConnectorBase_V1):
+class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
     def __init__(self, vllm_config: VllmConfig, role: KVConnectorRole, kv_cache_config: KVCacheConfig | None = None):
         super().__init__(vllm_config=vllm_config, role=role, kv_cache_config=kv_cache_config)
         self.kv_role = vllm_config.kv_transfer_config.kv_role
@@ -86,7 +86,11 @@ class AscendStoreConnector(KVConnectorBase_V1):
         self.sended_but_unfinished_reqs: set[str] = set()
 
         if role == KVConnectorRole.SCHEDULER:
-            self.connector_scheduler = KVPoolScheduler(vllm_config, self.use_layerwise)
+            if kv_cache_config is None or not kv_cache_config.kv_cache_groups:
+                raise ValueError("kv_cache_config with at least one group is required for scheduler")
+            page_size_bytes = kv_cache_config.kv_cache_groups[0].kv_cache_spec.page_size_bytes
+            logger.info(f">>>>> init pool scheduler, page_size_bytes = {page_size_bytes}")
+            self.connector_scheduler = KVPoolScheduler(vllm_config, self.use_layerwise, page_size_bytes)
         else:
             self.connector_worker = KVPoolWorker(
                 vllm_config,
@@ -103,6 +107,7 @@ class AscendStoreConnector(KVConnectorBase_V1):
 
     def get_num_new_matched_tokens(self, request: "Request", num_computed_tokens: int) -> tuple[int, bool]:
         assert self.connector_scheduler is not None
+        return 0, False # TODO support prefix cache
         return self.connector_scheduler.get_num_new_matched_tokens(request, num_computed_tokens)
 
     def update_state_after_alloc(self, request: "Request", blocks: "KVCacheBlocks", num_external_tokens: int):
@@ -123,6 +128,14 @@ class AscendStoreConnector(KVConnectorBase_V1):
     ) -> tuple[bool, dict[str, Any] | None]:
         assert self.connector_scheduler is not None
         return self.connector_scheduler.request_finished(request, block_ids)
+    
+    def request_finished_all_groups(
+        self,
+        request: "Request",
+        block_ids: tuple[list[int], ...],
+    ) -> tuple[bool, dict[str, Any] | None]:
+        # v32 sparse offload, 0 for indexer and 1 for ori kv_cache
+        return self.request_finished(request, block_ids[-1])
 
     def update_connector_output(self, connector_output: KVConnectorOutput):
         """
@@ -185,6 +198,9 @@ class AscendStoreConnector(KVConnectorBase_V1):
         self.connector_worker.save_kv_layer(self._get_connector_metadata())
 
     def wait_for_save(self):
+        logger.info(f'>>>>> connector wait for save')
+        # import time
+        # time.sleep(5)
         if self.kv_role == "kv_consumer" and not self.consumer_is_to_put:
             # Don't do save if the role is kv_consumer
             return
@@ -194,13 +210,33 @@ class AscendStoreConnector(KVConnectorBase_V1):
 
         self.connector_worker.wait_for_save(self._get_connector_metadata())
 
+    def load_kv_token_wise(
+        self,
+        layer_name: str,
+        req_ids: list[str],
+        token_indices: torch.Tensor,
+    ):
+        assert self.use_layerwise, "load kv token-wise only considered for sparse kv offload"
+        return self.connector_worker.load_kv_token_wise(layer_name, req_ids, token_indices)
+
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str], set[str]]:
         """Get the finished recving and sending requests."""
         assert self.connector_worker is not None
         done_sending, done_recving = self.connector_worker.get_finished(
             finished_req_ids, self._get_connector_metadata()
         )
-        return done_sending, done_recving
+        meta = self._get_connector_metadata()
+        sended_and_finished: set[str] = set()
+        for item in list(self.sended_but_unfinished_reqs):
+            if item not in meta.unfinished_request_ids:
+                sended_and_finished.add(item)
+                self.sended_but_unfinished_reqs.remove(item)
+        for item in done_sending:
+            if item in meta.unfinished_request_ids:
+                self.sended_but_unfinished_reqs.add(item)
+            else:
+                sended_and_finished.add(item)
+        return sended_and_finished, done_recving
 
     def get_kv_connector_kv_cache_events(self) -> AscendStoreKVEvents | None:
         """

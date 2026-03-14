@@ -158,6 +158,11 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
     # Metadata for Prefill Context Parallelism (PCP) operations.
     prefill_context_parallel_metadata: AscendPrefillContextParallelMetadata | None = None
 
+    indexer_block_table_tensor: torch.Tensor | None = None
+    indexer_slot_mapping: torch.Tensor | None = None
+    num_offloaded_blocks: torch.Tensor | None = None
+    req_ids: list[str] = field(default_factory=list)
+
     # TODO: Remove it when vLLM no longer uses this function.
     def unpadded(self, num_actual_tokens: int, num_actual_reqs: int) -> "AscendCommonAttentionMetadata":
         # This only use to eagle now. It will be use to enforce_eager in future.
@@ -286,6 +291,27 @@ def maybe_save_kv_layer_to_connector(
         return
     # TODO: assert ascendMetadata
     connector.save_kv_layer(layer_name, kv_cache_layer, attn_metadata)
+
+
+def maybe_load_kv_token_wise(
+    layer_name: str,
+    req_ids: list[str], # [num_reqs]
+    token_indices: torch.Tensor, # [num_reqs, topk]
+) -> tuple[torch.Tensor]: # [num_reqs, topk, 1, dim]
+    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
+        return
+
+    connector = get_kv_transfer_group()
+
+    forward_context: ForwardContext = get_forward_context()
+    attn_metadata = forward_context.attn_metadata
+    if attn_metadata is None:
+        return
+    
+    if not hasattr(connector, 'load_kv_token_wise'):
+        return (None, None)
+    
+    return connector.load_kv_token_wise(layer_name, req_ids, token_indices)
 
 
 def round_up(val: int, align: int) -> int:
