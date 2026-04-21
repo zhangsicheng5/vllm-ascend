@@ -1,5 +1,10 @@
+from abc import ABC
+from collections import deque
 from typing import Any
+import time
 
+# from memcache_hybrid import DistributedObjectStore
+import numpy as np
 import vllm.envs as envs
 import zmq
 from vllm.config import VllmConfig
@@ -12,6 +17,7 @@ from vllm.v1.core.sched.output import SchedulerOutput
 from vllm.v1.request import Request
 from vllm.v1.serial_utils import MsgpackEncoder
 
+from vllm_ascend.ascend_config import get_ascend_config, init_ascend_config
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import (
     AscendConnectorMetadata,
     LoadSpec,
@@ -20,8 +26,27 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import
 )
 
 
+class CPUBlockManager(ABC):
+    def __init__(self, block_num: int) -> None:
+        self.block_num = block_num
+        self.block_pool = deque(range(1, block_num))
+
+    def allocate_block(self, new_block_num: int) -> list[int]:
+        if len(self.block_pool) < new_block_num:
+            raise ValueError("No enough cpu block to allocate")
+        allocated_blocks = []
+        for _ in range(new_block_num):
+            allocated_blocks.append(self.block_pool.popleft())
+        # logger.info(f'>>>>> cpu block manager, allocate {new_block_num} blocks, remain {len(self.block_pool)} blocks')
+        return allocated_blocks
+    
+    def free(self, to_free_blocks: list[int]):
+        self.block_pool.extend(to_free_blocks)
+        # logger.info(f'>>>>> cpu block manager, free {len(to_free_blocks)} blocks, remain {len(self.block_pool)} blocks')
+
+
 class KVPoolScheduler:
-    def __init__(self, vllm_config: "VllmConfig", use_layerwise):
+    def __init__(self, vllm_config: "VllmConfig", use_layerwise, page_size_bytes: int):
         self.use_layerwise = use_layerwise
         self.kv_role = vllm_config.kv_transfer_config.kv_role
         self.consumer_is_to_load = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
@@ -36,6 +61,10 @@ class KVPoolScheduler:
         self.load_specs: dict[str, LoadSpec] = {}
         self.pcp_size = getattr(vllm_config.parallel_config, "prefill_context_parallel_size", 1)
         self.dcp_size = getattr(vllm_config.parallel_config, "decode_context_parallel_size", 1)
+        init_ascend_config(vllm_config)
+        ascend_config = get_ascend_config()
+        self.use_offload = ascend_config.use_offload
+        logger.info(f'>>>>> pool scheduler init, use_offload = {self.use_offload}')
 
         self.original_block_size = vllm_config.cache_config.block_size
         self._block_size = vllm_config.cache_config.block_size
@@ -48,10 +77,65 @@ class KVPoolScheduler:
         self._preempted_req_ids: set[str] = set()
         # Whether to discard partial chunks
         self._discard_partial_chunks = vllm_config.kv_transfer_config.get_from_extra_config(
-            "discard_partial_chunks", True
+            "discard_partial_chunks", not self.use_offload
         )
         self._unfinished_requests: dict[str, tuple[Request, list[int]]] = {}
         self._unfinished_request_ids: set[str] = set()
+
+        self.page_size_bytes = page_size_bytes
+        # if self.use_offload:
+        #     self.store_scheduler = DistributedObjectStore()
+        #     self.store_scheduler.init(device_id=0, init_bm=False)
+        # else:
+        #     self.store_scheduler = None
+        self.use_mla = False
+        model_config = vllm_config.model_config
+        if (hasattr(model_config, "use_mla")
+                and isinstance(model_config.use_mla, bool)
+                and model_config.use_mla):
+            self.use_mla = True
+
+        # TODO 这里只需要申请，不需要读取，这里各种并行是不存在的，这里需要对并行size进行循环，访问每一个并行
+        self.tp_size = vllm_config.parallel_config.tensor_parallel_size
+        self.pp_size = 1
+        self.pcp_size = 1
+        self.dcp_size = 1
+        if self.use_mla:
+            self.num_kv_head = 1
+        else:
+            self.num_kv_head = model_config.get_total_num_kv_heads()
+        if self.num_kv_head < self.tp_size:
+            self.put_step = self.tp_size // self.num_kv_head
+        else:
+            self.put_step = 1
+        self.num_layers = model_config.hf_text_config.num_hidden_layers
+        self.model_name = model_config.model.split('/')[-1]
+
+        # whole key_gva map of all requests
+        # {key: [gva, count]}
+        self.key_gva_mapping: dict[str, list[int]] = {}
+
+        cpu_block_num = 2048 # 32k token * 8, 0.28 GB/layer/rank, 275 GB for 61 layer * 16 cards
+        self.cpu_block_manager = CPUBlockManager(cpu_block_num)
+
+    def generate_keys(self, chunk_hashes, req_id=''):
+        # TODO 应该要维护一个key和地址的映射关系，在写入的时候可以直接写
+        # TODO 先不考虑prefix cache，每次用完后都直接释放，后面淘汰可以根据
+        # TODO 现在alloc的时候，如果是以及存在的key是否会返回现有的地址，还是会重新生成一个新的地址？
+        keys = []
+        for layer_id in range(self.num_layers):
+            for pcp_rank in range(self.pcp_size):
+                for dcp_rank in range(self.dcp_size):
+                    for head_or_tp_rank in range(self.tp_size // self.put_step):
+                        # head_or_tp_rank = tp_rank // self.put_step
+                        for chunk_hash in chunk_hashes:
+                            keys.append(
+                                f"{self.model_name}"
+                                f"@pcp{pcp_rank}@dcp{dcp_rank}"
+                                f"@head_or_tp_rank:{head_or_tp_rank}"
+                                f"@{chunk_hash.hex()}@{layer_id}"
+                            )
+        return keys
 
     def get_num_new_matched_tokens(
         self,
@@ -153,8 +237,9 @@ class KVPoolScheduler:
         Args:
             scheduler_output (SchedulerOutput): the scheduler output object.
         """
+        time_start = time.time()
 
-        force_skip_save = self.kv_role == "kv_consumer" and not self.consumer_is_to_put
+        force_skip_save = self.kv_role == "kv_consumer" and not self.consumer_is_to_put if not self.use_offload else False
 
         for finished_req_id in scheduler_output.finished_req_ids:
             self._request_trackers.pop(finished_req_id, None)
@@ -178,7 +263,8 @@ class KVPoolScheduler:
             if not isinstance(request.block_ids[0], list):
                 unfolded_block_ids = request.block_ids.copy()
             else:
-                unfolded_block_ids = request.block_ids[0].copy()
+                unfolded_block_ids = request.block_ids[-1].copy() # NOTE dskv32 sparse offload, 0 for indexer and 1 for ori kv_cache
+            logger.info(f'>>>>> pool scheduler new reqs {request.req_id}, blocks: {len(unfolded_block_ids)}')
             request_tracker = RequestTracker(
                 req_id=request.req_id,
                 token_len=num_tokens_to_compute,
@@ -193,6 +279,43 @@ class KVPoolScheduler:
                 else len(request.prompt_token_ids)
             )
 
+            """
+            # mmc based offload
+            block_keys = self.generate_keys(request_real.block_hashes, req_id=request.req_id)
+            num_new_blocks = len(request_real.block_hashes)
+            num_keys = len(block_keys)
+            assert num_keys == self.num_layers * self.pcp_size * self.dcp_size * (self.tp_size // self.put_step) * num_new_blocks
+            # [layer_id, pcp, dcp, tp, block_hashes]
+            if self.store_scheduler is not None:
+                key_gva_mapping = {}
+                block_keys_new = []
+                new_key_index = []
+                gvas = np.zeros([num_keys], dtype=np.uint64) # keep same order as block_keys
+                for idx, block_key in enumerate(block_keys):
+                    if block_key in self.key_gva_mapping:
+                        gva = self.key_gva_mapping[block_key][0]
+                        key_gva_mapping[block_key] = gva
+                        self.key_gva_mapping[block_key][1] += 1
+                        gvas[idx] = gva
+                    else:
+                        block_keys_new.append(block_key)
+                        new_key_index.append(idx)
+                block_size_bytes = [self.page_size_bytes for _ in range(len(block_keys_new))]
+                gvas_new = self.store_scheduler.batch_alloc(block_keys_new, block_size_bytes) if block_keys_new else []
+                for block_key_new, gva_new in zip(block_keys_new, gvas_new):
+                    key_gva_mapping[block_key_new] = gva_new
+                    self.key_gva_mapping[block_key_new] = [gva_new, 1]
+                gvas[new_key_index] = gvas_new
+            else:
+                key_gva_mapping = {}
+            request_tracker.key_gva_mapping = key_gva_mapping
+            request_tracker.allocated_block_gvas = gvas.reshape([self.num_layers, self.pcp_size, self.dcp_size, self.tp_size // self.put_step, num_new_blocks])
+            """
+            num_new_blocks = len(request_real.block_hashes) # NOTE should use block_hash(full blocks) instead of unfolded_block_ids(all blocks) here
+            # num_new_blocks = len(unfolded_block_ids)
+            block_ids_cpu = self.cpu_block_manager.allocate_block(num_new_blocks)
+            request_tracker.allocated_block_ids_cpu = block_ids_cpu
+
             req_meta = ReqMeta.from_request_tracker(
                 request_tracker,
                 self._block_size,
@@ -202,18 +325,25 @@ class KVPoolScheduler:
                 is_last_chunk=request_tracker.token_len >= last_chunk_tokens_num,
                 discard_partial_chunks=self._discard_partial_chunks,
                 original_block_size=self.original_block_size,
+                # need_save=True,
+                need_save=num_new_blocks > 0, # NOTE
+                num_new_blocks=num_new_blocks,
             )
             if req_meta is not None:
                 meta.add_request(req_meta)
 
         cached_reqs = scheduler_output.scheduled_cached_reqs
         if not force_skip_save:
-            for i, req_id in enumerate(cached_reqs.req_ids):
+            for idx, req_id in enumerate(cached_reqs.req_ids):
                 # resumed request
-                new_block_ids = cached_reqs.new_block_ids[i]
-                if not new_block_ids:
-                    continue
+                new_block_ids = cached_reqs.new_block_ids[idx]
+                if isinstance(new_block_ids, tuple):
+                    # NOTE dskv32 sparse offload, 0 for indexer and 1 for ori kv_cache
+                    new_block_ids = new_block_ids[-1]
+                # if not new_block_ids:
+                #     continue
                 if req_id in self._preempted_req_ids:
+                    raise ValueError('preempted reqs not implemented')
                     if isinstance(new_block_ids, tuple):
                         new_block_ids = new_block_ids[0].copy()
                     else:
@@ -263,25 +393,69 @@ class KVPoolScheduler:
                         raise ValueError(
                             f"Request {req_id} is not in _unfinished_requests, but it is scheduled to be cached"
                         )
-                    num_computed_token = cached_reqs.num_computed_tokens[i]
-                    if num_computed_token >= len(request.prompt_token_ids):
+                    num_computed_token = cached_reqs.num_computed_tokens[idx]
+                    if 0 and num_computed_token >= len(request.prompt_token_ids):
                         continue
-                    request_tracker.update(new_block_ids)
+                    # in offload case, can't continue even there's no new blocks,
+                    # since we need metadata for onload
+                    num_new_blocks = 0 if new_block_ids is None else len(new_block_ids)
+                    """
+                    # mmc based offload
+                    num_keys = self.num_layers * self.pcp_size * self.dcp_size * (self.tp_size // self.put_step) * num_new_blocks
+                    gvas = np.zeros([num_keys], dtype=np.uint64) # keep same order as block_keys
+                    if num_new_blocks:
+                        block_keys = self.generate_keys(request.block_hashes[-num_new_blocks:])
+                        assert len(block_keys) == num_keys
+                        if self.store_scheduler is not None:
+                            key_gva_mapping = {}
+                            block_keys_new = []
+                            new_key_index = []
+                            for idx, block_key in enumerate(block_keys):
+                                if block_key in self.key_gva_mapping:
+                                    gva = self.key_gva_mapping[block_key][0]
+                                    key_gva_mapping[block_key] = gva
+                                    self.key_gva_mapping[block_key][1] += 1
+                                    gvas[idx] = gva
+                                else:
+                                    block_keys_new.append(block_key)
+                                    new_key_index.append(idx)
+                            block_size_bytes = [self.page_size_bytes for _ in range(len(block_keys_new))]
+                            gvas_new = self.store_scheduler.batch_alloc(block_keys_new, block_size_bytes) if block_keys_new else []
+                            for block_key_new, gva_new in zip(block_keys_new, gvas_new):
+                                key_gva_mapping[block_key_new] = gva_new
+                                self.key_gva_mapping[block_key_new] = [gva_new, 1]
+                            gvas[new_key_index] = gvas_new
+                        else:
+                            key_gva_mapping = {}
+                        request_tracker.key_gva_mapping.update(key_gva_mapping)
+                    request_tracker.update(new_block_ids, gvas.reshape([self.num_layers, self.pcp_size, self.dcp_size, self.tp_size // self.put_step, num_new_blocks]))
+                    """
+                    new_block_ids_cpu = self.cpu_block_manager.allocate_block(num_new_blocks)
+                    request_tracker.update(new_block_ids, new_block_ids_cpu)
 
                     last_chunk_tokens_num = (
                         (len(request.prompt_token_ids) // self._block_size * self._block_size)
                         if self._discard_partial_chunks
                         else len(request.prompt_token_ids)
                     )
+                    load_spec = None
+                    # if self.use_offload:
+                    #     load_spec = LoadSpec(
+                    #         vllm_cached_tokens=0,
+                    #         kvpool_cached_tokens=cached_reqs.num_computed_tokens[i],
+                    #         can_load=True,
+                    #     ) #
                     req_meta = ReqMeta.from_request_tracker(
                         request_tracker,
                         self._block_size,
-                        load_spec=None,
+                        load_spec=load_spec,
                         skip_save=force_skip_save,
                         block_hashes=request.block_hashes,
                         is_last_chunk=request_tracker.token_len >= last_chunk_tokens_num,
                         discard_partial_chunks=self._discard_partial_chunks,
                         original_block_size=self.original_block_size,
+                        need_save=num_new_blocks > 0,
+                        num_new_blocks=num_new_blocks,
                     )
                 if req_meta is not None:
                     meta.add_request(req_meta)
@@ -315,6 +489,9 @@ class KVPoolScheduler:
                 )
                 if req_meta is not None:
                     meta.add_request(req_meta)
+
+        time_end = time.time()
+        # logger.info(f'>>>>> time, pool scheduler build meta = {time_end - time_start}')
         return meta
 
     def request_finished(
@@ -329,6 +506,7 @@ class KVPoolScheduler:
         if self.kv_role == "kv_consumer" and not self.consumer_is_to_put:
             return False, None
         tracker = self._request_trackers.get(request.request_id)
+        self.cpu_block_manager.free(tracker.allocated_block_ids_cpu)
         if tracker is not None and tracker.num_saved_tokens <= 0:
             return False, None
         delay_free_blocks = len(block_ids) > 0
