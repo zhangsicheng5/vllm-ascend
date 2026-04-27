@@ -13,7 +13,7 @@ def get_cache_miss_topk_kernel(
         num_reqs,
         topk: tl.constexpr,
         BLOCK: tl.constexpr,
-        SUB_BLOCK: tl.constexpr = 1,
+        SUB_BLOCK: tl.constexpr,
 ):
     pid = tl.program_id(0)
     if pid >= num_reqs:
@@ -141,5 +141,6 @@ def get_cache_miss_topk_indices_triton(
         num_reqs,
         topk=topk,
         BLOCK=BLOCK,
+        SUB_BLOCK=1
     )
     return out
