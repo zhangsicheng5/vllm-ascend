@@ -1026,7 +1026,27 @@ class AscendSFAImpl(MLAAttentionImpl):
                 attn_output = torch.cat([attn_output_decode, attn_output_prefill], dim=0).contiguous()
 
             return attn_output
+            num_decodes = attn_metadata.num_decodes
+            num_prefills = attn_metadata.num_prefills
+            num_decode_tokens = attn_metadata.num_decode_tokens
+            ql_nope_decode = ql_nope[:num_decode_tokens]
+            ql_nope_prefill = ql_nope[num_decode_tokens:]
+            # key_rope_decode = key_rope[:num_decode_tokens]
+            # key_rope_prefill = key_rope[num_decode_tokens:]
+            q_pe_decode = q_pe[:num_decode_tokens]
+            q_pe_prefill = q_pe[num_decode_tokens:]
+            topk_indices_decode = topk_indices[:num_decode_tokens]
+            topk_indices_prefill = topk_indices[num_decode_tokens:]
+            actual_seq_lengths_query_decode = actual_seq_lengths_query[:num_decodes]
+            actual_seq_lengths_query_prefill = actual_seq_lengths_query[num_decodes:]
+            actual_seq_lengths_key_decode = actual_seq_lengths_key[:num_decodes]
+            actual_seq_lengths_key_prefill = actual_seq_lengths_key[num_decodes:]
+            block_table_decode = block_table[:num_decodes]
+            block_table_prefill = block_table[num_decodes:]
 
+            if num_decodes > 0:
+                topk_buffer, sparse_topk_indices, sparse_block_table, sparse_seq_len_kv = \
+                    self._get_topk_buffer(topk_indices_decode, kv_cache, attn_metadata, layer_name, block_table_decode, actual_seq_lengths_key_decode)
         attn_output = torch.ops._C_ascend.npu_sparse_flash_attention(
             query=ql_nope,
             key=kv,
@@ -1178,35 +1198,46 @@ class AscendSFAImpl(MLAAttentionImpl):
         #     self.last_step_topk_indices[:num_reqs],
         #     topk_indices,
         # )
-        # topk_indices = get_cache_miss_topk_indices_triton(
-        #     attn_metadata.req_ids_tensor[:num_reqs],
-        #     self.last_step_topk_indices[:num_reqs],
-        #     topk_indices,
-        # )
-        # num_tokens_cache_miss = (topk_indices >= 0).sum().item()
+
+        t1 = time.time()
+        topk_indices = get_cache_miss_topk_indices_triton(
+            attn_metadata.req_ids_tensor[:num_reqs],
+            self.last_step_topk_indices[:num_reqs],
+            topk_indices,
+        )
+        t2 = time.time()
+        print(f">>>>>>>>>>> get_cache_miss_topk_indices_triton {(t2-t1)*1000:.2f}ms")
+        num_tokens_cache_miss = (topk_indices >= 0).sum().item()
 
         # common
+        t1 = time.time()
         valid_mask = topk_indices >= 0
         num_offloaded_blocks = attn_metadata.num_offloaded_blocks[:num_reqs].unsqueeze(1)
         offload_thresholds = num_offloaded_blocks * self.block_size
         npu_mask = (topk_indices >= offload_thresholds) & valid_mask
         cpu_mask = (topk_indices < offload_thresholds) & valid_mask
+        t2 = time.time()
+        print(f">>>>>>>>>>> time 2 {(t2-t1)*1000:.2f}ms")
+
         # num_tokens_npu = npu_mask.sum().item()
         # num_tokens_cpu = cpu_mask.sum().item()
 
         # load npu
+        t1 = time.time()
         block_indices = torch.clamp(topk_indices // self.block_size, min=0)
         block_ids = torch.gather(block_table, 1, block_indices)
         offsets_in_block = topk_indices % self.block_size
         npu_mask = npu_mask.unsqueeze(-1).unsqueeze(-1)
         topk_buffer_k[...] = torch.where(npu_mask, kv_cache[0][block_ids, offsets_in_block], topk_buffer_k)
         topk_buffer_v[...] = torch.where(npu_mask, kv_cache[1][block_ids, offsets_in_block], topk_buffer_v)
-
+        t2 = time.time()
+        print(f">>>>>>>>>>> time 3 {(t2-t1)*1000:.2f}ms")
         # load cpu
         cpu_token_indices = torch.where(cpu_mask, topk_indices, -1)
-        maybe_load_kv_token_wise_graph(layer_name, num_reqs, cpu_token_indices, cpu_mask, forward_context.capturing)
+        # maybe_load_kv_token_wise_graph(layer_name, num_reqs, cpu_token_indices, cpu_mask, forward_context.capturing)
 
         # generate new block_table & indices
+        t1 = time.time()
         topk_buffer_k = topk_buffer_k.reshape([-1, self.block_size, 1, 512])
         topk_buffer_v = topk_buffer_v.reshape([-1, self.block_size, 1, 64])
         sparse_block_table = self.sparse_block_table[:num_reqs]
@@ -1214,7 +1245,8 @@ class AscendSFAImpl(MLAAttentionImpl):
         sparse_topk_indices = self.sparse_topk_indices[:num_reqs]
         sparse_topk_indices = torch.where(sparse_topk_indices < sparse_seq_len_kv.unsqueeze(1), sparse_topk_indices, -1)
         sparse_topk_indices = sparse_topk_indices.unsqueeze(1)
-
+        t2 = time.time()
+        print(f">>>>>>>>>>> time 4 {(t2-t1)*1000:.2f}ms")
         return (topk_buffer_k, topk_buffer_v), sparse_topk_indices, sparse_block_table, sparse_seq_len_kv
 
     def indexer_select_pre_process(

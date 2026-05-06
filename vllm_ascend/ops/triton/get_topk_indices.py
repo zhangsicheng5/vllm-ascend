@@ -25,60 +25,60 @@ def get_cache_miss_topk_kernel(
     cols = tl.arange(0, BLOCK)
     mask = cols < topk
 
-    old = tl.load(old_ptr + row_off + cols, mask=mask, other=-1).to(tl.int32)
-    new = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int32)
+    old = tl.load(old_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    new = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
     new_with_offset = tl.where(new >= 0, new + req_offset, -1)
     # ---- sub-blocked miss_mask: new not in old ----
-    miss_count = tl.zeros((BLOCK,), tl.int32)
+    miss_count = tl.zeros((BLOCK,), tl.int64)
     for sb_start in range(0, BLOCK, SUB_BLOCK):
         sb_cols = sb_start + tl.arange(0, SUB_BLOCK)
         sb_mask = sb_cols < topk
         old_chunk = tl.load(
             old_ptr + row_off + sb_cols, mask=sb_mask, other=-1
-        ).to(tl.int32)
+        ).to(tl.int64)
         old_b = tl.broadcast_to(old_chunk[None, :], (BLOCK, SUB_BLOCK))
         new_b = tl.broadcast_to(new_with_offset[:, None], (BLOCK, SUB_BLOCK))
         cmp = new_b == old_b
-        miss_count += tl.sum(cmp.to(tl.int32), axis=1)
+        miss_count += tl.sum(cmp.to(tl.int64), axis=1)
     miss_mask = (miss_count == 0) & (new_with_offset >= 0)
 
     # ---- sub-blocked avail_mask: old not in new ----
-    avail_count = tl.zeros((BLOCK,), tl.int32)
+    avail_count = tl.zeros((BLOCK,), tl.int64)
     for sb_start in range(0, BLOCK, SUB_BLOCK):
         sb_cols = sb_start + tl.arange(0, SUB_BLOCK)
         sb_mask = sb_cols < topk
         new_chunk = tl.load(
             new_ptr + row_off + sb_cols, mask=sb_mask, other=-1
-        ).to(tl.int32)
+        ).to(tl.int64)
         new_chunk_off = tl.where(new_chunk >= 0, new_chunk + req_offset, -1)
         old_b = tl.broadcast_to(old[:, None], (BLOCK, SUB_BLOCK))
         new_b = tl.broadcast_to(new_chunk_off[None, :], (BLOCK, SUB_BLOCK))
         cmp = old_b == new_b
-        avail_count += tl.sum(cmp.to(tl.int32), axis=1)
+        avail_count += tl.sum(cmp.to(tl.int64), axis=1)
     avail_mask = (avail_count == 0) & (old >= 0)
 
     # ---- shortage: fill empty slots ----
-    num_tokens_to_load = tl.sum(miss_mask.to(tl.int32), axis=0)
-    num_available_slot = tl.sum(avail_mask.to(tl.int32), axis=0)
+    num_tokens_to_load = tl.sum(miss_mask.to(tl.int64), axis=0)
+    num_available_slot = tl.sum(avail_mask.to(tl.int64), axis=0)
     num_shortage_slot = num_tokens_to_load - num_available_slot
 
     empty_mask = old == -1
-    empty_cumsum = tl.cumsum(empty_mask.to(tl.int32), axis=0)
+    empty_cumsum = tl.cumsum(empty_mask.to(tl.int64), axis=0)
     selected_empty = (empty_cumsum <= num_shortage_slot) & empty_mask
     avail_mask = avail_mask | selected_empty
 
     # ---- compact: scatter miss values into available slots ----
     miss_vals = tl.where(miss_mask, new_with_offset, 0)
-    avail_rank = tl.cumsum(avail_mask.to(tl.int32), axis=0) - 1
-    miss_rank = tl.cumsum(miss_mask.to(tl.int32), axis=0) - 1
-    num_miss = tl.sum(miss_mask.to(tl.int32), axis=0)
+    avail_rank = tl.cumsum(avail_mask.to(tl.int64), axis=0) - 1
+    miss_rank = tl.cumsum(miss_mask.to(tl.int64), axis=0) - 1
+    num_miss = tl.sum(miss_mask.to(tl.int64), axis=0)
 
     # Gather-then-scatter: split by SUB_BLOCK chunks of target rank
     # Phase 1 (gather): for each target rank r in [sb_start, sb_start+SUB_BLOCK),
     #            find miss_vals where miss_rank == r
     # Phase 2 (scatter): for each available slot where avail_rank == r,
     #            write the gathered value
-    out_with_offset = tl.full((BLOCK,), -1, tl.int32)
+    out_with_offset = tl.full((BLOCK,), -1, tl.int64)
     for sb_start in range(0, BLOCK, SUB_BLOCK):
         target_ranks = sb_start + tl.arange(0, SUB_BLOCK)
 
@@ -90,7 +90,7 @@ def get_cache_miss_topk_kernel(
 
         miss_match = (mr_b == tr_b) & mm_b
         gathered = tl.sum(
-            tl.where(miss_match, mv_b, tl.zeros((BLOCK, SUB_BLOCK), tl.int32)),
+            tl.where(miss_match, mv_b, tl.zeros((BLOCK, SUB_BLOCK), tl.int64)),
             axis=0,
         )
 
@@ -104,11 +104,11 @@ def get_cache_miss_topk_kernel(
             tl.where(
                 slot_match,
                 gathered[None, :],
-                tl.zeros((BLOCK, SUB_BLOCK), tl.int32),
+                tl.zeros((BLOCK, SUB_BLOCK), tl.int64),
             ),
             axis=1,
         )
-        has_match = tl.sum(slot_match.to(tl.int32), axis=1) > 0
+        has_match = tl.sum(slot_match.to(tl.int64), axis=1) > 0
         out_with_offset = tl.where(has_match, result, out_with_offset)
 
     # ---- update old in-place ----
@@ -116,7 +116,7 @@ def get_cache_miss_topk_kernel(
     tl.store(old_ptr + row_off + cols, updated_old, mask=mask)
 
     # ---- remove req offset and store ----
-    out = tl.where(out_with_offset >= 0, out_with_offset - req_offset, tl.full((BLOCK,), -1, tl.int32))
+    out = tl.where(out_with_offset >= 0, out_with_offset - req_offset, tl.full((BLOCK,), -1, tl.int64))
     tl.store(out_ptr + row_off + cols, out.to(tl.int32), mask=mask)
 
 
