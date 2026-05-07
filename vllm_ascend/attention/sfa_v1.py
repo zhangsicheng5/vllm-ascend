@@ -1211,12 +1211,14 @@ class AscendSFAImpl(MLAAttentionImpl):
             topk_indices.device,
             history_dtype=topk_indices_old.dtype,
         )
+        torch.npu.synchronize()
         topk_indices1 = get_cache_miss_topk_indices_triton(
             attn_metadata.req_ids_tensor[:num_reqs],
             topk_indices_old,
             topk_indices,
             **cache_miss_scratch,
         )
+        torch.npu.synchronize()
         print(f">>>>>topk_indices {topk_indices1}")
         t2 = time.time()
         print(f">>>>>>>>>>> get_cache_miss_topk_indices_triton {(t2-t1)*1000:.2f}ms")

@@ -271,7 +271,11 @@ def get_cache_miss_topk_indices_triton_bitmap(
     num_reqs, topk = topk_indices_new.shape
     assert topk == topk_indices_old.shape[1]
 
-    out = torch.empty_like(topk_indices_new, dtype=torch.int32)
+    out = torch.empty(
+        topk_indices_new.shape,
+        dtype=torch.int32,
+        device=topk_indices_new.device,
+    )
     if old_marker is None:
         old_marker = torch.zeros(
             (num_reqs, token_limit),
@@ -285,9 +289,17 @@ def get_cache_miss_topk_indices_triton_bitmap(
             device=topk_indices_new.device,
         )
     if slot_scratch is None:
-        slot_scratch = torch.empty_like(topk_indices_new, dtype=torch.int32)
+        slot_scratch = torch.empty(
+            topk_indices_new.shape,
+            dtype=torch.int32,
+            device=topk_indices_new.device,
+        )
     if miss_scratch is None:
-        miss_scratch = torch.empty_like(topk_indices_old)
+        miss_scratch = torch.empty(
+            topk_indices_old.shape,
+            dtype=topk_indices_old.dtype,
+            device=topk_indices_old.device,
+        )
     if miss_count is None:
         miss_count = torch.empty((num_reqs,), dtype=torch.int32, device=topk_indices_new.device)
     if slot_count is None:
@@ -310,6 +322,7 @@ def get_cache_miss_topk_indices_triton_bitmap(
         TOKEN_LIMIT=token_limit,
         BLOCK=BLOCK,
     )
+    torch.npu.synchronize()
 
     compact_cache_miss_slots_kernel[grid](
         req_ids_tensor,
@@ -327,6 +340,7 @@ def get_cache_miss_topk_indices_triton_bitmap(
         TOKEN_LIMIT=token_limit,
         BLOCK=BLOCK,
     )
+    torch.npu.synchronize()
 
     apply_cache_miss_slots_kernel[grid](
         req_ids_tensor,
@@ -341,6 +355,7 @@ def get_cache_miss_topk_indices_triton_bitmap(
         TOKEN_LIMIT=token_limit,
         BLOCK=BLOCK,
     )
+    torch.npu.synchronize()
 
     return out
 
@@ -353,7 +368,11 @@ def get_cache_miss_topk_indices_triton_exact(
     num_reqs, topk = topk_indices_new.shape
     assert topk == topk_indices_old.shape[1]
 
-    out = torch.empty_like(topk_indices_new, dtype=torch.int32)
+    out = torch.empty(
+        topk_indices_new.shape,
+        dtype=torch.int32,
+        device=topk_indices_new.device,
+    )
 
     grid = (num_reqs,)
     BLOCK = triton.next_power_of_2(topk)
