@@ -42,10 +42,7 @@ from vllm_ascend.ops.layer_shard_linear import (
     register_all_layers_to_shard_weight_series,
 )
 from vllm_ascend.ops.rotary_embedding import get_cos_and_sin_mla
-from vllm_ascend.ops.triton.get_topk_indices import (
-    CacheMissTopKScratch,
-    get_cache_miss_topk_indices_triton,
-)
+from vllm_ascend.ops.triton.get_topk_indices import get_cache_miss_topk_indices_triton
 from vllm_ascend.ops.triton.rope import rope_forward_triton
 from vllm_ascend.quantization.methods import AscendW8A8LinearMethod
 from vllm_ascend.utils import (
@@ -477,7 +474,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.sparse_block_table = torch.arange(0, max_num_reqs * 2048 // 128, dtype=torch.int32, device='npu').reshape([max_num_reqs, -1])
         self.sparse_topk_indices = torch.arange(2048, dtype=torch.int32, device="npu").view(1, -1).repeat(max_num_reqs, 1)
         self.last_step_topk_indices = torch.full([max_num_reqs, 2048], -1, dtype=torch.int64, device='npu') # 32 bits for req_id, 11 bits for token_id, other redundent
-        self.cache_miss_scratch = CacheMissTopKScratch()
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
         # NOTE: We currently do not support quant kv_b_proj.
@@ -1205,18 +1201,11 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         t1 = time.time()
         topk_indices_old = self.last_step_topk_indices[:num_reqs]
-        cache_miss_scratch = self.cache_miss_scratch.prepare(
-            num_reqs,
-            topk_indices.shape[1],
-            topk_indices.device,
-            history_dtype=topk_indices_old.dtype,
-        )
         torch.npu.synchronize()
         topk_indices = get_cache_miss_topk_indices_triton(
             attn_metadata.req_ids_tensor[:num_reqs].contiguous(),
             topk_indices_old,
             topk_indices,
-            **cache_miss_scratch,
         )
         torch.npu.synchronize()
         t2 = time.time()
