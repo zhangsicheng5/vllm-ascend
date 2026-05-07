@@ -1193,7 +1193,7 @@ class AscendSFAImpl(MLAAttentionImpl):
         num_reqs = topk_indices.shape[0]
         topk_buffer_k = kv_cache[3][:num_reqs]
         topk_buffer_v = kv_cache[4][:num_reqs]
-        topk_indices = topk_indices.squeeze(1) # TODO maybe consider dim1 (head_num?)
+        topk_indices = topk_indices.squeeze(1).contiguous() # TODO maybe consider dim1 (head_num?)
 
         # cache reuse
         # num_tokens_ori = (topk_indices >= 0).sum().item()
@@ -1212,17 +1212,15 @@ class AscendSFAImpl(MLAAttentionImpl):
             history_dtype=topk_indices_old.dtype,
         )
         torch.npu.synchronize()
-        topk_indices1 = get_cache_miss_topk_indices_triton(
-            attn_metadata.req_ids_tensor[:num_reqs],
+        topk_indices = get_cache_miss_topk_indices_triton(
+            attn_metadata.req_ids_tensor[:num_reqs].contiguous(),
             topk_indices_old,
             topk_indices,
             **cache_miss_scratch,
         )
         torch.npu.synchronize()
-        print(f">>>>>topk_indices {topk_indices1}")
         t2 = time.time()
         print(f">>>>>>>>>>> get_cache_miss_topk_indices_triton {(t2-t1)*1000:.2f}ms")
-        num_tokens_cache_miss = (topk_indices1 >= 0).sum().item()
 
         # common
         t1 = time.time()

@@ -30,13 +30,15 @@ def mark_cache_tokens_kernel(
     old_with_offset = tl.load(old_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
     old_token = old_with_offset - req_offset
     old_valid = mask & (old_with_offset >= 0) & (old_token >= 0) & (old_token < TOKEN_LIMIT)
+    old_token_safe = tl.where(old_valid, old_token, 0)
     stamp = tl.load(stamp_ptr).to(tl.int32)
     stamp_vals = tl.full((BLOCK,), 0, tl.int32) + stamp
-    tl.store(old_marker_ptr + marker_off + old_token, stamp_vals, mask=old_valid)
+    tl.store(old_marker_ptr + marker_off + old_token_safe, stamp_vals, mask=old_valid)
 
     new_token = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
     new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
-    tl.store(new_marker_ptr + marker_off + new_token, stamp_vals, mask=new_valid)
+    new_token_safe = tl.where(new_valid, new_token, 0)
+    tl.store(new_marker_ptr + marker_off + new_token_safe, stamp_vals, mask=new_valid)
 
 
 @triton.jit
@@ -70,13 +72,15 @@ def compact_cache_miss_slots_kernel(
     old_with_offset = tl.load(old_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
     old_token = old_with_offset - req_offset
     old_valid = mask & (old_with_offset >= 0) & (old_token >= 0) & (old_token < TOKEN_LIMIT)
+    old_token_safe = tl.where(old_valid, old_token, 0)
 
     new_token = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
     new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_token_safe = tl.where(new_valid, new_token, 0)
     new_with_offset = new_token + req_offset
 
-    old_hit = tl.load(old_marker_ptr + marker_off + new_token, mask=new_valid, other=0)
-    new_hit = tl.load(new_marker_ptr + marker_off + old_token, mask=old_valid, other=0)
+    old_hit = tl.load(old_marker_ptr + marker_off + new_token_safe, mask=new_valid, other=0)
+    new_hit = tl.load(new_marker_ptr + marker_off + old_token_safe, mask=old_valid, other=0)
 
     stamp = tl.load(stamp_ptr).to(tl.int32)
     miss_mask = new_valid & (old_hit != stamp)
@@ -94,9 +98,11 @@ def compact_cache_miss_slots_kernel(
     miss_rank = tl.cumsum(miss_mask.to(tl.int32), axis=0) - 1
     avail_rank = tl.cumsum(avail_mask.to(tl.int32), axis=0) - 1
     num_slots = tl.sum(avail_mask.to(tl.int32), axis=0)
+    miss_rank_safe = tl.where(miss_mask, miss_rank, 0)
+    avail_rank_safe = tl.where(avail_mask, avail_rank, 0)
 
-    tl.store(slot_scratch_ptr + row_off + avail_rank, cols, mask=avail_mask)
-    tl.store(miss_scratch_ptr + row_off + miss_rank, new_with_offset, mask=miss_mask)
+    tl.store(slot_scratch_ptr + row_off + avail_rank_safe, cols, mask=avail_mask)
+    tl.store(miss_scratch_ptr + row_off + miss_rank_safe, new_with_offset, mask=miss_mask)
     tl.store(miss_count_ptr + pid, num_miss)
     tl.store(slot_count_ptr + pid, num_slots)
 
@@ -134,9 +140,10 @@ def apply_cache_miss_slots_kernel(
     slots = tl.load(slot_scratch_ptr + row_off + cols, mask=update_mask, other=0).to(tl.int32)
     miss_with_offset = tl.load(miss_scratch_ptr + row_off + cols, mask=miss_mask, other=-1).to(tl.int64)
     miss_token = miss_with_offset - req_offset
+    out_mask = miss_mask & update_mask
 
     tl.store(old_ptr + row_off + slots, miss_with_offset, mask=update_mask)
-    tl.store(out_ptr + row_off + slots, miss_token.to(tl.int32), mask=miss_mask)
+    tl.store(out_ptr + row_off + slots, miss_token.to(tl.int32), mask=out_mask)
 
 
 @triton.jit
@@ -437,7 +444,7 @@ class CacheMissTopKScratch:
             or self.history_dtype != history_dtype
             or self.marker_shape[0] < num_reqs
             or self.scratch_shape[0] < num_reqs
-            or self.scratch_shape[1] < topk
+            or self.scratch_shape[1] != topk
         )
 
         if needs_alloc:
