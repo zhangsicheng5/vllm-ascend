@@ -329,7 +329,6 @@ def get_cache_miss_topk_indices_triton_bitmap(
         TOKEN_LIMIT=token_limit,
         BLOCK=BLOCK,
     )
-    torch.npu.synchronize()
 
     compact_cache_miss_slots_kernel[grid](
         req_ids_tensor,
@@ -347,7 +346,6 @@ def get_cache_miss_topk_indices_triton_bitmap(
         TOKEN_LIMIT=token_limit,
         BLOCK=BLOCK,
     )
-    torch.npu.synchronize()
 
     apply_cache_miss_slots_kernel[grid](
         req_ids_tensor,
@@ -362,7 +360,6 @@ def get_cache_miss_topk_indices_triton_bitmap(
         TOKEN_LIMIT=token_limit,
         BLOCK=BLOCK,
     )
-    torch.npu.synchronize()
 
     return out
 
@@ -371,7 +368,7 @@ def get_cache_miss_topk_indices_triton_exact(
     req_ids_tensor: torch.Tensor,
     topk_indices_old: torch.Tensor,
     topk_indices_new: torch.Tensor,
-    sub_block: int = 32,
+    sub_block: int = 4,
 ):
     num_reqs, topk = topk_indices_new.shape
     assert topk == topk_indices_old.shape[1]
@@ -404,11 +401,11 @@ def get_cache_miss_topk_indices_triton(
     topk_indices_new: torch.Tensor,
     **kwargs,
 ):
-    return get_cache_miss_topk_indices_triton_exact(
+    return get_cache_miss_topk_indices_triton_bitmap(
         req_ids_tensor,
         topk_indices_old,
         topk_indices_new,
-        sub_block=kwargs.get("sub_block", 32),
+        **kwargs,
     )
 
 
