@@ -1200,14 +1200,15 @@ class AscendSFAImpl(MLAAttentionImpl):
         # )
 
         t1 = time.time()
-        topk_indices = get_cache_miss_topk_indices_triton(
+        topk_indices1 = get_cache_miss_topk_indices_triton(
             attn_metadata.req_ids_tensor[:num_reqs],
             self.last_step_topk_indices[:num_reqs],
             topk_indices,
         )
+        print(f">>>>>topk_indices {topk_indices1}")
         t2 = time.time()
         print(f">>>>>>>>>>> get_cache_miss_topk_indices_triton {(t2-t1)*1000:.2f}ms")
-        num_tokens_cache_miss = (topk_indices >= 0).sum().item()
+        num_tokens_cache_miss = (topk_indices1 >= 0).sum().item()
 
         # common
         t1 = time.time()
@@ -1217,7 +1218,7 @@ class AscendSFAImpl(MLAAttentionImpl):
         npu_mask = (topk_indices >= offload_thresholds) & valid_mask
         cpu_mask = (topk_indices < offload_thresholds) & valid_mask
         t2 = time.time()
-        print(f">>>>>>>>>>> time 2 {(t2-t1)*1000:.2f}ms")
+        # print(f">>>>>>>>>>> time 2 {(t2-t1)*1000:.2f}ms")
 
         # num_tokens_npu = npu_mask.sum().item()
         # num_tokens_cpu = cpu_mask.sum().item()
@@ -1231,7 +1232,7 @@ class AscendSFAImpl(MLAAttentionImpl):
         topk_buffer_k[...] = torch.where(npu_mask, kv_cache[0][block_ids, offsets_in_block], topk_buffer_k)
         topk_buffer_v[...] = torch.where(npu_mask, kv_cache[1][block_ids, offsets_in_block], topk_buffer_v)
         t2 = time.time()
-        print(f">>>>>>>>>>> time 3 {(t2-t1)*1000:.2f}ms")
+        # print(f">>>>>>>>>>> time 3 {(t2-t1)*1000:.2f}ms")
         # load cpu
         cpu_token_indices = torch.where(cpu_mask, topk_indices, -1)
         # maybe_load_kv_token_wise_graph(layer_name, num_reqs, cpu_token_indices, cpu_mask, forward_context.capturing)
@@ -1246,7 +1247,7 @@ class AscendSFAImpl(MLAAttentionImpl):
         sparse_topk_indices = torch.where(sparse_topk_indices < sparse_seq_len_kv.unsqueeze(1), sparse_topk_indices, -1)
         sparse_topk_indices = sparse_topk_indices.unsqueeze(1)
         t2 = time.time()
-        print(f">>>>>>>>>>> time 4 {(t2-t1)*1000:.2f}ms")
+        # print(f">>>>>>>>>>> time 4 {(t2-t1)*1000:.2f}ms")
         return (topk_buffer_k, topk_buffer_v), sparse_topk_indices, sparse_block_table, sparse_seq_len_kv
 
     def indexer_select_pre_process(
