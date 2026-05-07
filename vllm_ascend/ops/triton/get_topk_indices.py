@@ -1,10 +1,7 @@
-import time
-
 import torch
-import torch_npu
-
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def mark_cache_tokens_kernel(
@@ -388,54 +385,71 @@ def get_cache_miss_topk_indices_triton(
     )
 
 
-def prepare_cache_miss_scratch(
-    num_reqs: int,
-    topk: int,
-    device,
-    token_limit: int = 65536,
-    history_dtype: torch.dtype = torch.int64,
-):
-    cache = prepare_cache_miss_scratch
-    marker_shape = (num_reqs, token_limit)
-    scratch_shape = (num_reqs, topk)
-    needs_alloc = (
-        getattr(cache, "_cache_miss_token_limit", None) != token_limit
-        or getattr(cache, "_cache_miss_device", None) != device
-        or getattr(cache, "_cache_miss_history_dtype", None) != history_dtype
-        or getattr(cache, "_cache_miss_marker_shape", (0, 0))[0] < num_reqs
-        or getattr(cache, "_cache_miss_scratch_shape", (0, 0))[0] < num_reqs
-        or getattr(cache, "_cache_miss_scratch_shape", (0, 0))[1] < topk
-    )
+class CacheMissTopKScratch:
 
-    if needs_alloc:
-        cache._cache_miss_old_marker = torch.zeros(marker_shape, dtype=torch.int32, device=device)
-        cache._cache_miss_new_marker = torch.zeros(marker_shape, dtype=torch.int32, device=device)
-        cache._cache_miss_slot_scratch = torch.empty(scratch_shape, dtype=torch.int32, device=device)
-        cache._cache_miss_miss_scratch = torch.empty(scratch_shape, dtype=history_dtype, device=device)
-        cache._cache_miss_miss_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
-        cache._cache_miss_slot_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
-        cache._cache_miss_stamp_tensor = torch.empty((1,), dtype=torch.int32, device=device)
-        cache._cache_miss_token_limit = token_limit
-        cache._cache_miss_device = device
-        cache._cache_miss_history_dtype = history_dtype
-        cache._cache_miss_marker_shape = marker_shape
-        cache._cache_miss_scratch_shape = scratch_shape
-        cache._cache_miss_stamp = 0
+    def __init__(self):
+        self.token_limit = None
+        self.device = None
+        self.history_dtype = None
+        self.marker_shape = (0, 0)
+        self.scratch_shape = (0, 0)
+        self.stamp = 0
+        self.old_marker = None
+        self.new_marker = None
+        self.slot_scratch = None
+        self.miss_scratch = None
+        self.miss_count = None
+        self.slot_count = None
+        self.stamp_tensor = None
 
-    cache._cache_miss_stamp += 1
-    if cache._cache_miss_stamp >= 2_000_000_000:
-        cache._cache_miss_old_marker.zero_()
-        cache._cache_miss_new_marker.zero_()
-        cache._cache_miss_stamp = 1
-    cache._cache_miss_stamp_tensor.fill_(cache._cache_miss_stamp)
+    def prepare(
+        self,
+        num_reqs: int,
+        topk: int,
+        device,
+        token_limit: int = 65536,
+        history_dtype: torch.dtype = torch.int64,
+    ):
+        marker_shape = (num_reqs, token_limit)
+        scratch_shape = (num_reqs, topk)
+        needs_alloc = (
+            self.token_limit != token_limit
+            or self.device != device
+            or self.history_dtype != history_dtype
+            or self.marker_shape[0] < num_reqs
+            or self.scratch_shape[0] < num_reqs
+            or self.scratch_shape[1] < topk
+        )
 
-    return {
-        "token_limit": token_limit,
-        "stamp_tensor": cache._cache_miss_stamp_tensor,
-        "old_marker": cache._cache_miss_old_marker[:num_reqs],
-        "new_marker": cache._cache_miss_new_marker[:num_reqs],
-        "slot_scratch": cache._cache_miss_slot_scratch[:num_reqs, :topk],
-        "miss_scratch": cache._cache_miss_miss_scratch[:num_reqs, :topk],
-        "miss_count": cache._cache_miss_miss_count[:num_reqs],
-        "slot_count": cache._cache_miss_slot_count[:num_reqs],
-    }
+        if needs_alloc:
+            self.old_marker = torch.zeros(marker_shape, dtype=torch.int32, device=device)
+            self.new_marker = torch.zeros(marker_shape, dtype=torch.int32, device=device)
+            self.slot_scratch = torch.empty(scratch_shape, dtype=torch.int32, device=device)
+            self.miss_scratch = torch.empty(scratch_shape, dtype=history_dtype, device=device)
+            self.miss_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
+            self.slot_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
+            self.stamp_tensor = torch.empty((1,), dtype=torch.int32, device=device)
+            self.token_limit = token_limit
+            self.device = device
+            self.history_dtype = history_dtype
+            self.marker_shape = marker_shape
+            self.scratch_shape = scratch_shape
+            self.stamp = 0
+
+        self.stamp += 1
+        if self.stamp >= 2_000_000_000:
+            self.old_marker.zero_()
+            self.new_marker.zero_()
+            self.stamp = 1
+        self.stamp_tensor.fill_(self.stamp)
+
+        return {
+            "token_limit": token_limit,
+            "stamp_tensor": self.stamp_tensor,
+            "old_marker": self.old_marker[:num_reqs],
+            "new_marker": self.new_marker[:num_reqs],
+            "slot_scratch": self.slot_scratch[:num_reqs, :topk],
+            "miss_scratch": self.miss_scratch[:num_reqs, :topk],
+            "miss_count": self.miss_count[:num_reqs],
+            "slot_count": self.slot_count[:num_reqs],
+        }
