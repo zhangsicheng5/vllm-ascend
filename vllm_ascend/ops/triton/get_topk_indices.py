@@ -274,15 +274,17 @@ def get_cache_miss_topk_indices_triton_bitmap(
     miss_count: torch.Tensor | None = None,
     slot_count: torch.Tensor | None = None,
     stamp_tensor: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
 ):
     num_reqs, topk = topk_indices_new.shape
     assert topk == topk_indices_old.shape[1]
 
-    out = torch.empty(
-        topk_indices_new.shape,
-        dtype=torch.int32,
-        device=topk_indices_new.device,
-    )
+    if out is None:
+        out = torch.empty(
+            topk_indices_new.shape,
+            dtype=torch.int32,
+            device=topk_indices_new.device,
+        )
     if old_marker is None:
         old_marker = torch.zeros(
             (num_reqs, token_limit),
@@ -425,6 +427,7 @@ class CacheMissTopKScratch:
         self.miss_count = None
         self.slot_count = None
         self.stamp_tensor = None
+        self.out = None
 
     def prepare(
         self,
@@ -453,6 +456,7 @@ class CacheMissTopKScratch:
             self.miss_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
             self.slot_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
             self.stamp_tensor = torch.empty((1,), dtype=torch.int32, device=device)
+            self.out = torch.empty(scratch_shape, dtype=torch.int32, device=device)
             self.token_limit = token_limit
             self.device = device
             self.history_dtype = history_dtype
@@ -476,4 +480,5 @@ class CacheMissTopKScratch:
             "miss_scratch": self.miss_scratch[:num_reqs, :topk],
             "miss_count": self.miss_count[:num_reqs],
             "slot_count": self.slot_count[:num_reqs],
+            "out": self.out[:num_reqs, :topk],
         }
