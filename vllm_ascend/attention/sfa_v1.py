@@ -1203,7 +1203,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         #     topk_indices,
         # )
 
-        t1 = time.time()
         req_ids_tensor = attn_metadata.req_ids_tensor[:num_reqs].contiguous()
         cache_miss_state = self.cache_miss_state.prepare(
             num_reqs,
@@ -1212,6 +1211,7 @@ class AscendSFAImpl(MLAAttentionImpl):
             req_ids_tensor.dtype,
         )
         torch.npu.synchronize()
+        t1 = time.time()
         topk_indices = get_cache_miss_topk_indices_triton_state(
             req_ids_tensor,
             topk_indices,

@@ -4,6 +4,141 @@ import triton.language as tl
 
 
 @triton.jit
+def init_cache_miss_state_step_kernel(
+        req_ids_ptr,
+        req_state_ptr,
+        token_to_slot_ptr,
+        slot_to_token_ptr,
+        slot_stamp_ptr,
+        miss_count_ptr,
+        free_count_ptr,
+        out_ptr,
+        num_reqs,
+        topk: tl.constexpr,
+        TOKEN_LIMIT: tl.constexpr,
+        BLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    bid = tl.program_id(1)
+    if pid >= num_reqs:
+        return
+
+    req_id = tl.load(req_ids_ptr + pid).to(tl.int64)
+    last_req_id = tl.load(req_state_ptr + pid).to(tl.int64)
+    req_changed = req_id != last_req_id
+
+    if bid == 0:
+        tl.store(miss_count_ptr + pid, 0)
+        tl.store(free_count_ptr + pid, 0)
+        tl.store(req_state_ptr + pid, req_id, mask=req_changed)
+
+    row_off = pid * topk
+    token_map_off = pid * TOKEN_LIMIT
+    cols = bid * BLOCK + tl.arange(0, BLOCK)
+    mask = cols < topk
+
+    old_token = tl.load(slot_to_token_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    old_valid = req_changed & mask & (old_token >= 0) & (old_token < TOKEN_LIMIT)
+    old_token_safe = tl.where(old_valid, old_token, 0)
+    tl.store(token_to_slot_ptr + token_map_off + old_token_safe, -1, mask=old_valid)
+    tl.store(slot_to_token_ptr + row_off + cols, -1, mask=req_changed & mask)
+    tl.store(slot_stamp_ptr + row_off + cols, 0, mask=req_changed & mask)
+    tl.store(out_ptr + row_off + cols, tl.full((BLOCK,), -1, tl.int32), mask=mask)
+
+
+@triton.jit
+def collect_cache_miss_state_kernel(
+        new_ptr,
+        token_to_slot_ptr,
+        slot_to_token_ptr,
+        slot_stamp_ptr,
+        miss_scratch_ptr,
+        miss_count_ptr,
+        num_reqs,
+        stamp_ptr,
+        topk: tl.constexpr,
+        TOKEN_LIMIT: tl.constexpr,
+        BLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    bid = tl.program_id(1)
+    if pid >= num_reqs:
+        return
+
+    row_off = pid * topk
+    token_map_off = pid * TOKEN_LIMIT
+    cols = bid * BLOCK + tl.arange(0, BLOCK)
+    mask = cols < topk
+
+    new_token = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_token_safe = tl.where(new_valid, new_token, 0)
+
+    slot = tl.load(token_to_slot_ptr + token_map_off + new_token_safe, mask=new_valid, other=-1).to(tl.int32)
+    slot_valid = new_valid & (slot >= 0) & (slot < topk)
+    slot_safe = tl.where(slot_valid, slot, 0)
+    slot_token = tl.load(slot_to_token_ptr + row_off + slot_safe, mask=slot_valid, other=-1).to(tl.int64)
+    hit_mask = slot_valid & (slot_token == new_token)
+
+    stamp = tl.load(stamp_ptr).to(tl.int32)
+    tl.store(slot_stamp_ptr + row_off + slot_safe, stamp, mask=hit_mask)
+
+    miss_mask = new_valid & (hit_mask == 0)
+    miss_pos = tl.atomic_add(miss_count_ptr + pid, miss_mask.to(tl.int32), sem="relaxed")
+    tl.store(miss_scratch_ptr + row_off + miss_pos, new_token, mask=miss_mask)
+
+
+@triton.jit
+def apply_cache_miss_state_atomic_kernel(
+        out_ptr,
+        token_to_slot_ptr,
+        slot_to_token_ptr,
+        slot_stamp_ptr,
+        miss_scratch_ptr,
+        miss_count_ptr,
+        free_count_ptr,
+        num_reqs,
+        stamp_ptr,
+        topk: tl.constexpr,
+        TOKEN_LIMIT: tl.constexpr,
+        BLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    bid = tl.program_id(1)
+    if pid >= num_reqs:
+        return
+
+    row_off = pid * topk
+    token_map_off = pid * TOKEN_LIMIT
+    cols = bid * BLOCK + tl.arange(0, BLOCK)
+    mask = cols < topk
+
+    stamp = tl.load(stamp_ptr).to(tl.int32)
+    num_miss = tl.load(miss_count_ptr + pid).to(tl.int32)
+
+    slot_token = tl.load(slot_to_token_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    slot_stamp = tl.load(slot_stamp_ptr + row_off + cols, mask=mask, other=0).to(tl.int32)
+    free_mask = mask & ((slot_token < 0) | ((slot_token >= 0) & (slot_stamp != stamp)))
+
+    old_valid = free_mask & (slot_token >= 0) & (slot_token < TOKEN_LIMIT)
+    old_token_safe = tl.where(old_valid, slot_token, 0)
+    tl.store(token_to_slot_ptr + token_map_off + old_token_safe, -1, mask=old_valid)
+    tl.store(slot_to_token_ptr + row_off + cols, -1, mask=free_mask)
+    tl.store(slot_stamp_ptr + row_off + cols, 0, mask=free_mask)
+
+    free_pos = tl.atomic_add(free_count_ptr + pid, free_mask.to(tl.int32), sem="relaxed")
+    write_mask = free_mask & (free_pos < num_miss)
+    new_token = tl.load(miss_scratch_ptr + row_off + free_pos, mask=write_mask, other=-1).to(tl.int64)
+    new_valid = write_mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_token_safe = tl.where(new_valid, new_token, 0)
+
+    tl.store(slot_to_token_ptr + row_off + cols, new_token, mask=new_valid)
+    tl.store(slot_stamp_ptr + row_off + cols, stamp, mask=new_valid)
+    tl.store(token_to_slot_ptr + token_map_off + new_token_safe, cols, mask=new_valid)
+    tl.store(out_ptr + row_off + cols, new_token.to(tl.int32), mask=new_valid)
+
+
+@triton.jit
 def compact_cache_miss_state_kernel(
         req_ids_ptr,
         new_ptr,
@@ -565,13 +700,26 @@ def get_cache_miss_topk_indices_triton_state(
     if out is None:
         out = torch.empty((num_reqs, topk), dtype=torch.int32, device=device)
 
-    grid = (num_reqs,)
-    BLOCK = triton.next_power_of_2(topk)
+    BLOCK = 128
+    grid = (num_reqs, triton.cdiv(topk, BLOCK))
 
-    compact_cache_miss_state_kernel[grid](
+    init_cache_miss_state_step_kernel[grid](
         req_ids_tensor,
-        topk_indices_new,
         req_state,
+        token_to_slot,
+        slot_to_token,
+        slot_stamp,
+        miss_count,
+        free_count,
+        out,
+        num_reqs,
+        topk=topk,
+        TOKEN_LIMIT=token_limit,
+        BLOCK=BLOCK,
+    )
+
+    collect_cache_miss_state_kernel[grid](
+        topk_indices_new,
         token_to_slot,
         slot_to_token,
         slot_stamp,
@@ -584,14 +732,14 @@ def get_cache_miss_topk_indices_triton_state(
         BLOCK=BLOCK,
     )
 
-    apply_cache_miss_state_kernel[grid](
-        req_ids_tensor,
+    apply_cache_miss_state_atomic_kernel[grid](
         out,
         token_to_slot,
         slot_to_token,
         slot_stamp,
         miss_scratch,
         miss_count,
+        free_count,
         num_reqs,
         stamp_tensor,
         topk=topk,
