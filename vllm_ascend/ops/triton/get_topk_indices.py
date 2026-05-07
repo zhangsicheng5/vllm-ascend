@@ -11,9 +11,7 @@ def compact_cache_miss_state_kernel(
         token_to_slot_ptr,
         slot_to_token_ptr,
         slot_stamp_ptr,
-        free_scratch_ptr,
         miss_scratch_ptr,
-        free_count_ptr,
         miss_count_ptr,
         num_reqs,
         stamp_ptr,
@@ -42,12 +40,12 @@ def compact_cache_miss_state_kernel(
     tl.store(slot_stamp_ptr + row_off + cols, 0, mask=req_changed & mask)
     tl.store(req_state_ptr + pid, req_id, mask=req_changed)
 
-    current_slot_token = tl.where(req_changed, -1, old_slot_token)
     new_token = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
     new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
     new_token_safe = tl.where(new_valid, new_token, 0)
 
-    slot = tl.load(token_to_slot_ptr + token_map_off + new_token_safe, mask=new_valid, other=-1).to(tl.int32)
+    slot_lookup = tl.load(token_to_slot_ptr + token_map_off + new_token_safe, mask=new_valid, other=-1).to(tl.int32)
+    slot = tl.where(req_changed, -1, slot_lookup)
     slot_valid = new_valid & (slot >= 0) & (slot < topk)
     slot_safe = tl.where(slot_valid, slot, 0)
     slot_token = tl.load(slot_to_token_ptr + row_off + slot_safe, mask=slot_valid, other=-1).to(tl.int64)
@@ -56,23 +54,14 @@ def compact_cache_miss_state_kernel(
     stamp = tl.load(stamp_ptr).to(tl.int32)
     tl.store(slot_stamp_ptr + row_off + slot_safe, stamp, mask=hit_mask)
 
-    miss_mask = new_valid & ~hit_mask
-    slot_stamp = tl.load(slot_stamp_ptr + row_off + cols, mask=mask, other=0).to(tl.int32)
-    empty_slot_mask = mask & (current_slot_token < 0)
-    stale_slot_mask = mask & (current_slot_token >= 0) & (slot_stamp != stamp)
-    free_mask = empty_slot_mask | stale_slot_mask
+    miss_mask = new_valid & (hit_mask == 0)
 
     miss_rank = tl.cumsum(miss_mask.to(tl.int32), axis=0) - 1
-    free_rank = tl.cumsum(free_mask.to(tl.int32), axis=0) - 1
     miss_rank_safe = tl.where(miss_mask, miss_rank, 0)
-    free_rank_safe = tl.where(free_mask, free_rank, 0)
     num_miss = tl.sum(miss_mask.to(tl.int32), axis=0)
-    num_free = tl.sum(free_mask.to(tl.int32), axis=0)
 
     tl.store(miss_scratch_ptr + row_off + miss_rank_safe, new_token, mask=miss_mask)
-    tl.store(free_scratch_ptr + row_off + free_rank_safe, cols, mask=free_mask)
     tl.store(miss_count_ptr + pid, num_miss)
-    tl.store(free_count_ptr + pid, num_free)
 
 
 @triton.jit
@@ -82,9 +71,7 @@ def apply_cache_miss_state_kernel(
         token_to_slot_ptr,
         slot_to_token_ptr,
         slot_stamp_ptr,
-        free_scratch_ptr,
         miss_scratch_ptr,
-        free_count_ptr,
         miss_count_ptr,
         num_reqs,
         stamp_ptr,
@@ -103,27 +90,32 @@ def apply_cache_miss_state_kernel(
 
     tl.store(out_ptr + row_off + cols, tl.full((BLOCK,), -1, tl.int32), mask=mask)
 
-    num_miss = tl.load(miss_count_ptr + pid).to(tl.int32)
-    num_free = tl.load(free_count_ptr + pid).to(tl.int32)
-    update_mask = mask & (cols < num_free)
-    miss_mask = mask & (cols < num_miss)
-
-    free_slot = tl.load(free_scratch_ptr + row_off + cols, mask=update_mask, other=0).to(tl.int32)
-    old_token = tl.load(slot_to_token_ptr + row_off + free_slot, mask=update_mask, other=-1).to(tl.int64)
-    old_valid = update_mask & (old_token >= 0) & (old_token < TOKEN_LIMIT)
-    old_token_safe = tl.where(old_valid, old_token, 0)
-    tl.store(token_to_slot_ptr + token_map_off + old_token_safe, -1, mask=old_valid)
-
-    new_token = tl.load(miss_scratch_ptr + row_off + cols, mask=miss_mask, other=-1).to(tl.int64)
-    new_valid = miss_mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
-    new_token_safe = tl.where(new_valid, new_token, 0)
-    write_mask = update_mask & new_valid
     stamp = tl.load(stamp_ptr).to(tl.int32)
+    num_miss = tl.load(miss_count_ptr + pid).to(tl.int32)
 
-    tl.store(slot_to_token_ptr + row_off + free_slot, new_token, mask=write_mask)
-    tl.store(slot_stamp_ptr + row_off + free_slot, stamp, mask=write_mask)
-    tl.store(token_to_slot_ptr + token_map_off + new_token_safe, free_slot, mask=write_mask)
-    tl.store(out_ptr + row_off + free_slot, new_token.to(tl.int32), mask=write_mask)
+    slot_token = tl.load(slot_to_token_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    slot_stamp = tl.load(slot_stamp_ptr + row_off + cols, mask=mask, other=0).to(tl.int32)
+    empty_slot_mask = mask & (slot_token < 0)
+    stale_slot_mask = mask & (slot_token >= 0) & (slot_stamp != stamp)
+    free_mask = empty_slot_mask | stale_slot_mask
+    free_rank = tl.cumsum(free_mask.to(tl.int32), axis=0) - 1
+    free_rank_safe = tl.where(free_mask, free_rank, 0)
+
+    old_valid = free_mask & (slot_token >= 0) & (slot_token < TOKEN_LIMIT)
+    old_token_safe = tl.where(old_valid, slot_token, 0)
+    tl.store(token_to_slot_ptr + token_map_off + old_token_safe, -1, mask=old_valid)
+    tl.store(slot_to_token_ptr + row_off + cols, -1, mask=free_mask)
+    tl.store(slot_stamp_ptr + row_off + cols, 0, mask=free_mask)
+
+    write_mask = free_mask & (free_rank < num_miss)
+    new_token = tl.load(miss_scratch_ptr + row_off + free_rank_safe, mask=write_mask, other=-1).to(tl.int64)
+    new_valid = write_mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_token_safe = tl.where(new_valid, new_token, 0)
+
+    tl.store(slot_to_token_ptr + row_off + cols, new_token, mask=new_valid)
+    tl.store(slot_stamp_ptr + row_off + cols, stamp, mask=new_valid)
+    tl.store(token_to_slot_ptr + token_map_off + new_token_safe, cols, mask=new_valid)
+    tl.store(out_ptr + row_off + cols, new_token.to(tl.int32), mask=new_valid)
 
 
 @triton.jit
@@ -583,9 +575,7 @@ def get_cache_miss_topk_indices_triton_state(
         token_to_slot,
         slot_to_token,
         slot_stamp,
-        free_scratch,
         miss_scratch,
-        free_count,
         miss_count,
         num_reqs,
         stamp_tensor,
@@ -600,9 +590,7 @@ def get_cache_miss_topk_indices_triton_state(
         token_to_slot,
         slot_to_token,
         slot_stamp,
-        free_scratch,
         miss_scratch,
-        free_count,
         miss_count,
         num_reqs,
         stamp_tensor,
