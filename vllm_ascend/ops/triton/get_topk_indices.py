@@ -1080,6 +1080,7 @@ def get_cache_miss_topk_indices_triton_hash(
     out: torch.Tensor | None = None,
     hash_capacity: int = 8192,
     probe: int = 16,
+    debug_sync: bool = True,
 ):
     num_reqs, topk = topk_indices_new.shape
     assert topk == topk_indices_old.shape[1]
@@ -1112,6 +1113,11 @@ def get_cache_miss_topk_indices_triton_hash(
         HASH_CAPACITY=hash_capacity,
         BLOCK=clear_block,
     )
+    if debug_sync:
+        try:
+            torch.npu.synchronize()
+        except Exception as exc:
+            raise RuntimeError("clear_cache_miss_hash_kernel failed") from exc
 
     mark_cache_tokens_hash_kernel[grid](
         req_ids_tensor,
@@ -1126,6 +1132,11 @@ def get_cache_miss_topk_indices_triton_hash(
         BLOCK=topk_block,
         PROBE=probe,
     )
+    if debug_sync:
+        try:
+            torch.npu.synchronize()
+        except Exception as exc:
+            raise RuntimeError("mark_cache_tokens_hash_kernel failed") from exc
 
     compact_cache_miss_slots_hash_kernel[grid](
         req_ids_tensor,
@@ -1144,6 +1155,11 @@ def get_cache_miss_topk_indices_triton_hash(
         BLOCK=topk_block,
         PROBE=probe,
     )
+    if debug_sync:
+        try:
+            torch.npu.synchronize()
+        except Exception as exc:
+            raise RuntimeError("compact_cache_miss_slots_hash_kernel failed") from exc
 
     apply_cache_miss_slots_kernel[grid](
         req_ids_tensor,
@@ -1158,6 +1174,11 @@ def get_cache_miss_topk_indices_triton_hash(
         TOKEN_LIMIT=token_limit,
         BLOCK=topk_block,
     )
+    if debug_sync:
+        try:
+            torch.npu.synchronize()
+        except Exception as exc:
+            raise RuntimeError("apply_cache_miss_slots_kernel failed after hash compact") from exc
 
     return out
 
