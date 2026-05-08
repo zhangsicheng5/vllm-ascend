@@ -44,7 +44,7 @@ from vllm_ascend.ops.layer_shard_linear import (
 from vllm_ascend.ops.rotary_embedding import get_cos_and_sin_mla
 from vllm_ascend.ops.triton.get_topk_indices import (
     CacheMissTopKScratch,
-    get_cache_miss_topk_indices_triton_sorted,
+    get_cache_miss_topk_indices_triton,
 )
 from vllm_ascend.ops.triton.rope import rope_forward_triton
 from vllm_ascend.quantization.methods import AscendW8A8LinearMethod
@@ -1213,20 +1213,11 @@ class AscendSFAImpl(MLAAttentionImpl):
         )
         torch.npu.synchronize()
         t1 = time.time()
-        topk_indices_sorted = torch.sort(topk_indices, dim=1).values
-        topk_indices_old_sorted, topk_indices_old_slots = torch.sort(topk_indices_old, dim=1)
-        topk_indices = get_cache_miss_topk_indices_triton_sorted(
+        topk_indices = get_cache_miss_topk_indices_triton(
             req_ids_tensor,
             topk_indices_old,
-            topk_indices_sorted,
-            topk_indices_old_sorted,
-            topk_indices_old_slots,
-            token_limit=cache_miss_scratch["token_limit"],
-            slot_scratch=cache_miss_scratch["slot_scratch"],
-            miss_scratch=cache_miss_scratch["miss_scratch"],
-            miss_count=cache_miss_scratch["miss_count"],
-            slot_count=cache_miss_scratch["slot_count"],
-            out=cache_miss_scratch["out"],
+            topk_indices,
+            **cache_miss_scratch,
         )
         torch.npu.synchronize()
         t2 = time.time()
