@@ -76,27 +76,27 @@ abs_path = os.path.dirname(os.path.abspath(__file__))
 src_path = os.path.join(abs_path, "cpu_sparse_attn.cpp")
 logger.info(f'>>>>> load cpu_sparse_attn from src: {src_path}')
 cpu_sparse_attn = None
-cpu_sparse_attn = load(
-    name="cpu_sparse_attn",
-    sources=[src_path],
-    extra_cflags=[
-        "-O3",
-        "-std=c++20",
-        "-fopenmp",
-        "-march=armv8.2-a+sve+fp16+bf16",
-        "-fPIC",
-        f"-I{npu_include_path}",
-        f"-I{torch_npu_include}",
-    ],
-    extra_ldflags=[
-        "-fopenmp",
-        f"-L{npu_lib_path}",
-        "-lascendcl",
-        f"-L{torch_npu_lib_path}",
-        "-ltorch_npu",
-    ],
-    verbose=True,  # 添加 verbose 查看编译过程
-)
+# cpu_sparse_attn = load(
+#     name="cpu_sparse_attn",
+#     sources=[src_path],
+#     extra_cflags=[
+#         "-O3",
+#         "-std=c++20",
+#         "-fopenmp",
+#         "-march=armv8.2-a+sve+fp16+bf16",
+#         "-fPIC",
+#         f"-I{npu_include_path}",
+#         f"-I{torch_npu_include}",
+#     ],
+#     extra_ldflags=[
+#         "-fopenmp",
+#         f"-L{npu_lib_path}",
+#         "-lascendcl",
+#         f"-L{torch_npu_lib_path}",
+#         "-ltorch_npu",
+#     ],
+#     verbose=True,  # 添加 verbose 查看编译过程
+# )
 
 # _TEST_STREAM = None
 # def load_cpu(args):
