@@ -4,6 +4,92 @@ import triton.language as tl
 
 
 @triton.jit
+def sorted_compact_cache_miss_slots_kernel(
+        req_ids_ptr,
+        old_sorted_ptr,
+        old_slots_ptr,
+        new_sorted_ptr,
+        slot_scratch_ptr,
+        miss_scratch_ptr,
+        miss_count_ptr,
+        slot_count_ptr,
+        num_reqs,
+        topk: tl.constexpr,
+        TOKEN_LIMIT: tl.constexpr,
+        BLOCK: tl.constexpr,
+        LOGK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    if pid >= num_reqs:
+        return
+
+    req_id = tl.load(req_ids_ptr + pid).to(tl.int64)
+    req_offset = req_id * TOKEN_LIMIT
+    row_off = pid * topk
+    cols = tl.arange(0, BLOCK)
+    mask = cols < topk
+
+    new_token = tl.load(new_sorted_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_with_offset = new_token + req_offset
+
+    # lower_bound(old_sorted, new_with_offset)
+    lo = tl.full((BLOCK,), 0, tl.int32)
+    hi = tl.full((BLOCK,), topk, tl.int32)
+    for _ in range(LOGK):
+        mid = (lo + hi) // 2
+        mid_valid = new_valid & (mid < topk)
+        mid_safe = tl.where(mid_valid, mid, 0)
+        old_mid = tl.load(old_sorted_ptr + row_off + mid_safe, mask=mid_valid, other=-1).to(tl.int64)
+        go_right = old_mid < new_with_offset
+        lo = tl.where(new_valid & go_right, mid + 1, lo)
+        hi = tl.where(new_valid & ~go_right, mid, hi)
+    lo_safe = tl.where(lo < topk, lo, 0)
+    old_found = tl.load(old_sorted_ptr + row_off + lo_safe, mask=new_valid & (lo < topk), other=-1).to(tl.int64)
+    miss_mask = new_valid & (old_found != new_with_offset)
+
+    old_with_offset = tl.load(old_sorted_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    old_token = old_with_offset - req_offset
+    old_valid = mask & (old_with_offset >= 0) & (old_token >= 0) & (old_token < TOKEN_LIMIT)
+
+    # lower_bound(new_sorted, old_token)
+    old_lo = tl.full((BLOCK,), 0, tl.int32)
+    old_hi = tl.full((BLOCK,), topk, tl.int32)
+    for _ in range(LOGK):
+        mid = (old_lo + old_hi) // 2
+        mid_valid = old_valid & (mid < topk)
+        mid_safe = tl.where(mid_valid, mid, 0)
+        new_mid = tl.load(new_sorted_ptr + row_off + mid_safe, mask=mid_valid, other=-1).to(tl.int64)
+        go_right = new_mid < old_token
+        old_lo = tl.where(old_valid & go_right, mid + 1, old_lo)
+        old_hi = tl.where(old_valid & ~go_right, mid, old_hi)
+    old_lo_safe = tl.where(old_lo < topk, old_lo, 0)
+    new_found = tl.load(new_sorted_ptr + row_off + old_lo_safe, mask=old_valid & (old_lo < topk), other=-1).to(tl.int64)
+    avail_mask = old_valid & (new_found != old_token)
+
+    num_miss = tl.sum(miss_mask.to(tl.int32), axis=0)
+    num_avail = tl.sum(avail_mask.to(tl.int32), axis=0)
+    num_shortage = num_miss - num_avail
+
+    empty_mask = mask & (old_with_offset == -1)
+    empty_cumsum = tl.cumsum(empty_mask.to(tl.int32), axis=0)
+    selected_empty = (empty_cumsum <= num_shortage) & empty_mask
+    avail_mask = avail_mask | selected_empty
+
+    miss_rank = tl.cumsum(miss_mask.to(tl.int32), axis=0) - 1
+    avail_rank = tl.cumsum(avail_mask.to(tl.int32), axis=0) - 1
+    num_slots = tl.sum(avail_mask.to(tl.int32), axis=0)
+    miss_rank_safe = tl.where(miss_mask, miss_rank, 0)
+    avail_rank_safe = tl.where(avail_mask, avail_rank, 0)
+
+    old_slot = tl.load(old_slots_ptr + row_off + cols, mask=mask, other=0).to(tl.int32)
+    tl.store(slot_scratch_ptr + row_off + avail_rank_safe, old_slot, mask=avail_mask)
+    tl.store(miss_scratch_ptr + row_off + miss_rank_safe, new_with_offset, mask=miss_mask)
+    tl.store(miss_count_ptr + pid, num_miss)
+    tl.store(slot_count_ptr + pid, num_slots)
+
+
+@triton.jit
 def init_cache_miss_state_step_kernel(
         req_ids_ptr,
         req_state_ptr,
@@ -806,6 +892,73 @@ def get_cache_miss_topk_indices_triton(
         topk_indices_new,
         **kwargs,
     )
+
+
+def get_cache_miss_topk_indices_triton_sorted(
+    req_ids_tensor: torch.Tensor,
+    topk_indices_old: torch.Tensor,
+    topk_indices_new_sorted: torch.Tensor,
+    topk_indices_old_sorted: torch.Tensor,
+    topk_indices_old_slots: torch.Tensor,
+    token_limit: int = 65536,
+    slot_scratch: torch.Tensor | None = None,
+    miss_scratch: torch.Tensor | None = None,
+    miss_count: torch.Tensor | None = None,
+    slot_count: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
+):
+    num_reqs, topk = topk_indices_new_sorted.shape
+    assert topk == topk_indices_old.shape[1]
+    assert topk == topk_indices_old_sorted.shape[1]
+    assert topk == topk_indices_old_slots.shape[1]
+
+    device = topk_indices_new_sorted.device
+    if out is None:
+        out = torch.empty((num_reqs, topk), dtype=torch.int32, device=device)
+    if slot_scratch is None:
+        slot_scratch = torch.empty((num_reqs, topk), dtype=torch.int32, device=device)
+    if miss_scratch is None:
+        miss_scratch = torch.empty((num_reqs, topk), dtype=topk_indices_old.dtype, device=device)
+    if miss_count is None:
+        miss_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
+    if slot_count is None:
+        slot_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
+
+    grid = (num_reqs,)
+    BLOCK = triton.next_power_of_2(topk)
+    LOGK = topk.bit_length()
+
+    sorted_compact_cache_miss_slots_kernel[grid](
+        req_ids_tensor,
+        topk_indices_old_sorted,
+        topk_indices_old_slots,
+        topk_indices_new_sorted,
+        slot_scratch,
+        miss_scratch,
+        miss_count,
+        slot_count,
+        num_reqs,
+        topk=topk,
+        TOKEN_LIMIT=token_limit,
+        BLOCK=BLOCK,
+        LOGK=LOGK,
+    )
+
+    apply_cache_miss_slots_kernel[grid](
+        req_ids_tensor,
+        topk_indices_old,
+        out,
+        slot_scratch,
+        miss_scratch,
+        miss_count,
+        slot_count,
+        num_reqs,
+        topk=topk,
+        TOKEN_LIMIT=token_limit,
+        BLOCK=BLOCK,
+    )
+
+    return out
 
 
 def get_cache_miss_topk_indices_triton_state(
