@@ -4,6 +4,175 @@ import triton.language as tl
 
 
 @triton.jit
+def clear_cache_miss_hash_kernel(
+        old_hash_ptr,
+        new_hash_ptr,
+        num_reqs,
+        HASH_CAPACITY: tl.constexpr,
+        BLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    bid = tl.program_id(1)
+    if pid >= num_reqs:
+        return
+
+    cols = bid * BLOCK + tl.arange(0, BLOCK)
+    mask = cols < HASH_CAPACITY
+    row_off = pid * HASH_CAPACITY
+    empty = tl.full((BLOCK,), -1, tl.int32)
+    tl.store(old_hash_ptr + row_off + cols, empty, mask=mask)
+    tl.store(new_hash_ptr + row_off + cols, empty, mask=mask)
+
+
+@triton.jit
+def mark_cache_tokens_hash_kernel(
+        req_ids_ptr,
+        old_ptr,
+        new_ptr,
+        old_hash_ptr,
+        new_hash_ptr,
+        num_reqs,
+        topk: tl.constexpr,
+        TOKEN_LIMIT: tl.constexpr,
+        HASH_CAPACITY: tl.constexpr,
+        BLOCK: tl.constexpr,
+        PROBE: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    if pid >= num_reqs:
+        return
+
+    req_id = tl.load(req_ids_ptr + pid).to(tl.int64)
+    req_offset = req_id * TOKEN_LIMIT
+    row_off = pid * topk
+    hash_off = pid * HASH_CAPACITY
+    cols = tl.arange(0, BLOCK)
+    mask = cols < topk
+
+    old_with_offset = tl.load(old_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    old_token = (old_with_offset - req_offset).to(tl.int32)
+    old_valid = mask & (old_with_offset >= 0) & (old_token >= 0) & (old_token < TOKEN_LIMIT)
+    old_hash = (old_token * 1103515245 + 12345) & (HASH_CAPACITY - 1)
+    old_inserted = tl.full((BLOCK,), False, tl.int1)
+
+    new_token = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int32)
+    new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_hash = (new_token * 1103515245 + 12345) & (HASH_CAPACITY - 1)
+    new_inserted = tl.full((BLOCK,), False, tl.int1)
+
+    for probe_idx in range(PROBE):
+        old_slot = (old_hash + probe_idx) & (HASH_CAPACITY - 1)
+        old_active = old_valid & ~old_inserted
+        old_cmp = tl.where(old_active, -1, -2)
+        old_value = tl.where(old_active, old_token, -1)
+        old_prev = tl.atomic_cas(
+            old_hash_ptr + hash_off + old_slot,
+            old_cmp,
+            old_value,
+            sem="relaxed",
+        )
+        old_inserted = old_inserted | (old_active & ((old_prev == -1) | (old_prev == old_token)))
+
+        new_slot = (new_hash + probe_idx) & (HASH_CAPACITY - 1)
+        new_active = new_valid & ~new_inserted
+        new_cmp = tl.where(new_active, -1, -2)
+        new_value = tl.where(new_active, new_token, -1)
+        new_prev = tl.atomic_cas(
+            new_hash_ptr + hash_off + new_slot,
+            new_cmp,
+            new_value,
+            sem="relaxed",
+        )
+        new_inserted = new_inserted | (new_active & ((new_prev == -1) | (new_prev == new_token)))
+
+
+@triton.jit
+def compact_cache_miss_slots_hash_kernel(
+        req_ids_ptr,
+        old_ptr,
+        new_ptr,
+        old_hash_ptr,
+        new_hash_ptr,
+        slot_scratch_ptr,
+        miss_scratch_ptr,
+        miss_count_ptr,
+        slot_count_ptr,
+        num_reqs,
+        topk: tl.constexpr,
+        TOKEN_LIMIT: tl.constexpr,
+        HASH_CAPACITY: tl.constexpr,
+        BLOCK: tl.constexpr,
+        PROBE: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    if pid >= num_reqs:
+        return
+
+    req_id = tl.load(req_ids_ptr + pid).to(tl.int64)
+    req_offset = req_id * TOKEN_LIMIT
+    row_off = pid * topk
+    hash_off = pid * HASH_CAPACITY
+    cols = tl.arange(0, BLOCK)
+    mask = cols < topk
+
+    new_token = tl.load(new_ptr + row_off + cols, mask=mask, other=-1).to(tl.int32)
+    new_valid = mask & (new_token >= 0) & (new_token < TOKEN_LIMIT)
+    new_hash = (new_token * 1103515245 + 12345) & (HASH_CAPACITY - 1)
+    new_found = tl.full((BLOCK,), False, tl.int1)
+    new_blocked = tl.full((BLOCK,), False, tl.int1)
+
+    old_with_offset = tl.load(old_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    old_token = (old_with_offset - req_offset).to(tl.int32)
+    old_valid = mask & (old_with_offset >= 0) & (old_token >= 0) & (old_token < TOKEN_LIMIT)
+    old_hash = (old_token * 1103515245 + 12345) & (HASH_CAPACITY - 1)
+    old_found = tl.full((BLOCK,), False, tl.int1)
+    old_blocked = tl.full((BLOCK,), False, tl.int1)
+
+    for probe_idx in range(PROBE):
+        new_slot = (new_hash + probe_idx) & (HASH_CAPACITY - 1)
+        old_key = tl.load(
+            old_hash_ptr + hash_off + new_slot,
+            mask=new_valid & ~new_found & ~new_blocked,
+            other=-1,
+        )
+        new_found = new_found | (new_valid & (old_key == new_token))
+        new_blocked = new_blocked | (new_valid & (old_key == -1))
+
+        old_slot = (old_hash + probe_idx) & (HASH_CAPACITY - 1)
+        new_key = tl.load(
+            new_hash_ptr + hash_off + old_slot,
+            mask=old_valid & ~old_found & ~old_blocked,
+            other=-1,
+        )
+        old_found = old_found | (old_valid & (new_key == old_token))
+        old_blocked = old_blocked | (old_valid & (new_key == -1))
+
+    miss_mask = new_valid & ~new_found
+    avail_mask = old_valid & ~old_found
+
+    num_miss = tl.sum(miss_mask.to(tl.int32), axis=0)
+    num_avail = tl.sum(avail_mask.to(tl.int32), axis=0)
+    num_shortage = num_miss - num_avail
+
+    empty_mask = mask & (old_with_offset == -1)
+    empty_cumsum = tl.cumsum(empty_mask.to(tl.int32), axis=0)
+    selected_empty = (empty_cumsum <= num_shortage) & empty_mask
+    avail_mask = avail_mask | selected_empty
+
+    miss_rank = tl.cumsum(miss_mask.to(tl.int32), axis=0) - 1
+    avail_rank = tl.cumsum(avail_mask.to(tl.int32), axis=0) - 1
+    num_slots = tl.sum(avail_mask.to(tl.int32), axis=0)
+    miss_rank_safe = tl.where(miss_mask, miss_rank, 0)
+    avail_rank_safe = tl.where(avail_mask, avail_rank, 0)
+    new_with_offset = new_token.to(tl.int64) + req_offset
+
+    tl.store(slot_scratch_ptr + row_off + avail_rank_safe, cols, mask=avail_mask)
+    tl.store(miss_scratch_ptr + row_off + miss_rank_safe, new_with_offset, mask=miss_mask)
+    tl.store(miss_count_ptr + pid, num_miss)
+    tl.store(slot_count_ptr + pid, num_slots)
+
+
+@triton.jit
 def sorted_compact_cache_miss_slots_kernel(
         req_ids_ptr,
         old_sorted_ptr,
@@ -886,12 +1055,111 @@ def get_cache_miss_topk_indices_triton(
     topk_indices_new: torch.Tensor,
     **kwargs,
 ):
-    return get_cache_miss_topk_indices_triton_bitmap(
+    return get_cache_miss_topk_indices_triton_hash(
         req_ids_tensor,
         topk_indices_old,
         topk_indices_new,
         **kwargs,
     )
+
+
+def get_cache_miss_topk_indices_triton_hash(
+    req_ids_tensor: torch.Tensor,
+    topk_indices_old: torch.Tensor,
+    topk_indices_new: torch.Tensor,
+    token_limit: int = 65536,
+    old_marker: torch.Tensor | None = None,
+    new_marker: torch.Tensor | None = None,
+    stamp_tensor: torch.Tensor | None = None,
+    old_hash: torch.Tensor | None = None,
+    new_hash: torch.Tensor | None = None,
+    slot_scratch: torch.Tensor | None = None,
+    miss_scratch: torch.Tensor | None = None,
+    miss_count: torch.Tensor | None = None,
+    slot_count: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
+    hash_capacity: int = 8192,
+    probe: int = 16,
+):
+    num_reqs, topk = topk_indices_new.shape
+    assert topk == topk_indices_old.shape[1]
+
+    device = topk_indices_new.device
+    if out is None:
+        out = torch.empty((num_reqs, topk), dtype=torch.int32, device=device)
+    if old_hash is None:
+        old_hash = torch.empty((num_reqs, hash_capacity), dtype=torch.int32, device=device)
+    if new_hash is None:
+        new_hash = torch.empty((num_reqs, hash_capacity), dtype=torch.int32, device=device)
+    if slot_scratch is None:
+        slot_scratch = torch.empty((num_reqs, topk), dtype=torch.int32, device=device)
+    if miss_scratch is None:
+        miss_scratch = torch.empty((num_reqs, topk), dtype=topk_indices_old.dtype, device=device)
+    if miss_count is None:
+        miss_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
+    if slot_count is None:
+        slot_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
+
+    topk_block = triton.next_power_of_2(topk)
+    clear_block = 256
+    clear_grid = (num_reqs, triton.cdiv(hash_capacity, clear_block))
+    grid = (num_reqs,)
+
+    clear_cache_miss_hash_kernel[clear_grid](
+        old_hash,
+        new_hash,
+        num_reqs,
+        HASH_CAPACITY=hash_capacity,
+        BLOCK=clear_block,
+    )
+
+    mark_cache_tokens_hash_kernel[grid](
+        req_ids_tensor,
+        topk_indices_old,
+        topk_indices_new,
+        old_hash,
+        new_hash,
+        num_reqs,
+        topk=topk,
+        TOKEN_LIMIT=token_limit,
+        HASH_CAPACITY=hash_capacity,
+        BLOCK=topk_block,
+        PROBE=probe,
+    )
+
+    compact_cache_miss_slots_hash_kernel[grid](
+        req_ids_tensor,
+        topk_indices_old,
+        topk_indices_new,
+        old_hash,
+        new_hash,
+        slot_scratch,
+        miss_scratch,
+        miss_count,
+        slot_count,
+        num_reqs,
+        topk=topk,
+        TOKEN_LIMIT=token_limit,
+        HASH_CAPACITY=hash_capacity,
+        BLOCK=topk_block,
+        PROBE=probe,
+    )
+
+    apply_cache_miss_slots_kernel[grid](
+        req_ids_tensor,
+        topk_indices_old,
+        out,
+        slot_scratch,
+        miss_scratch,
+        miss_count,
+        slot_count,
+        num_reqs,
+        topk=topk,
+        TOKEN_LIMIT=token_limit,
+        BLOCK=topk_block,
+    )
+
+    return out
 
 
 def get_cache_miss_topk_indices_triton_sorted(
@@ -1067,6 +1335,9 @@ class CacheMissTopKScratch:
         self.slot_count = None
         self.stamp_tensor = None
         self.out = None
+        self.old_hash = None
+        self.new_hash = None
+        self.hash_capacity = None
 
     def prepare(
         self,
@@ -1075,6 +1346,7 @@ class CacheMissTopKScratch:
         device,
         token_limit: int = 65536,
         history_dtype: torch.dtype = torch.int64,
+        hash_capacity: int = 8192,
     ):
         marker_shape = (num_reqs, token_limit)
         scratch_shape = (num_reqs, topk)
@@ -1082,6 +1354,7 @@ class CacheMissTopKScratch:
             self.token_limit != token_limit
             or self.device != device
             or self.history_dtype != history_dtype
+            or self.hash_capacity != hash_capacity
             or self.marker_shape[0] < num_reqs
             or self.scratch_shape[0] < num_reqs
             or self.scratch_shape[1] != topk
@@ -1096,9 +1369,12 @@ class CacheMissTopKScratch:
             self.slot_count = torch.empty((num_reqs,), dtype=torch.int32, device=device)
             self.stamp_tensor = torch.empty((1,), dtype=torch.int32, device=device)
             self.out = torch.empty(scratch_shape, dtype=torch.int32, device=device)
+            self.old_hash = torch.empty((num_reqs, hash_capacity), dtype=torch.int32, device=device)
+            self.new_hash = torch.empty((num_reqs, hash_capacity), dtype=torch.int32, device=device)
             self.token_limit = token_limit
             self.device = device
             self.history_dtype = history_dtype
+            self.hash_capacity = hash_capacity
             self.marker_shape = marker_shape
             self.scratch_shape = scratch_shape
             self.stamp = 0
@@ -1120,6 +1396,9 @@ class CacheMissTopKScratch:
             "miss_count": self.miss_count[:num_reqs],
             "slot_count": self.slot_count[:num_reqs],
             "out": self.out[:num_reqs, :topk],
+            "old_hash": self.old_hash[:num_reqs],
+            "new_hash": self.new_hash[:num_reqs],
+            "hash_capacity": hash_capacity,
         }
 
 
