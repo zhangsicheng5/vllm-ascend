@@ -2,6 +2,7 @@ import torch
 
 from vllm.config import VllmConfig
 
+
 class ExpertOffloadManager():
     def __init__(self, vllm_config: VllmConfig):
         self.vllm_config = vllm_config
@@ -21,3 +22,25 @@ class ExpertOffloadManager():
         # 模型前向时根据所需专家列表 topk_ids 更新 npu weight buffer
         # 待补充入参：layer_id, npu weight buffer，开发过程中根据情况补充
         pass
+
+
+_EXPERT_OFFLOAD_MANAGER: ExpertOffloadManager = None
+
+
+def maybe_init_expert_offload_manager(vllm_config: VllmConfig):
+    # if no need to init offload manager:
+    #     return
+    global _EXPERT_OFFLOAD_MANAGER
+    if _EXPERT_OFFLOAD_MANAGER is None:
+        _EXPERT_OFFLOAD_MANAGER = ExpertOffloadManager(vllm_config)
+
+
+def has_expert_offload_manager():
+    return _EXPERT_OFFLOAD_MANAGER is not None
+
+
+def get_expert_offload_manager():
+    assert _EXPERT_OFFLOAD_MANAGER is not None, (
+        "Expert Offload Manager is not initialized"
+    )
+    return _EXPERT_OFFLOAD_MANAGER

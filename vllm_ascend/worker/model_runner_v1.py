@@ -111,6 +111,11 @@ from vllm_ascend.eplb.core.eplb_device_transfer_loader import D2DExpertWeightLoa
 from vllm_ascend.eplb.core.eplb_worker import EplbProcess
 from vllm_ascend.eplb.eplb_updator import EplbUpdator
 from vllm_ascend.eplb.utils import model_register
+from vllm_ascend.expert_offload.expert_offload_manager import (
+    maybe_init_expert_offload_manager,
+    has_expert_offload_manager,
+    get_expert_offload_manager,
+)
 from vllm_ascend.ops.rotary_embedding import set_cos_and_sin, update_cos_sin
 from vllm_ascend.patch.worker.patch_draft_quarot import patch_load_weights
 from vllm_ascend.patch.worker.patch_module import patch_torch_npu_argsort
@@ -474,6 +479,10 @@ class NPUModelRunner(GPUModelRunner):
             self.kvcomp_meta_data = initialize_kvcomp_metadata(max_num_reqs=self.max_num_reqs,
                 block_size=self.block_size, device=self.device, vllm_config=self.vllm_config,
                 parallel_config=self.parallel_config, dtype=self.dtype)
+            
+        maybe_init_expert_offload_manager(self.vllm_config)
+        if has_expert_offload_manager():
+            self.expert_offload_manager = get_expert_offload_manager()
 
     @property
     def use_cp(self) -> bool:
