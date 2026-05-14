@@ -112,21 +112,66 @@ class ExpertOffloadManager:
     #  Forward path: page in experts based on topk_ids                    #
     # ------------------------------------------------------------------ #
 
-    def update_weights(self, layer, topk_ids: torch.Tensor):
-        """Copy experts needed by *topk_ids* from CPU to their original
-        device slots.  No remapping — topk_ids is unchanged."""
+    def update_weights(self, layer, topk_ids: torch.Tensor,
+                        log2phy: torch.Tensor) -> int:
+        """Incrementally page in needed experts, overwriting unused slots.
+
+        Only copies experts that are NOT already on device.  Experts
+        already mapped to a device slot (log2phy[eid] >= 0) are left
+        untouched.  Reusable slots come from experts not in the current
+        topk_ids set.
+
+        Args:
+            layer: AscendFusedMoE instance.
+            topk_ids: [num_tokens, top_k] routed expert indices.
+            log2phy: [global_num_experts] CPU tensor, modified in-place.
+
+        Returns: number of CPU→NPU copies performed.
+        """
         try:
             layer_idx = self.moe_layers.index(layer)
         except ValueError:
-            return
+            return 0
+
+        unique_experts = topk_ids.unique().cpu().tolist()
+        needed = set(unique_experts)
+
+        # Build reverse map: slot → expert_id currently occupying it
+        slot_owner: dict[int, int] = {}
+        for eid in range(len(log2phy)):
+            s = log2phy[eid].item()
+            if s >= 0:
+                slot_owner[s] = eid
+
+        on_device = set(slot_owner.values())
+        already_there = needed & on_device           # no-op
+        need_to_load = needed - already_there          # CPU→NPU copy
+        reusable_slots = [s for s, e in slot_owner.items()
+                          if e not in needed]          # slots to recycle
+
+        if not need_to_load:
+            return 0
+
         dev = layer.w13_weight.device
         dt = layer.w13_weight.dtype
-        for eid in topk_ids.unique():
-            eid = eid.item()
-            layer.w13_weight.data[eid].copy_(
+        n_copies = 0
+
+        for eid in need_to_load:
+            if not reusable_slots:
+                break  # no free slots — should not happen in normal usage
+            slot = reusable_slots.pop()
+            # Copy from CPU to NPU
+            layer.w13_weight.data[slot].copy_(
                 self.w13_weights_cpu[layer_idx][eid].to(dev).to(dt))
-            layer.w2_weight.data[eid].copy_(
+            layer.w2_weight.data[slot].copy_(
                 self.w2_weights_cpu[layer_idx][eid].to(dev).to(dt))
+            # Update mapping
+            log2phy[slot_owner[slot]] = -1   # evict old occupant
+            log2phy[eid] = slot               # assign slot to new expert
+            slot_owner[slot] = eid
+            n_copies += 1
+
+        return n_copies
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #

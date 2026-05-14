@@ -166,10 +166,12 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
                     topk_ids=topk_ids,
                 )
 
-        # Expert offload: page in needed experts based on topk_ids
+        # Expert offload: incrementally page in needed experts, update log2phy
         if getattr(layer, 'enable_expert_offload', False):
             from vllm_ascend.expert_offload import ExpertOffloadManager
-            ExpertOffloadManager.get_instance().update_weights(layer, topk_ids)
+            ExpertOffloadManager.get_instance().update_weights(
+                layer, topk_ids, layer.log2phy)
+            log2phy = layer.log2phy = layer.log2phy.to(topk_ids.device)
 
         if zero_expert_num > 0 and zero_expert_type is not None:
             topk_ids, topk_weights, zero_expert_result = zero_experts_compute(
@@ -386,6 +388,20 @@ class AscendFusedMoE(FusedMoE):
         self.enable_expert_offload = (offload_config.expert_offload
                                       and offload_config.num_device_experts > 0
                                       and offload_config.num_device_experts < self.local_num_experts)
+        if self.enable_expert_offload:
+            ndev = offload_config.num_device_experts
+            # 1. Delete full-size weights, patch create_weights
+            for attr in ["w13_weight", "w2_weight"]:
+                if hasattr(self, attr):
+                    delattr(self, attr)
+            orig_cw = self.quant_method.create_weights
+            def _patched_create_weights(layer, num_experts, **kwargs):
+                orig_cw(layer, ndev, **kwargs)
+            self.quant_method.create_weights = _patched_create_weights
+            # 2. Init offload log2phy mapping (CPU, int32 to match topk_ids)
+            self.log2phy = torch.full(
+                (self.global_num_experts,), -1, dtype=torch.int32, device='cpu')
+            self.log2phy[:ndev] = torch.arange(ndev, dtype=torch.int32)
 
         if self._expert_map is not None:
             logger.info_once(

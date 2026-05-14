@@ -128,6 +128,7 @@ class MoECommMethod(ABC):
         routed_topk_ids = fused_experts_input.topk_ids
         if fused_experts_input.routing.log2phy is not None:
             routed_topk_ids = fused_experts_input.routing.log2phy[routed_topk_ids]
+            routed_topk_ids = routed_topk_ids.clamp(min=0)  # safety: unmapped → 0
 
         token_dispatch_input = build_token_dispatch_input(
             fused_experts_input=fused_experts_input,
@@ -140,6 +141,14 @@ class MoECommMethod(ABC):
             token_dispatch_output=token_dispatch_output,
             use_fusion_ops=self.use_fusion_ops,
         )
+
+        # Expert offload: trim group_list to match shrunk weight dimension.
+        # log2phy already remapped topk_ids to [0, ndev), so entries
+        # beyond ndev in the group_list are all zero — safe to drop.
+        num_weight_experts = fused_experts_input.weights.w1.shape[0]
+        if (group_list_size := mlp_compute_input.group_list.size(0)) != num_weight_experts:
+            object.__setattr__(mlp_compute_input, 'group_list',
+                               mlp_compute_input.group_list[:num_weight_experts])
 
         mlp_output = self._apply_mlp(mlp_compute_input)
 
