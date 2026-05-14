@@ -1,6 +1,7 @@
 """Expert Offload Manager — manages CPU-side expert weights and NPU paging."""
 
 import torch
+from vllm.config import VllmConfig
 
 
 class ExpertOffloadManager:
@@ -17,7 +18,7 @@ class ExpertOffloadManager:
         assert cls._instance is not None, "ExpertOffloadManager not initialized"
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, vllm_config=None):
         from vllm_ascend.ascend_config import get_ascend_config
 
         self.offload_config = get_ascend_config().expert_offload_config

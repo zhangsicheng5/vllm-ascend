@@ -483,7 +483,7 @@ class NPUModelRunner(GPUModelRunner):
         if self.ascend_config.expert_offload_config.expert_offload:
             maybe_init_expert_offload_manager(self.vllm_config)
             if has_expert_offload_manager():
-                self.expert_offload_manager = get_expert_offload_manager()
+                self.offload_manager = get_expert_offload_manager()
 
     @property
     def use_cp(self) -> bool:
