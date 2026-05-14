@@ -314,28 +314,18 @@ class AscendFusedMoE(FusedMoE):
     gate_stream: torch.npu.Stream | None = None
 
     def __init__(self, *args, **kwargs):
-        # Save original routed_scaling_factor before super().__init__ modifies it.
         self._original_routed_scaling_factor = kwargs.get("routed_scaling_factor", 1.0)
 
-        # Expert offload preset: set _expert_map BEFORE super().__init__()
-        # so that create_weights allocates the right size (no 64→32 peak)
-        # and weight_loader skips experts beyond the device budget.
+        # Expert offload: preset _expert_map before super().__init__()
+        # so that create_weights allocates the right size (no peak memory).
         from vllm_ascend.ascend_config import get_ascend_config
-        _ascend_config = get_ascend_config()
-        _offload_cfg = _ascend_config.expert_offload_config
-        _num_experts = kwargs.get("num_experts", 0)
-        self.enable_expert_offload = (
-            _offload_cfg.expert_offload
-            and _offload_cfg.num_device_experts > 0
-            and _offload_cfg.num_device_experts < _num_experts
-        )
-        if self.enable_expert_offload:
-            _ndev = _offload_cfg.num_device_experts
-            self._expert_map_offload = torch.full(
-                (_num_experts,), -1, dtype=torch.int32)
-            self._expert_map_offload[:_ndev] = torch.arange(
-                _ndev, dtype=torch.int32)
-            self._expert_map_offload_count = _ndev
+        from vllm_ascend.expert_offload.utils import init_expert_offload_config
+        _offload_cfg = get_ascend_config().expert_offload_config
+        self.enable_expert_offload, _offload_emap = init_expert_offload_config(
+            _offload_cfg, kwargs.get("num_experts", 0))
+        if _offload_emap is not None:
+            self._expert_map_offload = _offload_emap
+            self._expert_map_offload_count = _offload_cfg.num_device_experts
 
         super().__init__(*args, **kwargs)
         self.use_overlapped = True
@@ -403,14 +393,10 @@ class AscendFusedMoE(FusedMoE):
         if not self.enable_expert_offload:
             self.local_num_experts = self.global_num_experts // self.ep_size
 
-        # Expert offload: log2phy was already set via _expert_map_offload in
-        # super().__init__().  Just init the forward mapping table here now
-        # that global_num_experts is known.
         if self.enable_expert_offload:
-            ndev = _offload_cfg.num_device_experts
-            self.log2phy = torch.full(
-                (self.global_num_experts,), -1, dtype=torch.int32, device='cpu')
-            self.log2phy[:ndev] = torch.arange(ndev, dtype=torch.int32)
+            from vllm_ascend.expert_offload.utils import init_log2phy_for_offload
+            self.log2phy = init_log2phy_for_offload(
+                self.global_num_experts, _offload_cfg.num_device_experts)
 
         if self._expert_map is not None:
             logger.info_once(
