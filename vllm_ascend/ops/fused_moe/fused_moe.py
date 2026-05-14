@@ -315,10 +315,28 @@ class AscendFusedMoE(FusedMoE):
 
     def __init__(self, *args, **kwargs):
         # Save original routed_scaling_factor before super().__init__ modifies it.
-        # When apply_routed_scale_to_output=True, vLLM sets self.routed_scaling_factor
-        # to 1.0 and expects the runner to apply scaling to output. But vllm-ascend
-        # uses its own forward path, so we need the original value.
         self._original_routed_scaling_factor = kwargs.get("routed_scaling_factor", 1.0)
+
+        # Expert offload preset: set _expert_map BEFORE super().__init__()
+        # so that create_weights allocates the right size (no 64→32 peak)
+        # and weight_loader skips experts beyond the device budget.
+        from vllm_ascend.ascend_config import get_ascend_config
+        _ascend_config = get_ascend_config()
+        _offload_cfg = _ascend_config.expert_offload_config
+        _num_experts = kwargs.get("num_experts", 0)
+        self.enable_expert_offload = (
+            _offload_cfg.expert_offload
+            and _offload_cfg.num_device_experts > 0
+            and _offload_cfg.num_device_experts < _num_experts
+        )
+        if self.enable_expert_offload:
+            _ndev = _offload_cfg.num_device_experts
+            self._expert_map_offload = torch.full(
+                (_num_experts,), -1, dtype=torch.int32)
+            self._expert_map_offload[:_ndev] = torch.arange(
+                _ndev, dtype=torch.int32)
+            self._expert_map_offload_count = _ndev
+
         super().__init__(*args, **kwargs)
         self.use_overlapped = True
         self._routed_input_transform = kwargs.get("routed_input_transform")
@@ -332,7 +350,8 @@ class AscendFusedMoE(FusedMoE):
         AscendFusedMoE.moe_counter += 1
         self.moe_instance_id = AscendFusedMoE.moe_counter
 
-        self._expert_map = None
+        if not self.enable_expert_offload:
+            self._expert_map = None
         self.log2phy = None
 
         if self.quant_config is None:
@@ -381,24 +400,14 @@ class AscendFusedMoE(FusedMoE):
         )
         self.global_num_experts = num_experts + self.global_redundant_expert_num
         self.dynamic_eplb = eplb_config.dynamic_eplb and (self.log2phy is not None)
-        self.local_num_experts = self.global_num_experts // self.ep_size
+        if not self.enable_expert_offload:
+            self.local_num_experts = self.global_num_experts // self.ep_size
 
-        # Expert offload: enable if configured and num_device_experts < local_num_experts
-        offload_config = ascend_config.expert_offload_config
-        self.enable_expert_offload = (offload_config.expert_offload
-                                      and offload_config.num_device_experts > 0
-                                      and offload_config.num_device_experts < self.local_num_experts)
+        # Expert offload: log2phy was already set via _expert_map_offload in
+        # super().__init__().  Just init the forward mapping table here now
+        # that global_num_experts is known.
         if self.enable_expert_offload:
-            ndev = offload_config.num_device_experts
-            # 1. Delete full-size weights, patch create_weights
-            for attr in ["w13_weight", "w2_weight"]:
-                if hasattr(self, attr):
-                    delattr(self, attr)
-            orig_cw = self.quant_method.create_weights
-            def _patched_create_weights(layer, num_experts, **kwargs):
-                orig_cw(layer, ndev, **kwargs)
-            self.quant_method.create_weights = _patched_create_weights
-            # 2. Init offload log2phy mapping (CPU, int32 to match topk_ids)
+            ndev = _offload_cfg.num_device_experts
             self.log2phy = torch.full(
                 (self.global_num_experts,), -1, dtype=torch.int32, device='cpu')
             self.log2phy[:ndev] = torch.arange(ndev, dtype=torch.int32)
@@ -441,6 +450,14 @@ class AscendFusedMoE(FusedMoE):
         if self.quant_method.__class__.__name__ in ("GPTQMarlinMoEMethod", "CompressedTensorsWNA16MoEMethod"):
             moe_quant_params["intermediate_size_full"] = intermediate_size
         self.quant_method.create_weights(layer=self, **moe_quant_params)
+
+        if self.enable_expert_offload and self.moe_instance_id == 0:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "[EXPERT_OFFLOAD] layer=0 w13.shape=%s w2.shape=%s local_num_experts=%d",
+                tuple(self.w13_weight.shape) if hasattr(self, 'w13_weight') else 'N/A',
+                tuple(self.w2_weight.shape) if hasattr(self, 'w2_weight') else 'N/A',
+                self.local_num_experts)
 
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
         self.enable_npugraph_ex_static_kernel = ascend_config.ascend_compilation_config.enable_static_kernel
