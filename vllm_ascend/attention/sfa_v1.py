@@ -962,6 +962,13 @@ class AscendSFAImpl(MLAAttentionImpl):
             num_decodes = attn_metadata.num_decodes
             num_prefills = attn_metadata.num_prefills
             num_decode_tokens = attn_metadata.num_decode_tokens
+            print(
+                "[SFA][offload] "
+                f"layer={layer_name} num_decodes={num_decodes} "
+                f"num_prefills={num_prefills} num_decode_tokens={num_decode_tokens} "
+                f"topk_shape={tuple(topk_indices.shape)}",
+                flush=True,
+            )
             ql_nope_decode = ql_nope[:num_decode_tokens]
             ql_nope_prefill = ql_nope[num_decode_tokens:]
             # key_rope_decode = key_rope[:num_decode_tokens]
@@ -1150,11 +1157,28 @@ class AscendSFAImpl(MLAAttentionImpl):
         topk_buffer_v = kv_cache[4][:num_reqs]
         topk_indices = topk_indices.squeeze(1).contiguous() # TODO maybe consider dim1 (head_num?)
 
-        topk_indices = torch.ops.npu.get_cache_miss_topk_indices(
+        print(
+            "[SFA][topk_buffer][before_op] "
+            f"layer={layer_name} capturing={forward_context.capturing} "
+            f"num_reqs={num_reqs} topk_shape={tuple(topk_indices.shape)} "
+            f"topk_dtype={topk_indices.dtype} topk_device={topk_indices.device} "
+            f"last_step_shape={tuple(self.last_step_topk_indices[:num_reqs].shape)} "
+            f"req_ids_shape={tuple(attn_metadata.req_ids_tensor[:num_reqs].shape)}",
+            flush=True,
+        )
+        topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
             topk_indices,
             self.last_step_topk_indices[:num_reqs],
             attn_metadata.req_ids_tensor[:num_reqs]
         )
+        print(
+            "[SFA][topk_buffer][after_op] "
+            f"layer={layer_name} result_is_none={topk_indices_result is None} "
+            f"topk_shape={tuple(topk_indices.shape)} topk_dtype={topk_indices.dtype}",
+            flush=True,
+        )
+        if topk_indices_result is not None:
+            topk_indices = topk_indices_result
         # cache reuse
         # num_tokens_ori = (topk_indices >= 0).sum().item()
         # topk_indices = self.get_cache_miss_topk_indices(
