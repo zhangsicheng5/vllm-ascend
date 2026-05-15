@@ -478,7 +478,14 @@ class AscendFusedMoE(FusedMoE):
             self.quant_method.process_weights_after_loading = wrapped_process_weights  # type: ignore
 
     def _wrap_weight_loader_for_offload(self):
-        """Wrap weight_loader to intercept w13/w2 weights and store them on CPU."""
+        """Wrap weight_loader to intercept w13/w2 weights and store them on CPU.
+
+        Also intercepts scale/offset parameters for quantized models (W8A8).
+        Uses weight_name substring matching to distinguish param types:
+        - "weight_scale" → scale params
+        - "weight_offset" → offset params
+        - otherwise → weight params
+        """
         from vllm_ascend.expert_offload import ExpertOffloadManager
         mgr = ExpertOffloadManager.get_instance()
         layer_moe_idx = self.moe_instance_id
@@ -487,15 +494,30 @@ class AscendFusedMoE(FusedMoE):
 
         def _offload_weight_loader(param, loaded_weight, weight_name, shard_id,
                                    expert_id, **kwargs):
-            # Always copy expert weights to CPU
-            if shard_id in ("w1", "w3"):
-                mgr.load_w13(layer_moe_idx, expert_id, loaded_weight, shard_id)
-            elif shard_id == "w2":
-                mgr.load_w2(layer_moe_idx, expert_id, loaded_weight)
-            # Only load to device if expert_id < num_device_experts
-            # (shared experts and other params like gate/routing go through normal path)
-            if shard_id in ("w1", "w2", "w3") and expert_id >= ndev:
-                return None
+            # --- Handle scale/offset params (quantized models) ---
+            if "weight_scale" in weight_name:
+                mgr._add_pending_scale(layer_moe_idx, expert_id,
+                                       "w13_weight_scale" if shard_id in ("w1", "w3")
+                                       else "w2_weight_scale",
+                                       shard_id, loaded_weight)
+                if expert_id >= ndev:
+                    return None
+            elif "weight_offset" in weight_name:
+                mgr._add_pending_scale(layer_moe_idx, expert_id,
+                                       "w13_weight_offset" if shard_id in ("w1", "w3")
+                                       else "w2_weight_offset",
+                                       shard_id, loaded_weight)
+                if expert_id >= ndev:
+                    return None
+            else:
+                # --- Handle weight params (existing logic) ---
+                if shard_id in ("w1", "w3"):
+                    mgr.load_w13(layer_moe_idx, expert_id, loaded_weight, shard_id)
+                elif shard_id == "w2":
+                    mgr.load_w2(layer_moe_idx, expert_id, loaded_weight)
+                # Only load to device if expert_id < num_device_experts
+                if shard_id in ("w1", "w2", "w3") and expert_id >= ndev:
+                    return None
             return orig_wl(param, loaded_weight, weight_name, shard_id,
                            expert_id, **kwargs)
 

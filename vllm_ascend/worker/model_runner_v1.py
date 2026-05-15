@@ -3067,8 +3067,9 @@ class NPUModelRunner(GPUModelRunner):
             intermediate_size_per_partition=first.intermediate_size_per_partition,
             params_dtype=first.params_dtype,
         )
-        for layer in moe_layers:
+        for i, layer in enumerate(moe_layers):
             self.offload_manager.register_moe_layer(layer)
+            self.offload_manager.maybe_create_scale_buffers(layer, i)
         self.offload_manager.init_device_experts()
 
     def initialize_kv_cache(self, kv_cache_config: KVCacheConfig) -> None:
