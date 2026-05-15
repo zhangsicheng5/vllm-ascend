@@ -764,7 +764,7 @@ class KVPoolWorker:
         thread_num = 16
         token_indices_cpu = self.topk_indices_buffer_cpu[:num_reqs]
         cpu_mask = cpu_mask.unsqueeze(-1).unsqueeze(-1)
-        # sparse_mask = torch.rand_like(token_indices_npu, dtype=torch.bfloat16) < 0.9
+        # sparse_mask = torch.rand_like(token_indices_npu, dtype=torch.bfloat16) < 0.3
         # token_indices_npu = torch.where(sparse_mask, -1, token_indices_npu)
         token_indices_cpu.copy_(token_indices_npu, non_blocking=capturing)
         if not capturing and self.current_layer_load == 0 and self.tp_rank == 0:

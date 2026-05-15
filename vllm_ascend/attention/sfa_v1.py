@@ -5,6 +5,7 @@ import time
 import torch
 import torch_npu
 import vllm.envs as envs_vllm
+import ascend_kernel
 from torch import nn
 from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.distributed import get_tensor_model_parallel_world_size, get_tp_group
@@ -1147,8 +1148,13 @@ class AscendSFAImpl(MLAAttentionImpl):
         num_reqs = topk_indices.shape[0]
         topk_buffer_k = kv_cache[3][:num_reqs]
         topk_buffer_v = kv_cache[4][:num_reqs]
-        topk_indices = topk_indices.squeeze(1) # TODO maybe consider dim1 (head_num?)
+        topk_indices = topk_indices.squeeze(1).contiguous() # TODO maybe consider dim1 (head_num?)
 
+        topk_indices = torch.ops.npu.get_cache_miss_topk_indices(
+            topk_indices,
+            self.last_step_topk_indices[:num_reqs],
+            attn_metadata.req_ids_tensor[:num_reqs]
+        )
         # cache reuse
         # num_tokens_ori = (topk_indices >= 0).sum().item()
         # topk_indices = self.get_cache_miss_topk_indices(
