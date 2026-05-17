@@ -222,37 +222,13 @@ class ExpertOffloadManager:
             del self._pending_scales[key]
 
     def init_device_experts(self):
-        """Copy the first num_device_experts experts from CPU to NPU."""
+        """Refresh derived fp32 scale after weight loading.
+
+        Device experts are already loaded by the weight loader and
+        process_weights_after_loading. Only refresh w13_weight_scale_fp32.
+        """
         for i, layer in enumerate(self.moe_layers):
-            dev = layer.w13_weight.device
-            dt = layer.w13_weight.dtype
             ndev = min(self.num_device_experts, layer.w13_weight.shape[0])
-            for j in range(ndev):
-                layer.w13_weight.data[j].copy_(
-                    self.w13_weights_cpu[i][j].to(dev).to(dt))
-                layer.w2_weight.data[j].copy_(
-                    self.w2_weights_cpu[i][j].to(dev).to(dt))
-
-            # Copy initial scales/offsets for first N experts
-            for attr_name, buffers in self.scale_cpu_buffers.items():
-                if i >= len(buffers):
-                    continue
-                dev_tensor = getattr(layer, attr_name, None)
-                if dev_tensor is None:
-                    continue
-                for j in range(min(ndev, len(buffers[i]))):
-                    dev_tensor.data[j].copy_(buffers[i][j].to(dev))
-
-            for attr_name, buffers in self.offset_cpu_buffers.items():
-                if i >= len(buffers):
-                    continue
-                dev_tensor = getattr(layer, attr_name, None)
-                if dev_tensor is None:
-                    continue
-                for j in range(min(ndev, len(buffers[i]))):
-                    dev_tensor.data[j].copy_(buffers[i][j].to(dev))
-
-            # Refresh derived fp32 scale if present (W8A8_DYNAMIC)
             if hasattr(layer, 'w13_weight_scale_fp32'):
                 for j in range(ndev):
                     layer.w13_weight_scale_fp32[j].copy_(
