@@ -299,6 +299,23 @@ class ExpertOffloadManager:
         reusable_slots = [s for s, e in slot_owner.items()
                           if e not in needed]          # slots to recycle
 
+        # Debug: print routing info for first 30 calls
+        if not hasattr(self, '_dbg_call'):
+            self._dbg_call = 0
+        if self._dbg_call < 10000:
+            import logging
+            _dbg = logging.getLogger(__name__)
+            _dbg.warning("[UPDATE-W] l=%d call=%d topk_shape=%s |needed|=%d |on_dev|=%d |to_load|=%d reusable=%d needed=%s",
+                         layer_idx, self._dbg_call, tuple(topk_ids.shape),
+                         len(needed), len(on_device),
+                         len(need_to_load), len(reusable_slots),
+                         sorted(needed)[:30])
+            if need_to_load and len(need_to_load) > len(reusable_slots):
+                _dbg.warning("[UPDATE-W] l=%d SHORTFALL: need %d load but only %d slots, to_load=%s",
+                             layer_idx, len(need_to_load), len(reusable_slots),
+                             sorted(need_to_load)[:20])
+            self._dbg_call += 1
+
         if not need_to_load:
             return 0
 
@@ -308,6 +325,11 @@ class ExpertOffloadManager:
 
         for eid in need_to_load:
             if not reusable_slots:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[UPDATE-W] l=%d NO SLOTS: %d experts could not be loaded, missed=%s",
+                    layer_idx, len(need_to_load) - n_copies,
+                    sorted(list(need_to_load))[n_copies:][:20])
                 break  # no free slots — should not happen in normal usage
             slot = reusable_slots.pop()
             # Copy weights from CPU to NPU
