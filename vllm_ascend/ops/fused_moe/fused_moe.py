@@ -170,8 +170,7 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
         if getattr(layer, 'enable_expert_offload', False):
             from vllm_ascend.expert_offload import ExpertOffloadManager
             ExpertOffloadManager.get_instance().update_weights(
-                layer, topk_ids, layer.log2phy)
-            log2phy = layer.log2phy = layer.log2phy.to(topk_ids.device)
+                layer, topk_ids, log2phy)
 
         if zero_expert_num > 0 and zero_expert_type is not None:
             topk_ids, topk_weights, zero_expert_result = zero_experts_compute(

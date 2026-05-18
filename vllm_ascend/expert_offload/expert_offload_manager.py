@@ -1,7 +1,16 @@
 """Expert Offload Manager — manages CPU-side expert weights and NPU paging."""
 
 import torch
+import torch_npu
 from vllm.config import VllmConfig
+from vllm.logger import logger
+
+from vllm_ascend.ascend_forward_context import _EXTRA_CTX
+
+
+_SUBSCRIBED_COMPUTE_STREAMS = set()
+def get_subscribed_compute_streams() -> set:
+    return _SUBSCRIBED_COMPUTE_STREAMS
 
 
 class ExpertOffloadManager:
@@ -18,11 +27,13 @@ class ExpertOffloadManager:
         assert cls._instance is not None, "ExpertOffloadManager not initialized"
         return cls._instance
 
-    def __init__(self, vllm_config=None):
+    def __init__(self, vllm_config: VllmConfig):
         from vllm_ascend.ascend_config import get_ascend_config
 
         self.offload_config = get_ascend_config().expert_offload_config
         self.num_device_experts = self.offload_config.num_device_experts
+        self.topk = vllm_config.model_config.hf_config.num_experts_per_tok
+        self.offload_threshold = self.num_device_experts // self.topk
 
         # CPU weight buffers (post-transpose format, matching device after
         # process_weights_after_loading):
@@ -48,6 +59,8 @@ class ExpertOffloadManager:
         self._pending_scales: dict[tuple, dict[str, torch.Tensor]] = {}
 
         ExpertOffloadManager._instance = self
+
+        self.load_stream = torch_npu.npu.Stream()
 
     # ------------------------------------------------------------------ #
     #  Lifecycle: called from NPUModelRunner during model loading         #
@@ -76,6 +89,11 @@ class ExpertOffloadManager:
             self.w13_weights_cpu.append(w13_list)
             self.w2_weights_cpu.append(w2_list)
         self._drain_pending_weights()
+
+        # update weights related buffers
+        self.topk_ids_h = torch.zeros([self.offload_threshold, self.topk], dtype=torch.int32, device='cpu', pin_memory=True)
+        self.log2phy_h = torch.zeros(num_total_experts, dtype=torch.int32, device='cpu', pin_memory=True)
+        self.log2phy_np = self.log2phy_h.numpy()
 
     def register_moe_layer(self, layer):
         self.moe_layers.append(layer)
@@ -254,91 +272,129 @@ class ExpertOffloadManager:
 
         Returns: number of CPU→NPU copies performed.
         """
+        num_tokens = topk_ids.size(0)
+        if num_tokens > self.offload_threshold:
+            # Prefill case, should not happen, return directly
+            logger.warning(f'num_tokens = {num_tokens}, unable to do sparse moe onload, pass.')
+            return 0
+
         try:
             layer_idx = self.moe_layers.index(layer)
         except ValueError:
             return 0
 
-        unique_experts = topk_ids.unique().cpu().tolist()
-        needed = set(unique_experts)
+        topk_ids_h = self.topk_ids_h[:num_tokens]
+        log2phy_h = self.log2phy_h
+        log2phy_np = self.log2phy_np
+        topk_ids_h.copy_(topk_ids, non_blocking=_EXTRA_CTX.capturing)
+        log2phy_h.copy_(log2phy, non_blocking=_EXTRA_CTX.capturing)
 
-        # Build reverse map: slot → expert_id currently occupying it
-        slot_owner: dict[int, int] = {}
-        for eid in range(len(log2phy)):
-            s = log2phy[eid].item()
-            if s >= 0:
-                slot_owner[s] = eid
+        current_compute_stream = torch_npu.npu.current_stream()
+        subscribed_compute_streams = get_subscribed_compute_streams()
+        if current_compute_stream not in subscribed_compute_streams:
+            torch_npu.npu._subscribe_report(current_compute_stream)
+            subscribed_compute_streams.add(current_compute_stream)
 
-        on_device = set(slot_owner.values())
-        already_there = needed & on_device           # no-op
-        need_to_load = needed - already_there          # CPU→NPU copy
-        reusable_slots = [s for s, e in slot_owner.items()
-                          if e not in needed]          # slots to recycle
+        args = (
+            topk_ids_h,
+            log2phy_np,
+            layer,
+            layer_idx,
+        )
+        if _EXTRA_CTX.capturing:
+            torch_npu.npu._launch_host_func(
+                current_compute_stream,
+                self._update_weights,
+                args,
+            )
+        else:
+            self._update_weights(args)
 
-        # Debug: print routing info for first 30 calls
-        if not hasattr(self, '_dbg_call'):
-            self._dbg_call = 0
-        if self._dbg_call < 10000:
-            import logging
-            _dbg = logging.getLogger(__name__)
-            _dbg.warning("[UPDATE-W] l=%d call=%d topk_shape=%s |needed|=%d |on_dev|=%d |to_load|=%d reusable=%d needed=%s",
-                         layer_idx, self._dbg_call, tuple(topk_ids.shape),
-                         len(needed), len(on_device),
-                         len(need_to_load), len(reusable_slots),
-                         sorted(needed)[:30])
-            if need_to_load and len(need_to_load) > len(reusable_slots):
-                _dbg.warning("[UPDATE-W] l=%d SHORTFALL: need %d load but only %d slots, to_load=%s",
-                             layer_idx, len(need_to_load), len(reusable_slots),
-                             sorted(need_to_load)[:20])
-            self._dbg_call += 1
+        log2phy.copy_(log2phy_h, non_blocking=_EXTRA_CTX.capturing)
+    
+    def _update_weights(self, args):
+        (
+            topk_ids_h,
+            log2phy_np,
+            layer,
+            layer_idx,
+        ) = args
+        with torch_npu.npu.stream(self.load_stream):
+            unique_experts = topk_ids_h.unique().tolist()
+            needed = set(unique_experts)
 
-        if not need_to_load:
-            return 0
+            # Build reverse map: slot → expert_id currently occupying it
+            slot_owner: dict[int, int] = {}
+            for eid, slot in enumerate(log2phy_np):
+                if slot >= 0:
+                    slot_owner[slot] = eid
 
-        dev = layer.w13_weight.device
-        dt = layer.w13_weight.dtype
-        n_copies = 0
+            on_device = set(slot_owner.values())
+            already_there = needed & on_device           # no-op
+            need_to_load = needed - already_there          # CPU→NPU copy
+            reusable_slots = [s for s, e in slot_owner.items()
+                            if e not in needed]          # slots to recycle
 
-        for eid in need_to_load:
-            if not reusable_slots:
+            # Debug: print routing info for first 30 calls
+            if not hasattr(self, '_dbg_call'):
+                self._dbg_call = 0
+            if self._dbg_call < 10000:
                 import logging
-                logging.getLogger(__name__).warning(
-                    "[UPDATE-W] l=%d NO SLOTS: %d experts could not be loaded, missed=%s",
-                    layer_idx, len(need_to_load) - n_copies,
-                    sorted(list(need_to_load))[n_copies:][:20])
-                break  # no free slots — should not happen in normal usage
-            slot = reusable_slots.pop()
-            # Copy weights from CPU to NPU
-            layer.w13_weight.data[slot].copy_(
-                self.w13_weights_cpu[layer_idx][eid].to(dev).to(dt))
-            layer.w2_weight.data[slot].copy_(
-                self.w2_weights_cpu[layer_idx][eid].to(dev).to(dt))
-            # Copy scales/offsets from CPU to NPU
-            for attr_name, buffers in self.scale_cpu_buffers.items():
-                if layer_idx >= len(buffers) or eid >= len(buffers[layer_idx]):
-                    continue
-                dev_tensor = getattr(layer, attr_name, None)
-                if dev_tensor is None:
-                    continue
-                dev_tensor.data[slot].copy_(buffers[layer_idx][eid].to(dev))
-            for attr_name, buffers in self.offset_cpu_buffers.items():
-                if layer_idx >= len(buffers) or eid >= len(buffers[layer_idx]):
-                    continue
-                dev_tensor = getattr(layer, attr_name, None)
-                if dev_tensor is None:
-                    continue
-                dev_tensor.data[slot].copy_(buffers[layer_idx][eid].to(dev))
-            # Refresh derived fp32 scale if present (W8A8_DYNAMIC)
-            if hasattr(layer, 'w13_weight_scale_fp32'):
-                layer.w13_weight_scale_fp32[slot].copy_(
-                    layer.w13_weight_scale.data[slot].to(torch.float32))
-            # Update mapping
-            log2phy[slot_owner[slot]] = -1   # evict old occupant
-            log2phy[eid] = slot               # assign slot to new expert
-            slot_owner[slot] = eid
-            n_copies += 1
+                _dbg = logging.getLogger(__name__)
+                _dbg.warning("[UPDATE-W] l=%d call=%d topk_shape=%s |needed|=%d |on_dev|=%d |to_load|=%d reusable=%d needed=%s",
+                            layer_idx, self._dbg_call, tuple(topk_ids_h.shape),
+                            len(needed), len(on_device),
+                            len(need_to_load), len(reusable_slots),
+                            sorted(needed)[:30])
+                if need_to_load and len(need_to_load) > len(reusable_slots):
+                    _dbg.warning("[UPDATE-W] l=%d SHORTFALL: need %d load but only %d slots, to_load=%s",
+                                layer_idx, len(need_to_load), len(reusable_slots),
+                                sorted(need_to_load)[:20])
+                self._dbg_call += 1
 
-        return n_copies
+            dev = layer.w13_weight.device
+            dt = layer.w13_weight.dtype
+            n_copies = 0
+            for eid in need_to_load:
+                if not reusable_slots:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "[UPDATE-W] l=%d NO SLOTS: %d experts could not be loaded, missed=%s",
+                        layer_idx, len(need_to_load) - n_copies,
+                        sorted(list(need_to_load))[n_copies:][:20])
+                    break  # no free slots — should not happen in normal usage
+                slot = reusable_slots.pop()
+                # Copy weights from CPU to NPU
+                layer.w13_weight.data[slot].copy_(
+                    self.w13_weights_cpu[layer_idx][eid].to(dev).to(dt))
+                layer.w2_weight.data[slot].copy_(
+                    self.w2_weights_cpu[layer_idx][eid].to(dev).to(dt))
+                # Copy scales/offsets from CPU to NPU
+                for attr_name, buffers in self.scale_cpu_buffers.items():
+                    if layer_idx >= len(buffers) or eid >= len(buffers[layer_idx]):
+                        continue
+                    dev_tensor = getattr(layer, attr_name, None)
+                    if dev_tensor is None:
+                        continue
+                    dev_tensor.data[slot].copy_(buffers[layer_idx][eid].to(dev))
+                for attr_name, buffers in self.offset_cpu_buffers.items():
+                    if layer_idx >= len(buffers) or eid >= len(buffers[layer_idx]):
+                        continue
+                    dev_tensor = getattr(layer, attr_name, None)
+                    if dev_tensor is None:
+                        continue
+                    dev_tensor.data[slot].copy_(buffers[layer_idx][eid].to(dev))
+                # Refresh derived fp32 scale if present (W8A8_DYNAMIC)
+                if hasattr(layer, 'w13_weight_scale_fp32'):
+                    layer.w13_weight_scale_fp32[slot].copy_(
+                        layer.w13_weight_scale.data[slot].to(torch.float32))
+                # Update mapping
+                log2phy_np[slot_owner[slot]] = -1   # evict old occupant
+                log2phy_np[eid] = slot               # assign slot to new expert
+                slot_owner[slot] = eid
+                n_copies += 1
+
+            self.load_stream.synchronize()
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #

@@ -29,7 +29,7 @@ def init_expert_offload_config(offload_config, num_experts: int):
 
 
 def init_log2phy_for_offload(global_num_experts: int, num_device_experts: int):
-    """Initialize the forward-pass log2phy mapping table on CPU."""
-    log2phy = torch.full((global_num_experts,), -1, dtype=torch.int32, device='cpu')
-    log2phy[:num_device_experts] = torch.arange(num_device_experts, dtype=torch.int32)
+    """Initialize the forward-pass log2phy mapping table."""
+    log2phy = torch.arange(global_num_experts, dtype=torch.int32, device='npu')
+    log2phy[num_device_experts:].fill_(-1)
     return log2phy
