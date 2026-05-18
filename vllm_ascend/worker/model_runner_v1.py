@@ -3071,7 +3071,7 @@ class NPUModelRunner(GPUModelRunner):
             w13_up_dim=w13_up_dim,
             hidden_size=first.hidden_size,
             intermediate_size_per_partition=first.intermediate_size_per_partition,
-            params_dtype=first.params_dtype,
+            params_dtype=first.w13_weight.data.dtype,
         )
         t_b = time.perf_counter()
         for i, layer in enumerate(moe_layers):

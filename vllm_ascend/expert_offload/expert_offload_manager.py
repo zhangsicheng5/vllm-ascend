@@ -353,7 +353,6 @@ class ExpertOffloadManager:
                 self._dbg_call += 1
 
             dev = layer.w13_weight.device
-            dt = layer.w13_weight.dtype
             n_copies = 0
             for eid in need_to_load:
                 if not reusable_slots:
@@ -365,10 +364,11 @@ class ExpertOffloadManager:
                     break  # no free slots — should not happen in normal usage
                 slot = reusable_slots.pop()
                 # Copy weights from CPU to NPU
+                # TODO remove the to(dev) leads to wrong accuracy, weird, need to check why.
                 layer.w13_weight.data[slot].copy_(
-                    self.w13_weights_cpu[layer_idx][eid].to(dev).to(dt))
+                    self.w13_weights_cpu[layer_idx][eid].to(dev))
                 layer.w2_weight.data[slot].copy_(
-                    self.w2_weights_cpu[layer_idx][eid].to(dev).to(dt))
+                    self.w2_weights_cpu[layer_idx][eid].to(dev))
                 # Copy scales/offsets from CPU to NPU
                 for attr_name, buffers in self.scale_cpu_buffers.items():
                     if layer_idx >= len(buffers) or eid >= len(buffers[layer_idx]):
