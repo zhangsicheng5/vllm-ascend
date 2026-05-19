@@ -251,8 +251,7 @@ class AscendW8A8DynamicFusedMoEMethod(AscendMoEScheme):
         if getattr(layer, 'enable_expert_offload', False):
             from vllm_ascend.expert_offload import ExpertOffloadManager
             ExpertOffloadManager.get_instance().update_weights(
-                layer, topk_ids, layer.log2phy)
-            log2phy = layer.log2phy = layer.log2phy.to(topk_ids.device)
+                layer, topk_ids, log2phy)
 
         moe_comm_method = _EXTRA_CTX.moe_comm_method
         fused_scale_flag = (
