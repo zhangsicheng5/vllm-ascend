@@ -166,6 +166,22 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
                     topk_ids=topk_ids,
                 )
 
+        # Expert offload: incrementally page in needed experts, update log2phy
+        use_prefill_pool = False
+        prefill_slot = -1
+        if getattr(layer, 'enable_expert_offload', False):
+            from vllm_ascend.expert_offload import ExpertOffloadManager
+            mgr = ExpertOffloadManager.get_instance()
+            num_tokens = topk_ids.size(0)
+            mgr.update_weights(layer, topk_ids, log2phy)
+            if num_tokens > mgr.offload_threshold and mgr._prefill_initialized and not mgr._skip_prefill:
+                use_prefill_pool = True
+                try:
+                    layer_idx = mgr.moe_layers.index(layer)
+                except ValueError:
+                    layer_idx = 0
+                prefill_slot = layer_idx % len(mgr._prefill_w13)
+
         if zero_expert_num > 0 and zero_expert_type is not None:
             topk_ids, topk_weights, zero_expert_result = zero_experts_compute(
                 expert_indices=topk_ids,
@@ -184,26 +200,41 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
             topk_ids = torch.argsort(random_matrix, dim=1)[:, : topk_ids.size(1)].to(topk_ids.dtype)
 
         moe_comm_method = _EXTRA_CTX.moe_comm_method
-        # NOTE: In the MoECommType.FUSED_MC2 branch, we wrap weights (w1, w2) into lists
-        # and provide dummy scales (w1_scale, w2_scale). This is required because:
-        # The underlying Ascend fused operator (e.g., dispatch_ffn_combine) expects
-        # inputs in a list format.
-        # TODO: Passing an empty tensor as scale for float (BF16) cases is semantically
-        # incorrect. The ideal solution is to pass None. However, if the underlying
-        # dispatch_ffn_combine C++ operator does not support None for the scale argument
-        # (due to signature constraints), we are forced to use a placeholder empty tensor.
-        # This TODO tracks the requirement to update the C++ operator to accept Optional[Tensor]
-        # or None for scales in non-quantized scenarios.
-        if _EXTRA_CTX.moe_comm_type == MoECommType.FUSED_MC2:
-            w1 = [layer.w13_weight]
-            w1_scale = [torch.tensor([], dtype=torch.int64)]
-            w2 = [layer.w2_weight]
-            w2_scale = [torch.tensor([], dtype=torch.int64)]
+        if use_prefill_pool:
+            from vllm_ascend.expert_offload import ExpertOffloadManager
+            mgr = ExpertOffloadManager.get_instance()
+            # Override local expert count so kernel groupList matches prefill pool
+            _saved_nle = layer.moe_config.num_local_experts
+            _saved_lne = layer.local_num_experts
+            ntotal = mgr.num_total_experts
+            layer.moe_config.num_local_experts = ntotal
+            layer.local_num_experts = ntotal
+            # Also patch token dispatcher (cached with old num_experts_local)
+            _saved_td_nel = moe_comm_method.token_dispatcher.num_experts_local
+            moe_comm_method.token_dispatcher.num_experts_local = ntotal
+            # Use prefill-specific identity log2phy (don't pollute decode path)
+            log2phy = mgr._prefill_log2phy
+            if _EXTRA_CTX.moe_comm_type == MoECommType.FUSED_MC2:
+                w1 = [mgr._prefill_w13[prefill_slot]]
+                w1_scale = [torch.tensor([], dtype=torch.int64)]
+                w2 = [mgr._prefill_w2[prefill_slot]]
+                w2_scale = [torch.tensor([], dtype=torch.int64)]
+            else:
+                w1 = mgr._prefill_w13[prefill_slot]
+                w1_scale = None
+                w2 = mgr._prefill_w2[prefill_slot]
+                w2_scale = None
         else:
-            w1 = layer.w13_weight
-            w1_scale = None
-            w2 = layer.w2_weight
-            w2_scale = None
+            if _EXTRA_CTX.moe_comm_type == MoECommType.FUSED_MC2:
+                w1 = [layer.w13_weight]
+                w1_scale = [torch.tensor([], dtype=torch.int64)]
+                w2 = [layer.w2_weight]
+                w2_scale = [torch.tensor([], dtype=torch.int64)]
+            else:
+                w1 = layer.w13_weight
+                w1_scale = None
+                w2 = layer.w2_weight
+                w2_scale = None
 
         final_hidden_states = moe_comm_method.fused_experts(
             fused_experts_input=build_fused_experts_input(
@@ -229,6 +260,11 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
         )
         if zero_expert_num > 0 and zero_expert_type is not None:
             final_hidden_states += zero_expert_result
+        # Restore decode-path expert count after prefill override
+        if use_prefill_pool:
+            layer.moe_config.num_local_experts = _saved_nle
+            layer.local_num_experts = _saved_lne
+            moe_comm_method.token_dispatcher.num_experts_local = _saved_td_nel
         return final_hidden_states
 
 
@@ -307,11 +343,19 @@ class AscendFusedMoE(FusedMoE):
     gate_stream: torch.npu.Stream | None = None
 
     def __init__(self, *args, **kwargs):
-        # Save original routed_scaling_factor before super().__init__ modifies it.
-        # When apply_routed_scale_to_output=True, vLLM sets self.routed_scaling_factor
-        # to 1.0 and expects the runner to apply scaling to output. But vllm-ascend
-        # uses its own forward path, so we need the original value.
         self._original_routed_scaling_factor = kwargs.get("routed_scaling_factor", 1.0)
+
+        # Expert offload: preset _expert_map before super().__init__()
+        # so that create_weights allocates the right size (no peak memory).
+        from vllm_ascend.ascend_config import get_ascend_config
+        from vllm_ascend.expert_offload.utils import init_expert_offload_config
+        _offload_cfg = get_ascend_config().expert_offload_config
+        self.enable_expert_offload, _offload_emap = init_expert_offload_config(
+            _offload_cfg, kwargs.get("num_experts", 0))
+        if _offload_emap is not None:
+            self._expert_map_offload = _offload_emap
+            self._expert_map_offload_count = _offload_cfg.num_device_experts
+
         super().__init__(*args, **kwargs)
         self.use_overlapped = True
         self._routed_input_transform = kwargs.get("routed_input_transform")
@@ -325,7 +369,8 @@ class AscendFusedMoE(FusedMoE):
         AscendFusedMoE.moe_counter += 1
         self.moe_instance_id = AscendFusedMoE.moe_counter
 
-        self._expert_map = None
+        if not self.enable_expert_offload:
+            self._expert_map = None
         self.log2phy = None
 
         if self.quant_config is None:
@@ -374,7 +419,14 @@ class AscendFusedMoE(FusedMoE):
         )
         self.global_num_experts = num_experts + self.global_redundant_expert_num
         self.dynamic_eplb = eplb_config.dynamic_eplb and (self.log2phy is not None)
-        self.local_num_experts = self.global_num_experts // self.ep_size
+        if not self.enable_expert_offload:
+            self.local_num_experts = self.global_num_experts // self.ep_size
+
+        if self.enable_expert_offload:
+            from vllm_ascend.expert_offload.utils import init_log2phy_for_offload
+            self.log2phy = init_log2phy_for_offload(
+                self.global_num_experts, _offload_cfg.num_device_experts)
+        print(f"{self.moe_instance_id=}")
         if self._expert_map is not None:
             logger.info_once(
                 "[EP Rank %s/%s] Expert parallelism is enabled. Local/global"
@@ -399,6 +451,9 @@ class AscendFusedMoE(FusedMoE):
         self.moe_config.num_local_experts = self.local_num_experts
         self.moe_config.global_redundant_expert_num = self.global_redundant_expert_num
 
+        if self.enable_expert_offload:
+            self._wrap_weight_loader_for_offload()
+
         moe_quant_params = {
             "num_experts": self.local_num_experts,
             "hidden_size": self.hidden_size,
@@ -410,6 +465,14 @@ class AscendFusedMoE(FusedMoE):
         if self.quant_method.__class__.__name__ in ("GPTQMarlinMoEMethod", "CompressedTensorsWNA16MoEMethod"):
             moe_quant_params["intermediate_size_full"] = intermediate_size
         self.quant_method.create_weights(layer=self, **moe_quant_params)
+
+        if self.enable_expert_offload and self.moe_instance_id == 0:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "[EXPERT_OFFLOAD] layer=0 w13.shape=%s w2.shape=%s local_num_experts=%d",
+                tuple(self.w13_weight.shape) if hasattr(self, 'w13_weight') else 'N/A',
+                tuple(self.w2_weight.shape) if hasattr(self, 'w2_weight') else 'N/A',
+                self.local_num_experts)
 
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
         self.enable_npugraph_ex_static_kernel = ascend_config.ascend_compilation_config.enable_static_kernel
@@ -442,6 +505,57 @@ class AscendFusedMoE(FusedMoE):
                 return result
 
             self.quant_method.process_weights_after_loading = wrapped_process_weights  # type: ignore
+
+    def _wrap_weight_loader_for_offload(self):
+        """Wrap weight_loader to intercept w13/w2 weights and store them on CPU.
+
+        Also intercepts scale/offset parameters for quantized models (W8A8).
+        Uses weight_name substring matching to distinguish param types:
+        - "weight_scale" → scale params
+        - "weight_offset" → offset params
+        - otherwise → weight params
+        """
+        from vllm_ascend.expert_offload import ExpertOffloadManager
+        mgr = ExpertOffloadManager.get_instance()
+        layer_moe_idx = self.moe_instance_id
+        orig_wl = self.weight_loader
+        ndev = mgr.num_device_experts
+
+        def _offload_weight_loader(param, loaded_weight, weight_name, shard_id,
+                                   expert_id, **kwargs):
+            # print(f"{param=}")
+            # print(f"{loaded_weight.shape=}")
+            # print(f"{weight_name=}")
+            # print(f"{shard_id=}")
+            # print(f"{expert_id=}")
+            # --- Handle scale/offset params (quantized models) ---
+            if "weight_scale" in weight_name:
+                mgr._add_pending_scale(layer_moe_idx, expert_id,
+                                       "w13_weight_scale" if shard_id in ("w1", "w3")
+                                       else "w2_weight_scale",
+                                       shard_id, loaded_weight)
+                if expert_id >= ndev:
+                    return None
+            elif "weight_offset" in weight_name:
+                mgr._add_pending_scale(layer_moe_idx, expert_id,
+                                       "w13_weight_offset" if shard_id in ("w1", "w3")
+                                       else "w2_weight_offset",
+                                       shard_id, loaded_weight)
+                if expert_id >= ndev:
+                    return None
+            else:
+                # --- Handle weight params (existing logic) ---
+                if shard_id in ("w1", "w3"):
+                    mgr.load_w13(layer_moe_idx, expert_id, loaded_weight, shard_id)
+                elif shard_id == "w2":
+                    mgr.load_w2(layer_moe_idx, expert_id, loaded_weight)
+                # Only load to device if expert_id < num_device_experts
+                if shard_id in ("w1", "w2", "w3") and expert_id >= ndev:
+                    return None
+            return orig_wl(param, loaded_weight, weight_name, shard_id,
+                           expert_id, **kwargs)
+
+        self.weight_loader = _offload_weight_loader
 
     def _validate_shared_expert_consistency(self):
         """Validate that split shared expert computation matches integrated
