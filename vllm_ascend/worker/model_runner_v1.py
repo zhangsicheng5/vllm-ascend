@@ -633,6 +633,7 @@ class NPUModelRunner(GPUModelRunner):
             total_num_scheduled_tokens,
         ]
         """
+        logger.info(f'>>>>> num_scheduled_tokens = {num_scheduled_tokens}')
         total_num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
         assert total_num_scheduled_tokens > 0
         num_reqs = self.input_batch.num_reqs

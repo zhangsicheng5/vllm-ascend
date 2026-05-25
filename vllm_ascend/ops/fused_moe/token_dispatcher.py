@@ -347,6 +347,7 @@ class TokenDispatcherWithAllGather(MoETokenDispatcher[MoEAllGatherCombineMetadat
         pertoken_scale = token_dispatch_input.routing.pertoken_scale
         global_redundant_expert_num = token_dispatch_input.routing.global_redundant_expert_num
         restore_shape = hidden_states.shape
+        topk_weights_mask = token_dispatch_input.topk_weights_mask
 
         num_tokens = hidden_states.shape[:-1].numel()
         apply_router_weight_on_input = token_dispatch_input.routing.apply_router_weight_on_input
@@ -355,7 +356,12 @@ class TokenDispatcherWithAllGather(MoETokenDispatcher[MoEAllGatherCombineMetadat
             _, topk = topk_weights.shape
             assert topk == 1, "Only support topk=1 when `apply_router_weight_on_input` is True"
             hidden_states = hidden_states * topk_weights.to(hidden_states.dtype)
-        if expert_map is not None:
+        if topk_weights_mask is not None:
+            first_expert_idx = 0
+            last_expert_idx = self.num_experts_local
+            global_num_experts = self.num_experts_local
+            topk_weights = topk_weights * topk_weights_mask
+        elif expert_map is not None:
             global_num_experts = len(expert_map) + global_redundant_expert_num
             mask = expert_map[topk_ids] != -1
             topk_weights = topk_weights * mask

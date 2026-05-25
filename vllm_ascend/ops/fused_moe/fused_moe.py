@@ -169,8 +169,10 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
         # Expert offload: incrementally page in needed experts, update log2phy
         if getattr(layer, 'enable_expert_offload', False):
             from vllm_ascend.expert_offload import ExpertOffloadManager
-            ExpertOffloadManager.get_instance().update_weights(
+            log2phy_cache_hit, log2phy_cache_miss = ExpertOffloadManager.get_instance().update_weights(
                 layer, topk_ids, log2phy)
+        else:
+            log2phy_cache_hit, log2phy_cache_miss = None, None
 
         if zero_expert_num > 0 and zero_expert_type is not None:
             topk_ids, topk_weights, zero_expert_result = zero_experts_compute(
@@ -190,6 +192,7 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
             topk_ids = torch.argsort(random_matrix, dim=1)[:, : topk_ids.size(1)].to(topk_ids.dtype)
 
         moe_comm_method = _EXTRA_CTX.moe_comm_method
+        # logger.info(f'>>>>> moe_comm_method = {moe_comm_method}')
         # NOTE: In the MoECommType.FUSED_MC2 branch, we wrap weights (w1, w2) into lists
         # and provide dummy scales (w1_scale, w2_scale). This is required because:
         # The underlying Ascend fused operator (e.g., dispatch_ffn_combine) expects
@@ -231,6 +234,8 @@ class AscendUnquantizedFusedMoEMethod(UnquantizedFusedMoEMethod):
                 activation=activation,
                 w1_scale=w1_scale,
                 w2_scale=w2_scale,
+                log2phy_cache_hit=log2phy_cache_hit,
+                log2phy_cache_miss=log2phy_cache_miss,
             )
         )
         if zero_expert_num > 0 and zero_expert_type is not None:

@@ -144,6 +144,8 @@ def build_fused_experts_input(
     w2_scale_bias: torch.Tensor | None = None,
     w1_offset: torch.Tensor | None = None,
     w2_offset: torch.Tensor | None = None,
+    log2phy_cache_hit: torch.Tensor | None = None,
+    log2phy_cache_miss: torch.Tensor | None = None,
 ) -> MoEFusedExpertsInput:
     return MoEFusedExpertsInput(
         hidden_states=hidden_states,
@@ -168,6 +170,8 @@ def build_fused_experts_input(
             apply_router_weight_on_input=apply_router_weight_on_input,
             log2phy=log2phy,
             pertoken_scale=pertoken_scale,
+            log2phy_cache_hit=log2phy_cache_hit,
+            log2phy_cache_miss=log2phy_cache_miss,
         ),
         activation=activation,
         need_trans=need_trans,
@@ -191,6 +195,7 @@ def build_token_dispatch_input(
     *,
     fused_experts_input: MoEFusedExpertsInput,
     topk_ids: torch.Tensor | None = None,
+    topk_weights_mask: torch.Tensor | None = None,
 ) -> MoETokenDispatchInput:
     return MoETokenDispatchInput(
         hidden_states=fused_experts_input.hidden_states,
@@ -198,6 +203,7 @@ def build_token_dispatch_input(
         topk_ids=fused_experts_input.topk_ids if topk_ids is None else topk_ids,
         routing=fused_experts_input.routing,
         quant=fused_experts_input.quant,
+        topk_weights_mask=topk_weights_mask,
     )
 
 

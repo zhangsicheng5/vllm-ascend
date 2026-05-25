@@ -1,9 +1,13 @@
 """Expert Offload Manager — manages CPU-side expert weights and NPU paging."""
 
+import time
+
+import numpy as np
 import torch
 import torch_npu
 from vllm.config import VllmConfig
 from vllm.logger import logger
+from vllm.v1.utils import CpuGpuBuffer
 
 from vllm_ascend.ascend_forward_context import _EXTRA_CTX
 
@@ -94,6 +98,18 @@ class ExpertOffloadManager:
         self.topk_ids_h = torch.zeros([self.offload_threshold, self.topk], dtype=torch.int32, device='cpu', pin_memory=True)
         self.log2phy_h = torch.zeros(num_total_experts, dtype=torch.int32, device='cpu', pin_memory=True)
         self.log2phy_np = self.log2phy_h.numpy()
+        self.log2phy_cache_hit = CpuGpuBuffer(
+            num_total_experts,
+            dtype=torch.int32,
+            device='npu',
+            pin_memory=True,
+        )
+        self.log2phy_cache_miss = CpuGpuBuffer(
+            num_total_experts,
+            dtype=torch.int32,
+            device='npu',
+            pin_memory=True,
+        )
 
     def register_moe_layer(self, layer):
         self.moe_layers.append(layer)
@@ -257,7 +273,7 @@ class ExpertOffloadManager:
     # ------------------------------------------------------------------ #
 
     def update_weights(self, layer, topk_ids: torch.Tensor,
-                        log2phy: torch.Tensor) -> int:
+                        log2phy: torch.Tensor):
         """Incrementally page in needed experts, overwriting unused slots.
 
         Only copies experts that are NOT already on device.  Experts
@@ -276,12 +292,12 @@ class ExpertOffloadManager:
         if num_tokens > self.offload_threshold:
             # Prefill case, should not happen, return directly
             logger.warning(f'num_tokens = {num_tokens}, unable to do sparse moe onload, pass.')
-            return 0
+            return (None, None)
 
         try:
             layer_idx = self.moe_layers.index(layer)
         except ValueError:
-            return 0
+            return (None, None)
 
         topk_ids_h = self.topk_ids_h[:num_tokens]
         log2phy_h = self.log2phy_h
@@ -311,6 +327,10 @@ class ExpertOffloadManager:
             self._update_weights(args)
 
         log2phy.copy_(log2phy_h, non_blocking=_EXTRA_CTX.capturing)
+        self.log2phy_cache_hit.copy_to_gpu()
+        self.log2phy_cache_miss.copy_to_gpu()
+        # return (None, None)
+        return (self.log2phy_cache_hit.gpu, self.log2phy_cache_miss.gpu)
     
     def _update_weights(self, args):
         (
@@ -320,6 +340,7 @@ class ExpertOffloadManager:
             layer_idx,
         ) = args
         with torch_npu.npu.stream(self.load_stream):
+            np.copyto(self.log2phy_cache_hit.np, log2phy_np)
             unique_experts = topk_ids_h.unique().tolist()
             needed = set(unique_experts)
 
@@ -394,6 +415,11 @@ class ExpertOffloadManager:
                 slot_owner[slot] = eid
                 n_copies += 1
 
+            need_to_load_mask = np.zeros_like(log2phy_np)
+            need_to_load_mask[list(need_to_load)] = 1
+            log2phy_need_to_load = np.where(need_to_load_mask, log2phy_np, -1)
+            np.copyto(self.log2phy_cache_miss.np, log2phy_need_to_load)
+
             self.load_stream.synchronize()
 
     # ------------------------------------------------------------------ #
@@ -427,8 +453,6 @@ _EXPERT_OFFLOAD_MANAGER: ExpertOffloadManager = None
 
 
 def maybe_init_expert_offload_manager(vllm_config: VllmConfig):
-    # if no need to init offload manager:
-    #     return
     global _EXPERT_OFFLOAD_MANAGER
     if _EXPERT_OFFLOAD_MANAGER is None:
         _EXPERT_OFFLOAD_MANAGER = ExpertOffloadManager(vllm_config)
