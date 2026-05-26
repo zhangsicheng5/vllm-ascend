@@ -69,8 +69,8 @@ BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
 # Legacy hash Triton path (get_cache_miss_topk_indices_triton) is intentionally
 # disabled in SFA due to NPU vector core failures. Only stateful and AscendC
 # fallback paths are active.
-USE_STATEFUL_TOPK_CACHE_MISS = True
-USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK = False
+USE_STATEFUL_TOPK_CACHE_MISS = False
+USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK = True
 
 
 class AscendSFABackend(AttentionBackend):
