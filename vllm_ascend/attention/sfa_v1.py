@@ -46,7 +46,6 @@ from vllm_ascend.ops.rotary_embedding import get_cos_and_sin_mla
 from vllm_ascend.ops.triton.rope import rope_forward_triton
 from vllm_ascend.ops.triton.get_topk_indices import (
     CacheMissTopKState,
-    get_cache_miss_topk_indices_triton,
     get_cache_miss_topk_indices_triton_state,
 )
 from vllm_ascend.quantization.methods import AscendW8A8LinearMethod
@@ -67,6 +66,9 @@ if TYPE_CHECKING:
 # token count limits within bmm_transpose operator
 BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
 
+# Legacy hash Triton path (get_cache_miss_topk_indices_triton) is intentionally
+# disabled in SFA due to NPU vector core failures. Only stateful and AscendC
+# fallback paths are active.
 USE_STATEFUL_TOPK_CACHE_MISS = True
 USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK = False
 
@@ -1184,6 +1186,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                 self.cache_miss_state,
                 topk_indices,
             )
+            cache_path = "stateful"
         elif USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK:
             topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
                 topk_indices,
@@ -1192,32 +1195,20 @@ class AscendSFAImpl(MLAAttentionImpl):
             )
             if topk_indices_result is not None:
                 topk_indices = topk_indices_result
+            cache_path = "ascendc"
         else:
-            topk_indices = get_cache_miss_topk_indices_triton(
-                attn_metadata.req_ids_tensor[:num_reqs],
-                self.last_step_topk_indices[:num_reqs],
-                topk_indices,
+            raise RuntimeError(
+                "No enabled cache-miss topk path. "
+                "Set USE_STATEFUL_TOPK_CACHE_MISS=True or "
+                "USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK=True. "
+                "Legacy hash Triton path is intentionally disabled."
             )
         print(
             "[SFA][topk_buffer][after_op] "
-            f"layer={layer_name} stateful={USE_STATEFUL_TOPK_CACHE_MISS} "
+            f"layer={layer_name} path={cache_path} "
             f"topk_shape={tuple(topk_indices.shape)} topk_dtype={topk_indices.dtype}",
             flush=True,
         )
-        # cache reuse
-        # num_tokens_ori = (topk_indices >= 0).sum().item()
-        # topk_indices = self.get_cache_miss_topk_indices(
-        #     attn_metadata.req_ids_tensor[:num_reqs],
-        #     self.last_step_topk_indices[:num_reqs],
-        #     topk_indices,
-        # )
-        # topk_indices = get_cache_miss_topk_indices_triton(
-        #     attn_metadata.req_ids_tensor[:num_reqs],
-        #     self.last_step_topk_indices[:num_reqs],
-        #     topk_indices,
-        # )
-        # num_tokens_cache_miss = (topk_indices >= 0).sum().item()
-        # logger.info(f'>>>>> sfa get_topk_buffer, num_tokens_cache_miss = {num_tokens_cache_miss}')
 
         # common
         valid_mask = topk_indices >= 0
