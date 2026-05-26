@@ -79,13 +79,13 @@ def generate_test_data(
 def run_benchmark():
     has_npu_op = hasattr(torch.ops.npu, "get_cache_miss_topk_indices")
 
+    num_reqs = [1, 4, 8]
+    topk_vals = [128, 512, 1024, 2048]
+    token_limits = [32768, 65536]
+    overlaps = [0.95, 0.90, 0.75, 0.50, 0.0]
+
     configs = list(
-        itertools.product(
-            num_reqs=[1, 4, 8],
-            topk=[128, 512, 1024, 2048],
-            token_limit=[32768, 65536],
-            overlap=[0.95, 0.90, 0.75, 0.50, 0.0],
-        )
+        itertools.product(num_reqs, topk_vals, token_limits, overlaps)
     )
 
     print(
