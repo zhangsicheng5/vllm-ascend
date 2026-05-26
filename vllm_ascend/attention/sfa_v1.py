@@ -44,7 +44,11 @@ from vllm_ascend.ops.layer_shard_linear import (
 )
 from vllm_ascend.ops.rotary_embedding import get_cos_and_sin_mla
 from vllm_ascend.ops.triton.rope import rope_forward_triton
-from vllm_ascend.ops.triton.get_topk_indices import get_cache_miss_topk_indices_triton
+from vllm_ascend.ops.triton.get_topk_indices import (
+    CacheMissTopKState,
+    get_cache_miss_topk_indices_triton,
+    get_cache_miss_topk_indices_triton_state,
+)
 from vllm_ascend.quantization.methods import AscendW8A8LinearMethod
 from vllm_ascend.utils import (
     ACL_FORMAT_FRACTAL_ND,
@@ -62,6 +66,9 @@ if TYPE_CHECKING:
 
 # token count limits within bmm_transpose operator
 BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
+
+USE_STATEFUL_TOPK_CACHE_MISS = True
+USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK = False
 
 
 class AscendSFABackend(AttentionBackend):
@@ -475,6 +482,11 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.sparse_block_table = torch.arange(0, max_num_reqs * 2048 // 128, dtype=torch.int32, device='npu').reshape([max_num_reqs, -1])
         self.sparse_topk_indices = torch.arange(2048, dtype=torch.int32, device="npu").view(1, -1).repeat(max_num_reqs, 1)
         self.last_step_topk_indices = torch.full([max_num_reqs, 2048], -1, dtype=torch.int64, device='npu') # 32 bits for req_id, 11 bits for token_id, other redundent
+        self.cache_miss_state = CacheMissTopKState(
+            max_num_reqs=max_num_reqs,
+            topk=2048,
+            device="npu",
+        )
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
         # NOTE: We currently do not support quant kv_b_proj.
@@ -1166,19 +1178,32 @@ class AscendSFAImpl(MLAAttentionImpl):
             f"req_ids_shape={tuple(attn_metadata.req_ids_tensor[:num_reqs].shape)}",
             flush=True,
         )
-        topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
-            topk_indices,
-            self.last_step_topk_indices[:num_reqs],
-            attn_metadata.req_ids_tensor[:num_reqs]
-        )
+        if USE_STATEFUL_TOPK_CACHE_MISS:
+            topk_indices = get_cache_miss_topk_indices_triton_state(
+                attn_metadata.req_ids_tensor[:num_reqs],
+                self.cache_miss_state,
+                topk_indices,
+            )
+        elif USE_ASCENDC_CACHE_MISS_TOPK_FALLBACK:
+            topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
+                topk_indices,
+                self.last_step_topk_indices[:num_reqs],
+                attn_metadata.req_ids_tensor[:num_reqs]
+            )
+            if topk_indices_result is not None:
+                topk_indices = topk_indices_result
+        else:
+            topk_indices = get_cache_miss_topk_indices_triton(
+                attn_metadata.req_ids_tensor[:num_reqs],
+                self.last_step_topk_indices[:num_reqs],
+                topk_indices,
+            )
         print(
             "[SFA][topk_buffer][after_op] "
-            f"layer={layer_name} result_is_none={topk_indices_result is None} "
+            f"layer={layer_name} stateful={USE_STATEFUL_TOPK_CACHE_MISS} "
             f"topk_shape={tuple(topk_indices.shape)} topk_dtype={topk_indices.dtype}",
             flush=True,
         )
-        if topk_indices_result is not None:
-            topk_indices = topk_indices_result
         # cache reuse
         # num_tokens_ori = (topk_indices >= 0).sum().item()
         # topk_indices = self.get_cache_miss_topk_indices(
