@@ -5,6 +5,7 @@ import torch
 import torch_npu  # noqa: F401
 import vllm  # noqa: F401
 
+import ascend_kernel  # noqa: F401
 import vllm_ascend.platform  # noqa: F401
 from vllm_ascend.ops.triton.get_topk_indices import (
     CacheMissTopKState,

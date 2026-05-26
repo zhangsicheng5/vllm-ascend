@@ -26,7 +26,7 @@ class CacheMissTopKState:
             (max_num_reqs, token_limit), -1, dtype=torch.int32, device=device
         )
         self.slot_to_token = torch.full(
-            (max_num_reqs, topk), -1, dtype=torch.int64, device=device
+            (max_num_reqs, topk), -1, dtype=torch.int32, device=device
         )
         self.miss_tokens = torch.full(
             (max_num_reqs, topk), -1, dtype=torch.int32, device=device
@@ -59,9 +59,9 @@ def _stateful_find_miss_kernel(
     cols = tl.arange(0, BLOCK)
     mask = cols < topk
 
-    new_token = tl.load(new_topk_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    new_token = tl.load(new_topk_ptr + row_off + cols, mask=mask, other=-1).to(tl.int32)
     valid_new = (new_token >= 0) & (new_token < token_limit)
-    safe_new = tl.where(valid_new, new_token, tl.zeros((BLOCK,), tl.int64))
+    safe_new = tl.where(valid_new, new_token, tl.zeros((BLOCK,), tl.int32))
 
     # token_to_slot[req_id, token] -> slot index or -1
     prev_slot = tl.load(
@@ -70,33 +70,20 @@ def _stateful_find_miss_kernel(
         other=-1,
     )
     is_miss = (prev_slot < 0) & valid_new
-    miss_rank = tl.cumsum(is_miss.to(tl.int64), axis=0) - 1
-    num_miss = tl.sum(is_miss.to(tl.int64), axis=0)
+    miss_rank = tl.cumsum(is_miss.to(tl.int32), axis=0) - 1
+    num_miss = tl.sum(is_miss.to(tl.int32), axis=0)
 
     tl.store(miss_counts_ptr + pid, num_miss.to(tl.int32))
 
-    # Scatter miss tokens into compact miss_tensors[row] by rank
+    # Scatter miss tokens into compact miss_tokens[row] by rank.
     miss_row_off = pid * topk
     tl.store(miss_tokens_ptr + miss_row_off + cols, tl.full((BLOCK,), -1, tl.int32), mask=mask)
-
-    for sb_start in range(0, BLOCK, SUB_BLOCK):
-        target_ranks = sb_start + tl.arange(0, SUB_BLOCK)
-        mr_b = tl.broadcast_to(miss_rank[:, None], (BLOCK, SUB_BLOCK))
-        tr_b = tl.broadcast_to(target_ranks[None, :], (BLOCK, SUB_BLOCK))
-        im_b = tl.broadcast_to(is_miss[:, None], (BLOCK, SUB_BLOCK))
-        nt_b = tl.broadcast_to(new_token[:, None], (BLOCK, SUB_BLOCK))
-
-        miss_match = (mr_b == tr_b) & im_b
-        gathered = tl.sum(
-            tl.where(miss_match, nt_b, tl.zeros((BLOCK, SUB_BLOCK), tl.int64)),
-            axis=0,
-        )
-        write_mask = target_ranks < num_miss
-        tl.store(
-            miss_tokens_ptr + miss_row_off + target_ranks,
-            gathered.to(tl.int32),
-            mask=write_mask,
-        )
+    safe_miss_rank = tl.where(is_miss, miss_rank, tl.zeros((BLOCK,), tl.int32))
+    tl.store(
+        miss_tokens_ptr + miss_row_off + safe_miss_rank,
+        new_token,
+        mask=is_miss,
+    )
 
 
 @triton.jit
@@ -124,78 +111,51 @@ def _stateful_assign_slots_kernel(
     cols = tl.arange(0, BLOCK)
     mask = cols < topk
 
-    new_token = tl.load(new_topk_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
-    old_token = tl.load(slot_to_token_ptr + req_id * topk + cols, mask=mask, other=-1).to(tl.int64)
+    new_token = tl.load(new_topk_ptr + row_off + cols, mask=mask, other=-1).to(tl.int32)
+    old_token = tl.load(slot_to_token_ptr + req_id * topk + cols, mask=mask, other=-1).to(tl.int32)
 
     # Load miss info from kernel 1
-    miss_count = tl.load(miss_counts_ptr + pid).to(tl.int64)
-    miss_token = tl.load(miss_tokens_ptr + row_off + cols, mask=mask, other=-1).to(tl.int64)
+    miss_count = tl.load(miss_counts_ptr + pid).to(tl.int32)
 
     # Phase A: find free slots — old token not in new_topk
-    avail_count = tl.zeros((BLOCK,), tl.int64)
+    avail_count = tl.zeros((BLOCK,), tl.int32)
     for sb_start in range(0, BLOCK, SUB_BLOCK):
         sb_cols = sb_start + tl.arange(0, SUB_BLOCK)
         sb_mask = sb_cols < topk
         new_chunk = tl.load(
             new_topk_ptr + row_off + sb_cols, mask=sb_mask, other=-1
-        ).to(tl.int64)
+        ).to(tl.int32)
         old_b = tl.broadcast_to(old_token[:, None], (BLOCK, SUB_BLOCK))
         new_b = tl.broadcast_to(new_chunk[None, :], (BLOCK, SUB_BLOCK))
         cmp = old_b == new_b
-        avail_count += tl.sum(cmp.to(tl.int64), axis=1)
+        avail_count += tl.sum(cmp.to(tl.int32), axis=1)
 
     stale_mask = (avail_count == 0) & (old_token >= 0)
     empty_mask = old_token == -1
     avail_mask = stale_mask | empty_mask
 
     # Handle shortage: fill empty slots when not enough stale slots
-    num_avail = tl.sum(avail_mask.to(tl.int64), axis=0)
+    num_avail = tl.sum(avail_mask.to(tl.int32), axis=0)
     num_shortage = miss_count - num_avail
-    empty_cumsum = tl.cumsum(empty_mask.to(tl.int64), axis=0)
+    empty_cumsum = tl.cumsum(empty_mask.to(tl.int32), axis=0)
     selected_empty = (empty_cumsum <= num_shortage) & empty_mask
     avail_mask = avail_mask | selected_empty
 
-    avail_rank = tl.cumsum(avail_mask.to(tl.int64), axis=0) - 1
+    avail_rank = tl.cumsum(avail_mask.to(tl.int32), axis=0) - 1
 
-    # Phase B: scatter miss tokens into free slots by rank
-    out_vals = tl.full((BLOCK,), -1, tl.int64)
-    for sb_start in range(0, BLOCK, SUB_BLOCK):
-        target_ranks = sb_start + tl.arange(0, SUB_BLOCK)
-
-        # Gather: find miss token with this rank
-        mr_b = tl.broadcast_to(tl.arange(0, BLOCK)[:, None], (BLOCK, SUB_BLOCK))
-        tr_b = tl.broadcast_to(target_ranks[None, :], (BLOCK, SUB_BLOCK))
-        mt_b = tl.broadcast_to(miss_token[:, None], (BLOCK, SUB_BLOCK))
-
-        # miss token at position `rank` (where miss_token was compacted)
-        # The miss tokens are compacted at positions 0..miss_count-1
-        pos_match = (mr_b == tr_b) & (mr_b < miss_count)
-        gathered = tl.sum(
-            tl.where(pos_match, mt_b, tl.zeros((BLOCK, SUB_BLOCK), tl.int64)),
-            axis=0,
-        )
-
-        # Scatter: find free slot with this rank
-        ar_b = tl.broadcast_to(avail_rank[:, None], (BLOCK, SUB_BLOCK))
-        am_b = tl.broadcast_to(avail_mask[:, None], (BLOCK, SUB_BLOCK))
-        valid_rank = tr_b < miss_count
-
-        slot_match = (ar_b == tr_b) & am_b & valid_rank
-        result = tl.sum(
-            tl.where(
-                slot_match,
-                gathered[None, :],
-                tl.zeros((BLOCK, SUB_BLOCK), tl.int64),
-            ),
-            axis=1,
-        )
-        has_match = tl.sum(slot_match.to(tl.int64), axis=1) > 0
-        out_vals = tl.where(has_match, result, out_vals)
+    # Phase B: gather compacted miss tokens by free-slot rank.
+    take_miss = avail_mask & (avail_rank >= 0) & (avail_rank < miss_count)
+    safe_rank = tl.where(take_miss, avail_rank, tl.zeros((BLOCK,), tl.int32))
+    out_vals = tl.load(
+        miss_tokens_ptr + row_off + safe_rank,
+        mask=take_miss,
+        other=-1,
+    ).to(tl.int32)
 
     # Phase C: update slot_to_token
     new_slot_token = tl.where(
         avail_mask,
-        tl.where(out_vals >= 0, out_vals, tl.full((BLOCK,), -1, tl.int64)),
+        tl.where(out_vals >= 0, out_vals, tl.full((BLOCK,), -1, tl.int32)),
         old_token,
     )
     tl.store(
@@ -205,7 +165,7 @@ def _stateful_assign_slots_kernel(
     # Phase D: update token_to_slot
     # Clear old stale token entries
     clear_mask = stale_mask & (old_token >= 0) & (old_token < token_limit)
-    safe_old = tl.where(clear_mask, old_token, tl.zeros((BLOCK,), tl.int64))
+    safe_old = tl.where(clear_mask, old_token, tl.zeros((BLOCK,), tl.int32))
     tl.store(
         token_to_slot_ptr + req_id * token_limit + safe_old,
         tl.full((BLOCK,), -1, tl.int32),
@@ -213,7 +173,7 @@ def _stateful_assign_slots_kernel(
     )
     # Set new token entries for assigned slots
     set_mask = (new_slot_token >= 0) & (new_slot_token < token_limit)
-    safe_set = tl.where(set_mask, new_slot_token, tl.zeros((BLOCK,), tl.int64))
+    safe_set = tl.where(set_mask, new_slot_token, tl.zeros((BLOCK,), tl.int32))
     tl.store(
         token_to_slot_ptr + req_id * token_limit + safe_set,
         cols.to(tl.int32),
@@ -224,7 +184,7 @@ def _stateful_assign_slots_kernel(
     out = tl.where(
         avail_mask & (out_vals >= 0),
         out_vals,
-        tl.full((BLOCK,), -1, tl.int64),
+        tl.full((BLOCK,), -1, tl.int32),
     )
     tl.store(out_ptr + row_off + cols, out.to(tl.int32), mask=mask)
 
