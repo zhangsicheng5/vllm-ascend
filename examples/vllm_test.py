@@ -101,7 +101,7 @@ llm = LLM(
     gpu_memory_utilization=0.84, # tp2, 10 layers, 32k, graph, uti 0.84, bs 1
     # gpu_memory_utilization=0.94, # tp16, full, 128k, mock prefill, uti 0.95, bs1
     quantization="ascend",
-    max_num_seqs=4,
+    max_num_seqs=2,
     # max_model_len=4096,
     # max_num_batched_tokens=4096,
     max_model_len=33792,
@@ -139,11 +139,13 @@ llm = LLM(
     profiler_config={
         "profiler": "torch",
         # "torch_profiler_dir": "/home/z00911889/profile/v32_l10_tp2_baseline_bs4_seq256_graph",
-        "torch_profiler_dir": "/home/s886374/profile/v32_ascendc",
+        "torch_profiler_dir": "/home/s886374/profile/v32_triton_req2_test",
         "torch_profiler_with_stack": True,
     }
 )
 
+for i in range(3):
+    outputs = llm.generate(prompts, sampling_params)
 # Generate texts from the prompts.
 llm.start_profile()
 outputs = llm.generate(prompts, sampling_params)
