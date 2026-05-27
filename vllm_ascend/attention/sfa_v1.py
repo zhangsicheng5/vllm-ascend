@@ -1166,26 +1166,26 @@ class AscendSFAImpl(MLAAttentionImpl):
             f"req_ids_shape={tuple(attn_metadata.req_ids_tensor[:num_reqs].shape)}",
             flush=True,
         )
-        topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
-            topk_indices,
-            self.last_step_topk_indices[:num_reqs],
-            attn_metadata.req_ids_tensor[:num_reqs]
-        )
-        print(
-            "[SFA][topk_buffer][after_op] "
-            f"layer={layer_name} result_is_none={topk_indices_result is None} "
-            f"topk_shape={tuple(topk_indices.shape)} topk_dtype={topk_indices.dtype}",
-            flush=True,
-        )
-        if topk_indices_result is not None:
-            topk_indices = topk_indices_result
+        # topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
+        #     topk_indices,
+        #     self.last_step_topk_indices[:num_reqs],
+        #     attn_metadata.req_ids_tensor[:num_reqs]
+        # )
+        # print(
+        #     "[SFA][topk_buffer][after_op] "
+        #     f"layer={layer_name} result_is_none={topk_indices_result is None} "
+        #     f"topk_shape={tuple(topk_indices.shape)} topk_dtype={topk_indices.dtype}",
+        #     flush=True,
+        # )
+        # if topk_indices_result is not None:
+        #     topk_indices = topk_indices_result
         # cache reuse
         # num_tokens_ori = (topk_indices >= 0).sum().item()
-        # topk_indices = self.get_cache_miss_topk_indices(
-        #     attn_metadata.req_ids_tensor[:num_reqs],
-        #     self.last_step_topk_indices[:num_reqs],
-        #     topk_indices,
-        # )
+        topk_indices = self.get_cache_miss_topk_indices(
+            attn_metadata.req_ids_tensor[:num_reqs],
+            self.last_step_topk_indices[:num_reqs],
+            topk_indices,
+        )
         # topk_indices = get_cache_miss_topk_indices_triton(
         #     attn_metadata.req_ids_tensor[:num_reqs],
         #     self.last_step_topk_indices[:num_reqs],
