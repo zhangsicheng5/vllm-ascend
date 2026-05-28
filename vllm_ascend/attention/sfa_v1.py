@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar, Tuple
 import time
 
-import numpy as np
+
 import torch
 import torch_npu
 import vllm.envs as envs_vllm
@@ -25,22 +25,20 @@ from vllm_ascend.attention.attention_v1 import AscendAttentionState
 from vllm_ascend.attention.context_parallel.common_cp import AscendPCPMetadata
 from vllm_ascend.attention.cpu_cache_miss_topk import (
     NUMBA_AVAILABLE as CPU_CACHE_MISS_TOPK_AVAILABLE,
-    CPUCacheMissTopKWorkspace,
-    make_cpu_cache_miss_topk_workspace,
-    update_topk_indices_cpu,
 )
 from vllm_ascend.attention.mla_v1 import MAX_O_PROJ_PREFETCH_SIZE, MLAPO_MAX_SUPPORTED_TOKENS
 from vllm_ascend.attention.utils import (
     AscendCommonAttentionMetadata,
     ascend_chunked_prefill_workspace_size,
     enable_cp,
+    maybe_load_kv_token_wise_graph,
+    maybe_prepare_cache_miss_topk_graph,
     maybe_save_kv_layer_to_connector,
     maybe_save_kv_layer_to_connector_graph,
     trans_rope_weight,
     transdata,
     wait_for_kv_layer_from_connector,
     split_decodes_and_prefills,
-    maybe_load_kv_token_wise_graph,
 )
 from vllm_ascend.distributed.utils import all_gather_async
 from vllm_ascend.ops.layer_shard_linear import (
@@ -69,9 +67,6 @@ if TYPE_CHECKING:
 
 # token count limits within bmm_transpose operator
 BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
-USE_CPU_CACHE_MISS_TOPK = False
-USE_LOAD_CPU_CACHE_MISS_TOPK = True
-CPU_CACHE_MISS_TOPK_MAX_TOKEN = 131072
 
 
 class AscendSFABackend(AttentionBackend):
@@ -485,8 +480,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.sparse_block_table = torch.arange(0, max_num_reqs * 2048 // 128, dtype=torch.int32, device='npu').reshape([max_num_reqs, -1])
         self.sparse_topk_indices = torch.arange(2048, dtype=torch.int32, device="npu").view(1, -1).repeat(max_num_reqs, 1)
         self.last_step_topk_indices = torch.full([max_num_reqs, 2048], -1, dtype=torch.int64, device='npu') # 32 bits for req_id, 11 bits for token_id, other redundent
-        self.cpu_cache_miss_topk_workspace: CPUCacheMissTopKWorkspace | None = None
-        self.cpu_cache_miss_topk_topk = 2048
 
     def process_weights_after_loading(self, act_dtype: torch.dtype):
         # NOTE: We currently do not support quant kv_b_proj.
@@ -1099,62 +1092,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         # logger.info(f'>>>>> sfa fwd, ql_nope={ql_nope.shape}, attn_output={attn_output.shape}')
         return attn_output
 
-    def _ensure_cpu_cache_miss_topk_workspace(
-        self,
-        topk: int,
-    ) -> CPUCacheMissTopKWorkspace:
-        if (self.cpu_cache_miss_topk_workspace is None
-                or self.cpu_cache_miss_topk_topk != topk):
-            self.cpu_cache_miss_topk_workspace = (
-                make_cpu_cache_miss_topk_workspace(
-                    topk=topk,
-                    max_token=CPU_CACHE_MISS_TOPK_MAX_TOKEN,
-                )
-            )
-            self.cpu_cache_miss_topk_topk = topk
-
-        return self.cpu_cache_miss_topk_workspace
-
-    def get_cache_miss_topk_indices_cpu(
-        self,
-        req_ids_tensor: torch.Tensor,
-        topk_indices_old: torch.Tensor,
-        topk_indices_new: torch.Tensor,
-    ) -> torch.Tensor:
-        _, topk = topk_indices_new.shape
-        workspace = self._ensure_cpu_cache_miss_topk_workspace(topk)
-
-        req_ids_cpu = np.ascontiguousarray(
-            req_ids_tensor.detach().cpu().numpy(),
-            dtype=np.int64,
-        )
-        old_cpu = np.ascontiguousarray(
-            topk_indices_old.detach().cpu().numpy(),
-            dtype=np.int64,
-        )
-        new_cpu = np.ascontiguousarray(
-            topk_indices_new.detach().cpu().numpy(),
-            dtype=np.int32,
-        )
-
-        update_topk_indices_cpu(
-            req_ids_cpu,
-            old_cpu,
-            new_cpu,
-            workspace,
-        )
-
-        topk_indices_old.copy_(
-            torch.from_numpy(old_cpu).to(
-                device=topk_indices_old.device,
-                dtype=topk_indices_old.dtype,
-            )
-        )
-        return torch.from_numpy(new_cpu).to(
-            device=topk_indices_new.device,
-            dtype=topk_indices_new.dtype,
-        )
-
     def get_cache_miss_topk_indices(
         self,
         req_ids_tensor: torch.Tensor,
@@ -1247,36 +1184,23 @@ class AscendSFAImpl(MLAAttentionImpl):
         # )
         # if topk_indices_result is not None:
         #     topk_indices = topk_indices_result
-        # cache reuse
-        # num_tokens_ori = (topk_indices >= 0).sum().item()
-        load_cpu_topk_indices_new = None
-        load_cpu_topk_indices_old = None
-        if USE_LOAD_CPU_CACHE_MISS_TOPK and CPU_CACHE_MISS_TOPK_AVAILABLE:
-            load_cpu_topk_indices_new = topk_indices.clone()
-            load_cpu_topk_indices_old = (
-                self.last_step_topk_indices[:num_reqs].clone()
-            )
-
-        if (USE_CPU_CACHE_MISS_TOPK and CPU_CACHE_MISS_TOPK_AVAILABLE
-                and not forward_context.capturing):
-            topk_indices = self.get_cache_miss_topk_indices_cpu(
-                attn_metadata.req_ids_tensor[:num_reqs],
-                self.last_step_topk_indices[:num_reqs],
+        # cache miss prepare: CPU Numba D2H → cache-miss → H2D writeback
+        prepared_cache_miss_topk = False
+        if CPU_CACHE_MISS_TOPK_AVAILABLE:
+            prepared_cache_miss_topk = maybe_prepare_cache_miss_topk_graph(
+                layer_name,
+                num_reqs,
                 topk_indices,
+                self.last_step_topk_indices[:num_reqs],
+                attn_metadata.req_ids_tensor[:num_reqs],
+                forward_context.capturing,
             )
-        else:
+        if not prepared_cache_miss_topk:
             topk_indices = self.get_cache_miss_topk_indices(
                 attn_metadata.req_ids_tensor[:num_reqs],
                 self.last_step_topk_indices[:num_reqs],
                 topk_indices,
             )
-        # topk_indices = get_cache_miss_topk_indices_triton(
-        #     attn_metadata.req_ids_tensor[:num_reqs],
-        #     self.last_step_topk_indices[:num_reqs],
-        #     topk_indices,
-        # )
-        # num_tokens_cache_miss = (topk_indices >= 0).sum().item()
-        # logger.info(f'>>>>> sfa get_topk_buffer, num_tokens_cache_miss = {num_tokens_cache_miss}')
 
         # common
         valid_mask = topk_indices >= 0
@@ -1336,10 +1260,6 @@ class AscendSFAImpl(MLAAttentionImpl):
             cpu_token_indices,
             cpu_mask,
             forward_context.capturing,
-            load_cpu_topk_indices_new,
-            load_cpu_topk_indices_old,
-            attn_metadata.req_ids_tensor[:num_reqs],
-            offload_thresholds.squeeze(1),
         )
 
         # generate new block_table & indices

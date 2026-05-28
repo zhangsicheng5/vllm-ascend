@@ -312,10 +312,6 @@ def maybe_load_kv_token_wise_graph(
     token_indices: torch.Tensor, # [num_reqs, topk]
     cpu_mask: torch.Tensor,
     capturing: bool = False,
-    topk_indices_new: torch.Tensor | None = None,
-    topk_indices_old: torch.Tensor | None = None,
-    req_ids_tensor: torch.Tensor | None = None,
-    offload_thresholds: torch.Tensor | None = None,
 ):
     if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
         return
@@ -328,10 +324,29 @@ def maybe_load_kv_token_wise_graph(
         token_indices,
         cpu_mask,
         capturing,
+    )
+
+
+def maybe_prepare_cache_miss_topk_graph(
+    layer_name: str,
+    num_reqs: int,
+    topk_indices_new: torch.Tensor,
+    topk_indices_old: torch.Tensor,
+    req_ids_tensor: torch.Tensor,
+    capturing: bool = False,
+) -> bool:
+    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
+        return False
+    connector = get_kv_transfer_group()
+    if not hasattr(connector, "prepare_cache_miss_topk"):
+        return False
+    return connector.prepare_cache_miss_topk(
+        layer_name,
+        num_reqs,
         topk_indices_new,
         topk_indices_old,
         req_ids_tensor,
-        offload_thresholds,
+        capturing,
     )
 
 
