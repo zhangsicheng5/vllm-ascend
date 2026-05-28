@@ -226,7 +226,7 @@ if NUMBA_AVAILABLE:
         elif marker != base + NEW_FLAG and marker != base + BOTH_FLAG:
             mark[token] = base + NEW_FLAG
 
-    @njit(nogil=True, parallel=True, boundscheck=False)
+    @njit(nogil=True, parallel=False, boundscheck=False)
     def update_topk_cache_miss_inplace_numba(
         req_ids_tensor,
         topk_indices_old,
