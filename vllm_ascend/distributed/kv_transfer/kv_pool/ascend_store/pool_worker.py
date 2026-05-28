@@ -512,13 +512,10 @@ class KVPoolWorker:
                 logger.debug(f"Retrieved {num_retrieved_tokens} tokens")
 
     def save_cpu(self, args):
-        if self.save_stream is None:
-            self.save_stream = torch_npu.npu.Stream()
-        with torch_npu.npu.stream(self.save_stream):
-            self.kv_send_thread.add_request(self.layer_save_tasks[self.current_layer])
-            self.current_layer += 1
-            if self.current_layer == self.num_layers:
-                self.current_layer = 0
+        self.kv_send_thread.add_request(self.layer_save_tasks[self.current_layer])
+        self.current_layer += 1
+        if self.current_layer == self.num_layers:
+            self.current_layer = 0
 
     def save_kv_offload(
         self,
@@ -747,11 +744,33 @@ class KVPoolWorker:
         self.req_ids = req_ids
 
     def load_cpu(self, args):
-        if self.load_stream is None:
-            self.load_stream = torch_npu.npu.Stream()
-        with torch_npu.npu.stream(self.load_stream):
-            self.cpu_sparse_attn.get_kv_topk(*args)
-            self.load_stream.synchronize()
+        (
+            k_cache_cpu,
+            v_cache_cpu,
+            token_indices_cpu,
+            actual_seq_len_q,
+            cpu_block_table,
+            onload_topk_buffer_k_cpu,
+            onload_topk_buffer_v_cpu,
+            thread_num,
+        ) = args
+        self.cpu_sparse_attn.get_kv_topk(
+            k_cache_cpu.data_ptr(),
+            v_cache_cpu.data_ptr(),
+            token_indices_cpu.data_ptr(),
+            actual_seq_len_q.data_ptr(),
+            cpu_block_table.data_ptr(),
+            onload_topk_buffer_k_cpu.data_ptr(),
+            onload_topk_buffer_v_cpu.data_ptr(),
+            k_cache_cpu.shape,
+            v_cache_cpu.shape,
+            token_indices_cpu.shape,
+            actual_seq_len_q.shape,
+            cpu_block_table.shape,
+            onload_topk_buffer_k_cpu.shape,
+            onload_topk_buffer_v_cpu.shape,
+            thread_num,
+        )
 
     def load_kv_token_wise(
         self,
@@ -786,20 +805,13 @@ class KVPoolWorker:
         onload_topk_buffer_k_cpu = self.onload_topk_buffer_k_cpu[:num_reqs]
         onload_topk_buffer_v_cpu = self.onload_topk_buffer_v_cpu[:num_reqs]
         args = (
-            k_cache_cpu.data_ptr(),
-            v_cache_cpu.data_ptr(),
-            token_indices_cpu.data_ptr(),
-            actual_seq_len_q.data_ptr(),
-            cpu_block_table.data_ptr(),
-            onload_topk_buffer_k_cpu.data_ptr(),
-            onload_topk_buffer_v_cpu.data_ptr(),
-            k_cache_cpu.shape,
-            v_cache_cpu.shape,
-            token_indices_cpu.shape,
-            actual_seq_len_q.shape,
-            cpu_block_table.shape,
-            onload_topk_buffer_k_cpu.shape,
-            onload_topk_buffer_v_cpu.shape,
+            k_cache_cpu,
+            v_cache_cpu,
+            token_indices_cpu,
+            actual_seq_len_q,
+            cpu_block_table,
+            onload_topk_buffer_k_cpu,
+            onload_topk_buffer_v_cpu,
             thread_num,
         )
         # with torch_npu.npu.stream(self.side_compute_stream):
