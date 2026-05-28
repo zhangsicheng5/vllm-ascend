@@ -1,4 +1,6 @@
 #include <torch/extension.h>
+#include <algorithm>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <iostream>
@@ -35,6 +37,127 @@ at::Tensor restore_tensor(uintptr_t ptr_val, const std::vector<int64_t>& shape, 
     if (ptr_val == 0) return at::Tensor(); // 处理空指针情况
     auto options = torch::TensorOptions().dtype(dtype).device(torch::kCPU);
     return torch::from_blob(reinterpret_cast<void*>(ptr_val), shape, options);
+}
+
+constexpr int32_t OLD_FLAG = 1;
+constexpr int32_t NEW_FLAG = 2;
+constexpr int32_t BOTH_FLAG = 3;
+constexpr int64_t REQ_ID_OFFSET_STRIDE = 1LL << 16;
+constexpr int32_t EPOCH_RESET_THRESHOLD = 2'147'483'000;
+
+inline bool has_old(const int32_t* mark, int32_t token, int32_t base) {
+    const int32_t marker = mark[token];
+    return marker == base + OLD_FLAG || marker == base + BOTH_FLAG;
+}
+
+inline bool has_new(const int32_t* mark, int32_t token, int32_t base) {
+    const int32_t marker = mark[token];
+    return marker == base + NEW_FLAG || marker == base + BOTH_FLAG;
+}
+
+inline void set_old(int32_t* mark, int32_t token, int32_t base) {
+    const int32_t marker = mark[token];
+    if (marker == base + NEW_FLAG) {
+        mark[token] = base + BOTH_FLAG;
+    } else if (marker != base + OLD_FLAG && marker != base + BOTH_FLAG) {
+        mark[token] = base + OLD_FLAG;
+    }
+}
+
+inline void set_new(int32_t* mark, int32_t token, int32_t base) {
+    const int32_t marker = mark[token];
+    if (marker == base + OLD_FLAG) {
+        mark[token] = base + BOTH_FLAG;
+    } else if (marker != base + NEW_FLAG && marker != base + BOTH_FLAG) {
+        mark[token] = base + NEW_FLAG;
+    }
+}
+
+void cache_miss_topk(
+    uintptr_t req_ids_ptr,
+    uintptr_t topk_indices_old_ptr,
+    uintptr_t topk_indices_new_ptr,
+    uintptr_t mark_workspace_ptr,
+    uintptr_t miss_workspace_ptr,
+    uintptr_t epochs_ptr,
+    int64_t num_reqs,
+    int64_t topk,
+    int64_t max_token
+) {
+    auto* req_ids = reinterpret_cast<int64_t*>(req_ids_ptr);
+    auto* topk_indices_old = reinterpret_cast<int64_t*>(topk_indices_old_ptr);
+    auto* topk_indices_new = reinterpret_cast<int32_t*>(topk_indices_new_ptr);
+    auto* mark = reinterpret_cast<int32_t*>(mark_workspace_ptr);
+    auto* miss = reinterpret_cast<int32_t*>(miss_workspace_ptr);
+    auto* epochs = reinterpret_cast<int32_t*>(epochs_ptr);
+
+    for (int64_t row = 0; row < num_reqs; ++row) {
+        int32_t base = epochs[0] + 4;
+        if (base >= EPOCH_RESET_THRESHOLD) {
+            std::fill(mark, mark + max_token, 0);
+            base = 4;
+        }
+        epochs[0] = base;
+
+        const int64_t offset = req_ids[row] * REQ_ID_OFFSET_STRIDE;
+        const int64_t row_offset = row * topk;
+
+        for (int64_t slot = 0; slot < topk; ++slot) {
+            const int64_t value = topk_indices_old[row_offset + slot];
+            if (value >= 0) {
+                const int64_t raw_value = value - offset;
+                if (raw_value >= 0 && raw_value < max_token) {
+                    set_old(mark, static_cast<int32_t>(raw_value), base);
+                }
+            }
+        }
+
+        int64_t miss_count = 0;
+        for (int64_t slot = 0; slot < topk; ++slot) {
+            const int32_t value = topk_indices_new[row_offset + slot];
+            if (value >= 0 && value < max_token) {
+                set_new(mark, value, base);
+                if (!has_old(mark, value, base)) {
+                    miss[miss_count] = value;
+                    ++miss_count;
+                    set_old(mark, value, base);
+                }
+            }
+        }
+
+        int64_t miss_pos = 0;
+        for (int64_t slot = 0; slot < topk; ++slot) {
+            topk_indices_new[row_offset + slot] = -1;
+
+            const int64_t old_value = topk_indices_old[row_offset + slot];
+            const int64_t old_raw = old_value >= 0 ? old_value - offset : -1;
+            if (old_raw >= 0 && old_raw < max_token &&
+                !has_new(mark, static_cast<int32_t>(old_raw), base)) {
+                if (miss_pos < miss_count) {
+                    const int32_t replacement = miss[miss_pos];
+                    ++miss_pos;
+                    topk_indices_old[row_offset + slot] = replacement + offset;
+                    topk_indices_new[row_offset + slot] = replacement;
+                } else {
+                    topk_indices_old[row_offset + slot] = -1;
+                }
+            }
+        }
+
+        if (miss_pos < miss_count) {
+            for (int64_t slot = 0; slot < topk; ++slot) {
+                if (topk_indices_old[row_offset + slot] == -1) {
+                    const int32_t replacement = miss[miss_pos];
+                    ++miss_pos;
+                    topk_indices_old[row_offset + slot] = replacement + offset;
+                    topk_indices_new[row_offset + slot] = replacement;
+                    if (miss_pos >= miss_count) {
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 // std::tuple<at::Tensor, at::Tensor>
@@ -219,5 +342,6 @@ get_kv_topk(
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     namespace py = pybind11;
+    m.def("cache_miss_topk", &cache_miss_topk, "CPU cache-miss topk with single-thread epoch marking");
     m.def("get_kv_topk", &get_kv_topk, "High performance topk combine");
 }

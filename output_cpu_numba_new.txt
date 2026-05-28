@@ -88,63 +88,120 @@ ninja: no work to do.
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) INFO 05-28 21:29:49 [fused_moe.py:293] [EP Rank 1/2] Expert parallelism is enabled. Local/global number of experts: 128/256. Experts local to global index map: 0->128, 1->129, 2->130, 3->131, 4->132, 5->133, 6->134, 7->135, 8->136, 9->137, 10->138, 11->139, 12->140, 13->141, 14->142, 15->143, 16->144, 17->145, 18->146, 19->147, 20->148, 21->149, 22->150, 23->151, 24->152, 25->153, 26->154, 27->155, 28->156, 29->157, 30->158, 31->159, 32->160, 33->161, 34->162, 35->163, 36->164, 37->165, 38->166, 39->167, 40->168, 41->169, 42->170, 43->171, 44->172, 45->173, 46->174, 47->175, 48->176, 49->177, 50->178, 51->179, 52->180, 53->181, 54->182, 55->183, 56->184, 57->185, 58->186, 59->187, 60->188, 61->189, 62->190, 63->191, 64->192, 65->193, 66->194, 67->195, 68->196, 69->197, 70->198, 71->199, 72->200, 73->201, 74->202, 75->203, 76->204, 77->205, 78->206, 79->207, 80->208, 81->209, 82->210, 83->211, 84->212, 85->213, 86->214, 87->215, 88->216, 89->217, 90->218, 91->219, 92->220, 93->221, 94->222, 95->223, 96->224, 97->225, 98->226, 99->227, 100->228, 101->229, 102->230, 103->231, 104->232, 105->233, 106->234, 107->235, 108->236, 109->237, 110->238, 111->239, 112->240, 113->241, 114->242, 115->243, 116->244, 117->245, 118->246, 119->247, 120->248, 121->249, 122->250, 123->251, 124->252, 125->253, 126->254, 127->255.
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) INFO 05-28 21:29:54 [compilation.py:926] Using OOT custom backend for compilation.
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:29:54 [compilation.py:926] Using OOT custom backend for compilation.
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   0% Completed | 0/163 [00:00<?, ?it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   1% Completed | 1/163 [00:00<01:32,  1.76it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   1% Completed | 2/163 [00:01<01:55,  1.40it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   2% Completed | 3/163 [00:01<01:25,  1.87it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   2% Completed | 4/163 [00:02<01:29,  1.77it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   3% Completed | 5/163 [00:02<01:32,  1.71it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   4% Completed | 6/163 [00:03<01:19,  1.97it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   4% Completed | 7/163 [00:04<01:34,  1.66it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   5% Completed | 8/163 [00:04<01:28,  1.76it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   6% Completed | 9/163 [00:05<01:23,  1.85it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   6% Completed | 10/163 [00:05<01:38,  1.56it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   7% Completed | 11/163 [00:06<01:23,  1.81it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   7% Completed | 12/163 [00:06<01:26,  1.75it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   8% Completed | 13/163 [00:07<01:31,  1.64it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   9% Completed | 14/163 [00:07<01:17,  1.93it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:   9% Completed | 15/163 [00:08<01:27,  1.69it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  10% Completed | 16/163 [00:09<01:25,  1.72it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  10% Completed | 17/163 [00:09<01:18,  1.86it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  11% Completed | 18/163 [00:10<01:30,  1.61it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  12% Completed | 19/163 [00:10<01:19,  1.82it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  12% Completed | 20/163 [00:10<00:59,  2.40it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  15% Completed | 24/163 [00:11<00:24,  5.75it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  17% Completed | 28/163 [00:11<00:14,  9.36it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  20% Completed | 32/163 [00:11<00:10, 12.97it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  22% Completed | 36/163 [00:11<00:07, 16.43it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  25% Completed | 40/163 [00:11<00:06, 19.46it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  27% Completed | 44/163 [00:11<00:05, 22.08it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  29% Completed | 48/163 [00:11<00:04, 24.20it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  32% Completed | 52/163 [00:12<00:04, 25.89it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  34% Completed | 56/163 [00:12<00:03, 27.06it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  37% Completed | 60/163 [00:12<00:03, 27.95it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  39% Completed | 64/163 [00:12<00:03, 28.55it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  42% Completed | 68/163 [00:12<00:03, 28.99it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  44% Completed | 72/163 [00:12<00:03, 29.38it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  47% Completed | 76/163 [00:12<00:02, 29.59it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  49% Completed | 80/163 [00:12<00:02, 29.80it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  52% Completed | 84/163 [00:13<00:02, 29.89it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  54% Completed | 88/163 [00:13<00:02, 30.03it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  56% Completed | 92/163 [00:13<00:02, 30.01it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  59% Completed | 96/163 [00:13<00:02, 30.06it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  61% Completed | 100/163 [00:13<00:02, 30.06it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  64% Completed | 104/163 [00:13<00:01, 30.12it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  66% Completed | 108/163 [00:13<00:01, 30.12it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  69% Completed | 112/163 [00:14<00:01, 30.14it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  71% Completed | 116/163 [00:14<00:01, 30.13it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  74% Completed | 120/163 [00:14<00:01, 30.14it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  76% Completed | 124/163 [00:14<00:01, 30.12it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  79% Completed | 128/163 [00:14<00:01, 30.15it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  81% Completed | 132/163 [00:14<00:01, 30.15it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  83% Completed | 136/163 [00:14<00:00, 30.22it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  86% Completed | 140/163 [00:14<00:00, 30.16it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  88% Completed | 144/163 [00:15<00:00, 30.12it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  91% Completed | 148/163 [00:15<00:00, 30.10it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  93% Completed | 152/163 [00:15<00:00, 30.12it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  96% Completed | 156/163 [00:15<00:00, 30.08it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards:  98% Completed | 160/163 [00:15<00:00, 30.07it/s]
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Loading safetensors checkpoint shards: 100% Completed | 163/163 [00:16<00:00, 10.09it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   0% Completed | 0/163 [00:00<?, ?it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   1% Completed | 1/163 [00:00<01:32,  1.76it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   1% Completed | 2/163 [00:01<01:55,  1.40it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   2% Completed | 3/163 [00:01<01:25,  1.87it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   2% Completed | 4/163 [00:02<01:29,  1.77it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   3% Completed | 5/163 [00:02<01:32,  1.71it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   4% Completed | 6/163 [00:03<01:19,  1.97it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   4% Completed | 7/163 [00:04<01:34,  1.66it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   5% Completed | 8/163 [00:04<01:28,  1.76it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   6% Completed | 9/163 [00:05<01:23,  1.85it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   6% Completed | 10/163 [00:05<01:38,  1.56it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   7% Completed | 11/163 [00:06<01:23,  1.81it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   7% Completed | 12/163 [00:06<01:26,  1.75it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   8% Completed | 13/163 [00:07<01:31,  1.64it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   9% Completed | 14/163 [00:07<01:17,  1.93it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:   9% Completed | 15/163 [00:08<01:27,  1.69it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  10% Completed | 16/163 [00:09<01:25,  1.72it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  10% Completed | 17/163 [00:09<01:18,  1.86it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  11% Completed | 18/163 [00:10<01:30,  1.61it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  12% Completed | 19/163 [00:10<01:19,  1.82it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  12% Completed | 20/163 [00:10<00:59,  2.40it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  15% Completed | 24/163 [00:11<00:24,  5.75it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  17% Completed | 28/163 [00:11<00:14,  9.36it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  20% Completed | 32/163 [00:11<00:10, 12.97it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  22% Completed | 36/163 [00:11<00:07, 16.43it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  25% Completed | 40/163 [00:11<00:06, 19.46it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  27% Completed | 44/163 [00:11<00:05, 22.08it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  29% Completed | 48/163 [00:11<00:04, 24.20it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  32% Completed | 52/163 [00:12<00:04, 25.89it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  34% Completed | 56/163 [00:12<00:03, 27.06it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  37% Completed | 60/163 [00:12<00:03, 27.95it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  39% Completed | 64/163 [00:12<00:03, 28.55it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  42% Completed | 68/163 [00:12<00:03, 28.99it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  44% Completed | 72/163 [00:12<00:03, 29.38it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  47% Completed | 76/163 [00:12<00:02, 29.59it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  49% Completed | 80/163 [00:12<00:02, 29.80it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  52% Completed | 84/163 [00:13<00:02, 29.89it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  54% Completed | 88/163 [00:13<00:02, 30.03it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  56% Completed | 92/163 [00:13<00:02, 30.01it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  59% Completed | 96/163 [00:13<00:02, 30.06it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  61% Completed | 100/163 [00:13<00:02, 30.06it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  64% Completed | 104/163 [00:13<00:01, 30.12it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  66% Completed | 108/163 [00:13<00:01, 30.12it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  69% Completed | 112/163 [00:14<00:01, 30.14it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  71% Completed | 116/163 [00:14<00:01, 30.13it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  74% Completed | 120/163 [00:14<00:01, 30.14it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  76% Completed | 124/163 [00:14<00:01, 30.12it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  79% Completed | 128/163 [00:14<00:01, 30.15it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  81% Completed | 132/163 [00:14<00:01, 30.15it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  83% Completed | 136/163 [00:14<00:00, 30.22it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  86% Completed | 140/163 [00:14<00:00, 30.16it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  88% Completed | 144/163 [00:15<00:00, 30.12it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  91% Completed | 148/163 [00:15<00:00, 30.10it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  93% Completed | 152/163 [00:15<00:00, 30.12it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  96% Completed | 156/163 [00:15<00:00, 30.08it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards:  98% Completed | 160/163 [00:15<00:00, 30.07it/s]
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Loading safetensors checkpoint shards: 100% Completed | 163/163 [00:16<00:00, 10.09it/s]
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:10 [default_loader.py:293] Loading weights took 16.24 seconds
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:18 [model_runner_v1.py:2490] Loading model weights took 41.3022 GB
@@ -172,7 +229,8 @@ ninja: no work to do.
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:30 [pool_worker.py:311] Registering KV_Caches. use_mla: True, use_sparse: True, shape torch.Size([1417, 128, 1, 512])
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) INFO 05-28 21:30:30 [pool_worker.py:461] KV offload allocate 5668 cpu blocks, size = 7.7838134765625 GB per rank
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:30 [pool_worker.py:461] KV offload allocate 5668 cpu blocks, size = 7.7838134765625 GB per rank
-(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) Capturing CUDA graphs (decode, FULL):   0%|          | 0/1 [00:00<?, ?it/s](EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][offload] layer=model.layers.0.self_attn.attn num_decodes=1 num_prefills=0 num_decode_tokens=1 topk_shape=(1, 1, 2048)
+(EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) 
+Capturing CUDA graphs (decode, FULL):   0%|          | 0/1 [00:00<?, ?it/s](EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][offload] layer=model.layers.0.self_attn.attn num_decodes=1 num_prefills=0 num_decode_tokens=1 topk_shape=(1, 1, 2048)
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][topk_buffer][before_op] layer=model.layers.0.self_attn.attn capturing=False num_reqs=1 topk_shape=(1, 2048) topk_dtype=torch.int32 topk_device=npu:0 last_step_shape=(1, 2048) req_ids_shape=(1,)
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][cache_miss_prepare][worker] layer=model.layers.0.self_attn.attn capturing=False num_reqs=1 action=copy_d2h
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][cache_miss_prepare][worker_cpu] begin
@@ -515,7 +573,9 @@ ninja: no work to do.
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][cache_miss_prepare][connector] layer=model.layers.9.self_attn.attn capturing=True prepared=True
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][cache_miss_prepare][utils] layer=model.layers.9.self_attn.attn capturing=True prepared=True
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][cache_miss_prepare] layer=model.layers.9.self_attn.attn capturing=True available=True prepared=True
-Capturing CUDA graphs (decode, FULL): 100%|██████████| 1/1 [00:02<00:00,  2.09s/it]Capturing CUDA graphs (decode, FULL): 100%|██████████| 1/1 [00:02<00:00,  2.09s/it]
+
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 1/1 [00:02<00:00,  2.09s/it]
+Capturing CUDA graphs (decode, FULL): 100%|██████████| 1/1 [00:02<00:00,  2.09s/it]
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:33 [gpu_model_runner.py:5307] Graph capturing finished in 3 secs, took 0.11 GiB
 mki_log delete old file:/root/ascend/log/atb/atb_534079_20260514090501.log
 mki_log delete old file:/root/ascend/log/atb/atb_534082_20260514090501.log
@@ -542,8 +602,12 @@ ninja: no work to do.
 (EngineCore_DP0 pid=27168) WARNING 05-28 21:30:34 [platform.py:324]             
 (EngineCore_DP0 pid=27168) INFO 05-28 21:30:34 [platform.py:436] Set PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
 INFO 05-28 21:30:34 [llm.py:362] Supported tasks: ['generate']
-Rendering prompts:   0%|          | 0/1 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 1/1 [00:00<00:00,  6.87it/s]Rendering prompts: 100%|██████████| 1/1 [00:00<00:00,  6.86it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s](EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:34 [model_runner_v1.py:568] >>>>> input tokens = 1, [32769]
+
+Rendering prompts:   0%|          | 0/1 [00:00<?, ?it/s]
+Rendering prompts: 100%|██████████| 1/1 [00:00<00:00,  6.87it/s]
+Rendering prompts: 100%|██████████| 1/1 [00:00<00:00,  6.86it/s]
+
+Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s](EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:34 [model_runner_v1.py:568] >>>>> input tokens = 1, [32769]
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][offload] layer=model.layers.0.self_attn.attn num_decodes=0 num_prefills=1 num_decode_tokens=0 topk_shape=(32769, 1, 2048)
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][offload] layer=model.layers.0.self_attn.attn num_decodes=0 num_prefills=1 num_decode_tokens=0 topk_shape=(32769, 1, 2048)
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][offload] layer=model.layers.1.self_attn.attn num_decodes=0 num_prefills=1 num_decode_tokens=0 topk_shape=(32769, 1, 2048)
@@ -1145,9 +1209,15 @@ INFO 05-28 21:30:34 [llm.py:362] Supported tasks: ['generate']
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][cache_miss_prepare][worker_cpu] done
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][cache_miss_prepare][worker_cpu] done
 (EngineCore_DP0 pid=27168) INFO 05-28 21:30:39 [pool_scheduler.py:516] Delaying free of 2 blocks for request 0-8dfaae11
-Processed prompts: 100%|██████████| 1/1 [00:04<00:00,  4.14s/it, est. speed input: 7907.84 toks/s, output: 3.62 toks/s]Processed prompts: 100%|██████████| 1/1 [00:04<00:00,  4.14s/it, est. speed input: 7907.84 toks/s, output: 3.62 toks/s]Processed prompts: 100%|██████████| 1/1 [00:04<00:00,  4.14s/it, est. speed input: 7907.84 toks/s, output: 3.62 toks/s]
-Rendering prompts:   0%|          | 0/1 [00:00<?, ?it/s]Rendering prompts: 100%|██████████| 1/1 [00:00<00:00, 17.26it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s](EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:39 [model_runner_v1.py:568] >>>>> input tokens = 1, [32769]
+
+Processed prompts: 100%|██████████| 1/1 [00:04<00:00,  4.14s/it, est. speed input: 7907.84 toks/s, output: 3.62 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:04<00:00,  4.14s/it, est. speed input: 7907.84 toks/s, output: 3.62 toks/s]
+Processed prompts: 100%|██████████| 1/1 [00:04<00:00,  4.14s/it, est. speed input: 7907.84 toks/s, output: 3.62 toks/s]
+
+Rendering prompts:   0%|          | 0/1 [00:00<?, ?it/s]
+Rendering prompts: 100%|██████████| 1/1 [00:00<00:00, 17.26it/s]
+
+Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s](EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:39 [model_runner_v1.py:568] >>>>> input tokens = 1, [32769]
 (EngineCore_DP0 pid=27168) (Worker_TP1_EP1 pid=27178) [SFA][offload] layer=model.layers.0.self_attn.attn num_decodes=0 num_prefills=1 num_decode_tokens=0 topk_shape=(32769, 1, 2048)
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) [SFA][offload] layer=model.layers.0.self_attn.attn num_decodes=0 num_prefills=1 num_decode_tokens=0 topk_shape=(32769, 1, 2048)
 (EngineCore_DP0 pid=27168) (Worker_TP0_EP0 pid=27175) INFO 05-28 21:30:39 [kv_transfer.py:349] >>>>> kv sending thread offload 256 blocks of req 1-a7b979fa

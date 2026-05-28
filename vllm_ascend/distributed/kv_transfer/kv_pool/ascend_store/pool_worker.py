@@ -43,10 +43,8 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.kv_transfer import
     KVTransferThread,
 )
 from vllm_ascend.attention.cpu_cache_miss_topk import (
-    NUMBA_AVAILABLE as CPU_CACHE_MISS_TOPK_AVAILABLE,
     CPUCacheMissTopKWorkspace,
     make_cpu_cache_miss_topk_workspace,
-    update_topk_indices_cpu,
 )
 from vllm_ascend.utils import AscendDeviceType, get_ascend_device_type, get_subscribed_compute_streams
 
@@ -106,6 +104,9 @@ cpu_sparse_attn = load(
         "-ltorch_npu",
     ],
     verbose=True,  # 添加 verbose 查看编译过程
+)
+CPU_CACHE_MISS_TOPK_AVAILABLE = (
+    cpu_sparse_attn is not None and hasattr(cpu_sparse_attn, "cache_miss_topk")
 )
 
 # _TEST_STREAM = None
@@ -785,16 +786,22 @@ class KVPoolWorker:
 
     def cache_miss_topk_cpu(self, args):
         (
-            topk_indices_new_cpu,
-            topk_indices_old_cpu,
-            req_ids_tensor_cpu,
-            workspace,
+            req_ids_ptr,
+            topk_indices_old_ptr,
+            topk_indices_new_ptr,
+            mark_workspace_ptr,
+            miss_workspace_ptr,
+            epochs_ptr,
+            num_reqs,
+            topk,
+            max_token,
         ) = args
 
-        if workspace is None:
+        if self.cpu_sparse_attn is None or not hasattr(
+                self.cpu_sparse_attn, "cache_miss_topk"):
             print(
                 "[SFA][cache_miss_prepare][worker_cpu] "
-                "prepared=False reason=no_workspace",
+                "prepared=False reason=no_cpp_backend",
                 flush=True,
             )
             return
@@ -803,11 +810,16 @@ class KVPoolWorker:
             "[SFA][cache_miss_prepare][worker_cpu] begin",
             flush=True,
         )
-        update_topk_indices_cpu(
-            req_ids_tensor_cpu.numpy(),
-            topk_indices_old_cpu.numpy(),
-            topk_indices_new_cpu.numpy(),
-            workspace,
+        self.cpu_sparse_attn.cache_miss_topk(
+            req_ids_ptr,
+            topk_indices_old_ptr,
+            topk_indices_new_ptr,
+            mark_workspace_ptr,
+            miss_workspace_ptr,
+            epochs_ptr,
+            num_reqs,
+            topk,
+            max_token,
         )
         print(
             "[SFA][cache_miss_prepare][worker_cpu] done",
@@ -847,10 +859,15 @@ class KVPoolWorker:
         req_ids_tensor_cpu.copy_(req_ids_tensor_npu, non_blocking=capturing)
 
         args = (
-            topk_indices_new_cpu,
-            topk_indices_old_cpu,
-            req_ids_tensor_cpu,
-            self.cpu_cache_miss_topk_workspace,
+            req_ids_tensor_cpu.data_ptr(),
+            topk_indices_old_cpu.data_ptr(),
+            topk_indices_new_cpu.data_ptr(),
+            self.cpu_cache_miss_topk_workspace.mark_workspace.data_ptr(),
+            self.cpu_cache_miss_topk_workspace.miss_workspace.data_ptr(),
+            self.cpu_cache_miss_topk_workspace.epochs.data_ptr(),
+            num_reqs,
+            self.cpu_cache_miss_topk_workspace.topk,
+            self.cpu_cache_miss_topk_workspace.max_token,
         )
 
         if capturing:

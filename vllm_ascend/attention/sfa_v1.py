@@ -23,9 +23,6 @@ from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_mask import AttentionMaskBuilder
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
 from vllm_ascend.attention.context_parallel.common_cp import AscendPCPMetadata
-from vllm_ascend.attention.cpu_cache_miss_topk import (
-    NUMBA_AVAILABLE as CPU_CACHE_MISS_TOPK_AVAILABLE,
-)
 from vllm_ascend.attention.mla_v1 import MAX_O_PROJ_PREFETCH_SIZE, MLAPO_MAX_SUPPORTED_TOKENS
 from vllm_ascend.attention.utils import (
     AscendCommonAttentionMetadata,
@@ -61,6 +58,8 @@ from vllm_ascend.utils import (
     maybe_trans_nz,
 )
 from vllm_ascend.worker.npu_input_batch import NPUInputBatch
+
+CPU_CACHE_MISS_TOPK_AVAILABLE = True
 
 if TYPE_CHECKING:
     from vllm.v1.core.sched.output import SchedulerOutput
@@ -1184,7 +1183,7 @@ class AscendSFAImpl(MLAAttentionImpl):
         # )
         # if topk_indices_result is not None:
         #     topk_indices = topk_indices_result
-        # cache miss prepare: CPU Numba D2H → cache-miss → H2D writeback
+        # cache miss prepare: D2H -> C++ cache-miss update -> H2D writeback
         prepared_cache_miss_topk = False
         if CPU_CACHE_MISS_TOPK_AVAILABLE:
             prepared_cache_miss_topk = maybe_prepare_cache_miss_topk_graph(

@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -17,6 +18,92 @@ bench_cpu = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = bench_cpu
 assert SPEC.loader is not None
 SPEC.loader.exec_module(bench_cpu)
+
+_CPP_BACKEND = None
+_CPP_BACKEND_LOAD_ATTEMPTED = False
+
+
+def _load_cpp_backend():
+    global _CPP_BACKEND, _CPP_BACKEND_LOAD_ATTEMPTED
+    if _CPP_BACKEND_LOAD_ATTEMPTED:
+        if _CPP_BACKEND is None:
+            pytest.skip("cpu_sparse_attn extension is unavailable")
+        return _CPP_BACKEND
+
+    _CPP_BACKEND_LOAD_ATTEMPTED = True
+    pytest.importorskip("torch")
+    torch_npu = pytest.importorskip("torch_npu")
+
+    from torch.utils.cpp_extension import load
+
+    src_path = (Path(__file__).resolve().parents[3] / "vllm_ascend" /
+                "distributed" / "kv_transfer" / "kv_pool" /
+                "ascend_store" / "cpu_sparse_attn.cpp")
+    ascend_home = os.environ.get("ASCEND_HOME_PATH",
+                                 "/usr/local/Ascend/ascend-toolkit/latest")
+    npu_include_path = os.path.join(ascend_home, "include")
+    npu_lib_path = os.path.join(ascend_home, "lib64")
+    if not os.path.exists(npu_lib_path):
+        npu_lib_path = os.path.join(ascend_home, "lib")
+    torch_npu_path = os.path.dirname(torch_npu.__file__)
+    torch_npu_include = os.path.join(torch_npu_path, "include")
+    torch_npu_lib_path = os.path.join(torch_npu_path, "lib")
+    os.environ.setdefault("CXX", "clang++")
+    os.environ.setdefault("CC", "clang")
+
+    try:
+        _CPP_BACKEND = load(
+            name="cpu_sparse_attn_cache_miss_topk_test",
+            sources=[str(src_path)],
+            extra_cflags=[
+                "-O3",
+                "-std=c++20",
+                "-fopenmp",
+                "-march=armv8.2-a+sve+fp16+bf16",
+                "-fPIC",
+                f"-I{npu_include_path}",
+                f"-I{torch_npu_include}",
+            ],
+            extra_ldflags=[
+                "-fopenmp",
+                f"-L{npu_lib_path}",
+                "-lascendcl",
+                f"-L{torch_npu_lib_path}",
+                "-ltorch_npu",
+            ],
+            verbose=False,
+        )
+    except Exception as exc:
+        pytest.skip(f"cpu_sparse_attn extension is unavailable: {exc}")
+
+    if not hasattr(_CPP_BACKEND, "cache_miss_topk"):
+        pytest.skip("cpu_sparse_attn.cache_miss_topk is unavailable")
+    return _CPP_BACKEND
+
+
+def _cpp_update_topk_indices(req_ids, old, new, max_token):
+    torch = pytest.importorskip("torch")
+    backend = _load_cpp_backend()
+
+    req_ids_tensor = torch.from_numpy(req_ids.copy())
+    old_tensor = torch.from_numpy(old.copy())
+    new_tensor = torch.from_numpy(new.copy())
+    mark_workspace = torch.zeros([max_token], dtype=torch.int32)
+    miss_workspace = torch.empty([new.shape[1]], dtype=torch.int32)
+    epochs = torch.zeros([1], dtype=torch.int32)
+
+    backend.cache_miss_topk(
+        req_ids_tensor.data_ptr(),
+        old_tensor.data_ptr(),
+        new_tensor.data_ptr(),
+        mark_workspace.data_ptr(),
+        miss_workspace.data_ptr(),
+        epochs.data_ptr(),
+        req_ids.shape[0],
+        new.shape[1],
+        max_token,
+    )
+    return old_tensor.numpy(), new_tensor.numpy()
 
 
 def _offset_old(req_ids, old_raw):
@@ -166,3 +253,65 @@ def test_numba_stamp_matches_reference_when_numba_available():
     np.testing.assert_array_equal(actual, expected)
     np.testing.assert_array_equal(nb_old, ref_old)
     assert actual is nb_new
+
+
+def test_cpp_backend_matches_reference_when_available():
+    cases = []
+
+    req_ids = np.array([3], dtype=np.int64)
+    old_raw = np.array([[3, 7, 15, 22, -1, -1]], dtype=np.int32)
+    cases.append((
+        req_ids,
+        _offset_old(req_ids, old_raw),
+        np.array([[5, 7, 18, 22, 30, 33]], dtype=np.int32),
+        128,
+    ))
+
+    req_ids = np.array([3, 7], dtype=np.int64)
+    old_raw = np.array([
+        [5, 10, -1, -1],
+        [5, 20, -1, -1],
+    ], dtype=np.int32)
+    cases.append((
+        req_ids,
+        _offset_old(req_ids, old_raw),
+        np.array([
+            [5, 30, 31, -1],
+            [5, 40, 41, -1],
+        ], dtype=np.int32),
+        128,
+    ))
+
+    req_ids = np.array([11], dtype=np.int64)
+    old_raw = np.array([[1, 2, 3, -1, -1, -1]], dtype=np.int32)
+    cases.append((
+        req_ids,
+        _offset_old(req_ids, old_raw),
+        np.array([[2, 4, 4, 5, 5, 6]], dtype=np.int32),
+        128,
+    ))
+
+    req_ids, old, new = bench_cpu.generate_case(
+        num_reqs=4,
+        seq_len=32768,
+        topk=512,
+        hit_rate=0.7,
+        seed=13,
+    )
+    cases.append((req_ids, old, new, 32768))
+
+    for req_ids, old, new, max_token in cases:
+        ref_old = old.copy()
+        ref_new = new.copy()
+        expected = bench_cpu.reference_update_topk_indices(
+            req_ids, ref_old, ref_new)
+
+        cpp_old, actual = _cpp_update_topk_indices(
+            req_ids,
+            old,
+            new,
+            max_token=max_token,
+        )
+
+        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(cpp_old, ref_old)

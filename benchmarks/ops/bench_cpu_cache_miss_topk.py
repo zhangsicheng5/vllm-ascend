@@ -1,5 +1,6 @@
 import argparse
 import csv
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +29,9 @@ DEFAULT_SEQ_LENS = (32768, 131072)
 DEFAULT_HIT_RATES = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
 DEFAULT_TOPK = 2048
 DEFAULT_REPEAT = 20
+_CPP_BACKEND = None
+_CPP_BACKEND_LOAD_ATTEMPTED = False
+_CPP_BACKEND_ERROR = None
 
 
 @dataclass(frozen=True)
@@ -346,6 +350,110 @@ def update_topk_indices_cpu(
     )
 
 
+def _load_cpp_backend():
+    global _CPP_BACKEND, _CPP_BACKEND_LOAD_ATTEMPTED, _CPP_BACKEND_ERROR
+    if _CPP_BACKEND_LOAD_ATTEMPTED:
+        return _CPP_BACKEND
+
+    _CPP_BACKEND_LOAD_ATTEMPTED = True
+    try:
+        import torch_npu
+        from torch.utils.cpp_extension import load
+    except Exception as exc:
+        _CPP_BACKEND_ERROR = exc
+        return None
+
+    repo_root = Path(__file__).resolve().parents[2]
+    src_path = (repo_root / "vllm_ascend" / "distributed" /
+                "kv_transfer" / "kv_pool" / "ascend_store" /
+                "cpu_sparse_attn.cpp")
+    ascend_home = os.environ.get("ASCEND_HOME_PATH",
+                                 "/usr/local/Ascend/ascend-toolkit/latest")
+    npu_include_path = os.path.join(ascend_home, "include")
+    npu_lib_path = os.path.join(ascend_home, "lib64")
+    if not os.path.exists(npu_lib_path):
+        npu_lib_path = os.path.join(ascend_home, "lib")
+    torch_npu_path = os.path.dirname(torch_npu.__file__)
+    torch_npu_include = os.path.join(torch_npu_path, "include")
+    torch_npu_lib_path = os.path.join(torch_npu_path, "lib")
+    os.environ.setdefault("CXX", "clang++")
+    os.environ.setdefault("CC", "clang")
+
+    try:
+        _CPP_BACKEND = load(
+            name="cpu_sparse_attn_cache_miss_topk_bench",
+            sources=[str(src_path)],
+            extra_cflags=[
+                "-O3",
+                "-std=c++20",
+                "-fopenmp",
+                "-march=armv8.2-a+sve+fp16+bf16",
+                "-fPIC",
+                f"-I{npu_include_path}",
+                f"-I{torch_npu_include}",
+            ],
+            extra_ldflags=[
+                "-fopenmp",
+                f"-L{npu_lib_path}",
+                "-lascendcl",
+                f"-L{torch_npu_lib_path}",
+                "-ltorch_npu",
+            ],
+            verbose=False,
+        )
+    except Exception as exc:
+        _CPP_BACKEND_ERROR = exc
+        _CPP_BACKEND = None
+        return None
+
+    if not hasattr(_CPP_BACKEND, "cache_miss_topk"):
+        _CPP_BACKEND_ERROR = RuntimeError(
+            "cpu_sparse_attn.cache_miss_topk is unavailable")
+        _CPP_BACKEND = None
+    return _CPP_BACKEND
+
+
+def make_cpp_topk_workspace(topk: int, max_token: int):
+    import torch
+
+    backend = _load_cpp_backend()
+    if backend is None:
+        raise RuntimeError(f"C++ backend unavailable: {_CPP_BACKEND_ERROR}")
+    mark_workspace = torch.zeros([max_token], dtype=torch.int32)
+    miss_workspace = torch.empty([topk], dtype=torch.int32)
+    epochs = torch.zeros([1], dtype=torch.int32)
+    return backend, mark_workspace, miss_workspace, epochs, topk, max_token
+
+
+def update_topk_indices_cpp(
+    req_ids_tensor: np.ndarray,
+    topk_indices_old: np.ndarray,
+    topk_indices_new: np.ndarray,
+    workspace,
+) -> np.ndarray:
+    import torch
+
+    backend, mark_workspace, miss_workspace, epochs, topk, max_token = workspace
+    if topk_indices_old.shape[1] != topk:
+        raise ValueError("workspace topk mismatch")
+
+    req_ids_t = torch.from_numpy(req_ids_tensor)
+    old_t = torch.from_numpy(topk_indices_old)
+    new_t = torch.from_numpy(topk_indices_new)
+    backend.cache_miss_topk(
+        req_ids_t.data_ptr(),
+        old_t.data_ptr(),
+        new_t.data_ptr(),
+        mark_workspace.data_ptr(),
+        miss_workspace.data_ptr(),
+        epochs.data_ptr(),
+        req_ids_tensor.shape[0],
+        topk,
+        max_token,
+    )
+    return topk_indices_new
+
+
 def _time_impl(
     name: str,
     func: Callable[[np.ndarray, np.ndarray], np.ndarray],
@@ -405,6 +513,7 @@ def run_benchmark(
     seed: int = 0,
     csv_path: Path | None = None,
     include_numpy: bool = True,
+    backends: tuple[str, ...] = ("numba", "numpy"),
 ) -> list[dict[str, float | int | str]]:
     results: list[dict[str, float | int | str]] = []
     writer = None
@@ -445,8 +554,32 @@ def run_benchmark(
 
             impls: list[tuple[str, Callable[[np.ndarray, np.ndarray],
                                             np.ndarray]]] = []
+            requested_backends = set(backends)
 
-            if NUMBA_AVAILABLE:
+            if "cpp" in requested_backends:
+                try:
+                    cpp_workspace = make_cpp_topk_workspace(
+                        topk=case.topk,
+                        max_token=case.seq_len,
+                    )
+                    warm_old = old_base.copy()
+                    warm_new = new_base.copy()
+                    update_topk_indices_cpp(req_ids, warm_old, warm_new,
+                                            cpp_workspace)
+
+                    def cpp_impl(old, new, req_ids=req_ids,
+                                 workspace=cpp_workspace):
+                        return update_topk_indices_cpp(req_ids, old, new,
+                                                       workspace)
+
+                    impls.append(("cpp", cpp_impl))
+                except Exception as exc:
+                    print(
+                        f"SKIP impl=cpp reason={exc}",
+                        flush=True,
+                    )
+
+            if "numba" in requested_backends and NUMBA_AVAILABLE:
                 workspace = make_topk_workspace(topk=case.topk,
                                                 max_token=case.seq_len)
                 warm_old = old_base.copy()
@@ -461,7 +594,7 @@ def run_benchmark(
 
                 impls.append(("numba_stamp", numba_impl))
 
-            if include_numpy:
+            if include_numpy and "numpy" in requested_backends:
                 def numpy_impl(old, new, req_ids=req_ids):
                     return numpy_isin_update_topk_indices(req_ids, old, new)
 
@@ -524,6 +657,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-numpy",
                         action="store_true",
                         help="skip the slower NumPy baseline in full sweeps")
+    parser.add_argument("--backends",
+                        default="numba,numpy",
+                        help="comma-separated backends: cpp,numba,numpy")
     return parser.parse_args()
 
 
@@ -538,6 +674,8 @@ def main() -> None:
         seed=args.seed,
         csv_path=args.csv,
         include_numpy=not args.skip_numpy,
+        backends=tuple(item.strip() for item in args.backends.split(",")
+                       if item.strip()),
     )
 
 

@@ -1,6 +1,15 @@
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
+
+try:
+    import torch
+
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+    torch = None
 
 try:
     from numba import get_num_threads, get_thread_id, njit, prange
@@ -23,9 +32,9 @@ NUMBA_PARALLEL = False
 
 @dataclass
 class CPUCacheMissTopKWorkspace:
-    mark_workspace: np.ndarray
-    miss_workspace: np.ndarray
-    epochs: np.ndarray
+    mark_workspace: Any
+    miss_workspace: Any
+    epochs: Any
     topk: int
     max_token: int
 
@@ -132,9 +141,38 @@ def make_cpu_cache_miss_topk_workspace(
     topk: int,
     max_token: int,
 ) -> CPUCacheMissTopKWorkspace:
-    if NUMBA_AVAILABLE is False:
-        raise RuntimeError("numba is required for CPU cache-miss topk")
+    if TORCH_AVAILABLE:
+        assert torch is not None
+        mark_workspace = torch.empty(
+            [max_token],
+            dtype=torch.int32,
+            device="cpu",
+            pin_memory=True,
+        )
+        mark_workspace.zero_()
+        miss_workspace = torch.empty(
+            [topk],
+            dtype=torch.int32,
+            device="cpu",
+            pin_memory=True,
+        )
+        epochs = torch.empty(
+            [1],
+            dtype=torch.int32,
+            device="cpu",
+            pin_memory=True,
+        )
+        epochs.zero_()
+        return CPUCacheMissTopKWorkspace(
+            mark_workspace=mark_workspace,
+            miss_workspace=miss_workspace,
+            epochs=epochs,
+            topk=topk,
+            max_token=max_token,
+        )
 
+    if NUMBA_AVAILABLE is False:
+        raise RuntimeError("torch or numba is required for CPU cache-miss topk")
     num_threads = get_num_threads() if NUMBA_PARALLEL else 1
     return CPUCacheMissTopKWorkspace(
         mark_workspace=np.zeros((num_threads, max_token), dtype=np.int32),
@@ -172,11 +210,25 @@ def update_topk_indices_cpu(
     if not topk_indices_new.flags.c_contiguous:
         raise ValueError("topk_indices_new must be C-contiguous")
 
+    mark_workspace = workspace.mark_workspace
+    miss_workspace = workspace.miss_workspace
+    epochs = workspace.epochs
+    if TORCH_AVAILABLE and torch is not None and isinstance(mark_workspace, torch.Tensor):
+        if mark_workspace.device.type != "cpu":
+            raise ValueError("mark_workspace must be CPU tensor")
+        if miss_workspace.device.type != "cpu":
+            raise ValueError("miss_workspace must be CPU tensor")
+        if epochs.device.type != "cpu":
+            raise ValueError("epochs must be CPU tensor")
+        mark_workspace = mark_workspace.reshape(1, workspace.max_token).numpy()
+        miss_workspace = miss_workspace.reshape(1, workspace.topk).numpy()
+        epochs = epochs.numpy()
+
     return _update_topk_cache_miss_inplace_numba(
         req_ids_tensor,
         topk_indices_old,
         topk_indices_new,
-        workspace.mark_workspace,
-        workspace.miss_workspace,
-        workspace.epochs,
+        mark_workspace,
+        miss_workspace,
+        epochs,
     )

@@ -33,6 +33,24 @@ def test_cpu_topk_matches_spec_example_with_req_id_offset():
     assert out is new
 
 
+def test_cpu_topk_workspace_uses_cpu_tensors():
+    torch = pytest.importorskip("torch")
+    workspace = make_cpu_cache_miss_topk_workspace(topk=6, max_token=128)
+
+    assert isinstance(workspace.mark_workspace, torch.Tensor)
+    assert isinstance(workspace.miss_workspace, torch.Tensor)
+    assert isinstance(workspace.epochs, torch.Tensor)
+    assert workspace.mark_workspace.device.type == "cpu"
+    assert workspace.miss_workspace.device.type == "cpu"
+    assert workspace.epochs.device.type == "cpu"
+    assert workspace.mark_workspace.dtype == torch.int32
+    assert workspace.miss_workspace.dtype == torch.int32
+    assert workspace.epochs.dtype == torch.int32
+    assert workspace.mark_workspace.shape == (128,)
+    assert workspace.miss_workspace.shape == (6,)
+    assert workspace.epochs.shape == (1,)
+
+
 def test_cpu_topk_keeps_same_raw_token_isolated_by_req_id():
     if not NUMBA_AVAILABLE:
         pytest.skip("numba is required for CPU cache-miss topk")
