@@ -42,6 +42,12 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.kv_transfer import
     KVCacheStoreSendingThread,
     KVTransferThread,
 )
+from vllm_ascend.attention.cpu_cache_miss_topk import (
+    NUMBA_AVAILABLE as CPU_CACHE_MISS_TOPK_AVAILABLE,
+    CPUCacheMissTopKWorkspace,
+    make_cpu_cache_miss_topk_workspace,
+    update_topk_indices_cpu,
+)
 from vllm_ascend.utils import AscendDeviceType, get_ascend_device_type, get_subscribed_compute_streams
 
 backend_map = {
@@ -54,6 +60,9 @@ backend_map = {
         "path": "vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.memcache_backend",
     },
 }
+
+LOAD_CPU_KV_ARG_COUNT = 15
+CPU_CACHE_MISS_TOPK_MAX_TOKEN = 131072
 
 # cpu sparse attn kernel related
 # TODO maybe implement this in vllm custom op framework
@@ -411,7 +420,42 @@ class KVPoolWorker:
                 self.v_caches_npu.append(cache_or_caches[1])
                 self.topk_buffers_k.append(cache_or_caches[3])
                 self.topk_buffers_v.append(cache_or_caches[4])
-            self.topk_indices_buffer_cpu = torch.empty([self.max_num_reqs, self.topk], dtype=torch.int32, device='cpu', pin_memory=True)
+            self.topk_indices_buffer_cpu = torch.empty(
+                [self.max_num_reqs, self.topk],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.topk_indices_new_buffer_cpu = torch.empty(
+                [self.max_num_reqs, self.topk],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.topk_indices_old_buffer_cpu = torch.empty(
+                [self.max_num_reqs, self.topk],
+                dtype=torch.int64,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.req_ids_tensor_buffer_cpu = torch.empty(
+                [self.max_num_reqs],
+                dtype=torch.int64,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.offload_thresholds_buffer_cpu = torch.empty(
+                [self.max_num_reqs],
+                dtype=torch.int64,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.cpu_cache_miss_topk_workspace: CPUCacheMissTopKWorkspace | None = None
+            if CPU_CACHE_MISS_TOPK_AVAILABLE:
+                self.cpu_cache_miss_topk_workspace = make_cpu_cache_miss_topk_workspace(
+                    topk=self.topk,
+                    max_token=CPU_CACHE_MISS_TOPK_MAX_TOKEN,
+                )
             self.onload_topk_buffer_k_npu = torch.empty([self.max_num_reqs, self.topk, 1, 512], dtype=torch.bfloat16, device='npu')
             self.onload_topk_buffer_v_npu = torch.empty([self.max_num_reqs, self.topk, 1, 64], dtype=torch.bfloat16, device='npu')
             self.onload_topk_buffer_k_cpu = torch.empty([self.max_num_reqs, self.topk, 1, 512], dtype=torch.bfloat16, device='cpu', pin_memory=True)
@@ -746,11 +790,44 @@ class KVPoolWorker:
     def set_req_ids(self, req_ids: list):
         self.req_ids = req_ids
 
+    def _update_cpu_cache_miss_topk_for_load(self, args):
+        (
+            token_indices_cpu,
+            topk_indices_new_cpu,
+            topk_indices_old_cpu,
+            req_ids_tensor_cpu,
+            offload_thresholds_cpu,
+            workspace,
+        ) = args
+
+        if workspace is None:
+            return
+
+        topk_indices_new_np = topk_indices_new_cpu.numpy()
+        update_topk_indices_cpu(
+            req_ids_tensor_cpu.numpy(),
+            topk_indices_old_cpu.numpy(),
+            topk_indices_new_np,
+            workspace,
+        )
+
+        offload_thresholds_np = offload_thresholds_cpu.numpy()
+        cpu_token_mask = ((topk_indices_new_np >= 0)
+                          & (topk_indices_new_np < offload_thresholds_np[:, None]))
+        topk_indices_new_np[~cpu_token_mask] = -1
+        token_indices_cpu.copy_(topk_indices_new_cpu)
+
     def load_cpu(self, args):
+        kv_args = args
+        if len(args) > LOAD_CPU_KV_ARG_COUNT:
+            kv_args = args[:LOAD_CPU_KV_ARG_COUNT]
+            self._update_cpu_cache_miss_topk_for_load(
+                args[LOAD_CPU_KV_ARG_COUNT:])
+
         if self.load_stream is None:
             self.load_stream = torch_npu.npu.Stream()
         with torch_npu.npu.stream(self.load_stream):
-            self.cpu_sparse_attn.get_kv_topk(*args)
+            self.cpu_sparse_attn.get_kv_topk(*kv_args)
             self.load_stream.synchronize()
 
     def load_kv_token_wise(
@@ -760,13 +837,38 @@ class KVPoolWorker:
         token_indices_npu: torch.tensor,
         cpu_mask: torch.tensor,
         capturing: bool = False,
+        topk_indices_new: torch.Tensor | None = None,
+        topk_indices_old: torch.Tensor | None = None,
+        req_ids_tensor: torch.Tensor | None = None,
+        offload_thresholds: torch.Tensor | None = None,
     ):
         thread_num = 16
         token_indices_cpu = self.topk_indices_buffer_cpu[:num_reqs]
+        token_indices_cpu_2d = token_indices_cpu
         cpu_mask = cpu_mask.unsqueeze(-1).unsqueeze(-1)
         # sparse_mask = torch.rand_like(token_indices_npu, dtype=torch.bfloat16) < 0.3
         # token_indices_npu = torch.where(sparse_mask, -1, token_indices_npu)
         token_indices_cpu.copy_(token_indices_npu, non_blocking=capturing)
+        cache_miss_topk_args = ()
+        if (topk_indices_new is not None and topk_indices_old is not None
+                and req_ids_tensor is not None and offload_thresholds is not None
+                and self.cpu_cache_miss_topk_workspace is not None):
+            topk_indices_new_cpu = self.topk_indices_new_buffer_cpu[:num_reqs]
+            topk_indices_old_cpu = self.topk_indices_old_buffer_cpu[:num_reqs]
+            req_ids_tensor_cpu = self.req_ids_tensor_buffer_cpu[:num_reqs]
+            offload_thresholds_cpu = self.offload_thresholds_buffer_cpu[:num_reqs]
+            topk_indices_new_cpu.copy_(topk_indices_new, non_blocking=capturing)
+            topk_indices_old_cpu.copy_(topk_indices_old, non_blocking=capturing)
+            req_ids_tensor_cpu.copy_(req_ids_tensor, non_blocking=capturing)
+            offload_thresholds_cpu.copy_(offload_thresholds, non_blocking=capturing)
+            cache_miss_topk_args = (
+                token_indices_cpu_2d,
+                topk_indices_new_cpu,
+                topk_indices_old_cpu,
+                req_ids_tensor_cpu,
+                offload_thresholds_cpu,
+                self.cpu_cache_miss_topk_workspace,
+            )
         if not capturing and self.current_layer_load == 0 and self.tp_rank == 0:
             num_tokens_to_load = (token_indices_cpu != -1).sum().item()
             logger.info(f'>>>>> load kv tokenwise, num_tokens_to_load = {num_tokens_to_load}')
@@ -801,7 +903,7 @@ class KVPoolWorker:
             onload_topk_buffer_k_cpu.shape,
             onload_topk_buffer_v_cpu.shape,
             thread_num,
-        )
+        ) + cache_miss_topk_args
         # with torch_npu.npu.stream(self.side_compute_stream):
         #     tmp = token_indices_npu // 128
         #     for _ in range(100):

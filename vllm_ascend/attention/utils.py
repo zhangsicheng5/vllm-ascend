@@ -312,13 +312,27 @@ def maybe_load_kv_token_wise_graph(
     token_indices: torch.Tensor, # [num_reqs, topk]
     cpu_mask: torch.Tensor,
     capturing: bool = False,
+    topk_indices_new: torch.Tensor | None = None,
+    topk_indices_old: torch.Tensor | None = None,
+    req_ids_tensor: torch.Tensor | None = None,
+    offload_thresholds: torch.Tensor | None = None,
 ):
     if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
         return
     connector = get_kv_transfer_group()
     if not hasattr(connector, 'load_kv_token_wise'):
         return
-    connector.load_kv_token_wise(layer_name, num_reqs, token_indices, cpu_mask, capturing)
+    connector.load_kv_token_wise(
+        layer_name,
+        num_reqs,
+        token_indices,
+        cpu_mask,
+        capturing,
+        topk_indices_new,
+        topk_indices_old,
+        req_ids_tensor,
+        offload_thresholds,
+    )
 
 
 def maybe_save_kv_layer_to_connector_graph(

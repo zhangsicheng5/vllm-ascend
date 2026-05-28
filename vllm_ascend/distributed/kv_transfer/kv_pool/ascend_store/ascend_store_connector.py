@@ -238,13 +238,27 @@ class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
         token_indices: torch.Tensor,
         cpu_mask: torch.Tensor,
         capturing: bool = False,
+        topk_indices_new: torch.Tensor | None = None,
+        topk_indices_old: torch.Tensor | None = None,
+        req_ids_tensor: torch.Tensor | None = None,
+        offload_thresholds: torch.Tensor | None = None,
     ):
         # logger.info(f'>>>>> connector load, layer = {layer_name}')
         # assert self.use_layerwise, "load kv token-wise only considered for sparse kv offload"
         # if not self.has_connector_metadata():
         #     return
         # self.connector_worker.load_kv_token_wise(layer_name, token_indices)
-        self.connector_worker.load_kv_token_wise(layer_name, num_reqs, token_indices, cpu_mask, capturing)
+        self.connector_worker.load_kv_token_wise(
+            layer_name,
+            num_reqs,
+            token_indices,
+            cpu_mask,
+            capturing,
+            topk_indices_new,
+            topk_indices_old,
+            req_ids_tensor,
+            offload_thresholds,
+        )
 
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str], set[str]]:
         """Get the finished recving and sending requests."""

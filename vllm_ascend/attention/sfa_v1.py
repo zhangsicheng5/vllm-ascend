@@ -70,6 +70,7 @@ if TYPE_CHECKING:
 # token count limits within bmm_transpose operator
 BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
 USE_CPU_CACHE_MISS_TOPK = True
+USE_LOAD_CPU_CACHE_MISS_TOPK = True
 CPU_CACHE_MISS_TOPK_MAX_TOKEN = 131072
 
 
@@ -1248,7 +1249,16 @@ class AscendSFAImpl(MLAAttentionImpl):
         #     topk_indices = topk_indices_result
         # cache reuse
         # num_tokens_ori = (topk_indices >= 0).sum().item()
-        if USE_CPU_CACHE_MISS_TOPK and CPU_CACHE_MISS_TOPK_AVAILABLE:
+        load_cpu_topk_indices_new = None
+        load_cpu_topk_indices_old = None
+        if USE_LOAD_CPU_CACHE_MISS_TOPK and CPU_CACHE_MISS_TOPK_AVAILABLE:
+            load_cpu_topk_indices_new = topk_indices.clone()
+            load_cpu_topk_indices_old = (
+                self.last_step_topk_indices[:num_reqs].clone()
+            )
+
+        if (USE_CPU_CACHE_MISS_TOPK and CPU_CACHE_MISS_TOPK_AVAILABLE
+                and not forward_context.capturing):
             topk_indices = self.get_cache_miss_topk_indices_cpu(
                 attn_metadata.req_ids_tensor[:num_reqs],
                 self.last_step_topk_indices[:num_reqs],
@@ -1320,7 +1330,17 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         # load cpu
         cpu_token_indices = torch.where(cpu_mask, topk_indices, -1)
-        maybe_load_kv_token_wise_graph(layer_name, num_reqs, cpu_token_indices, cpu_mask, forward_context.capturing)
+        maybe_load_kv_token_wise_graph(
+            layer_name,
+            num_reqs,
+            cpu_token_indices,
+            cpu_mask,
+            forward_context.capturing,
+            load_cpu_topk_indices_new,
+            load_cpu_topk_indices_old,
+            attn_metadata.req_ids_tensor[:num_reqs],
+            offload_thresholds.squeeze(1),
+        )
 
         # generate new block_table & indices
         topk_buffer_k = topk_buffer_k.reshape([-1, self.block_size, 1, 512])
