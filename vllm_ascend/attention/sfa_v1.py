@@ -1195,7 +1195,17 @@ class AscendSFAImpl(MLAAttentionImpl):
                 attn_metadata.req_ids_tensor[:num_reqs],
                 forward_context.capturing,
             )
+        print(
+            "[SFA][cache_miss_prepare] "
+            f"layer={layer_name} capturing={forward_context.capturing} "
+            f"available={CPU_CACHE_MISS_TOPK_AVAILABLE} "
+            f"prepared={prepared_cache_miss_topk}",
+            flush=True,
+        )
         if not prepared_cache_miss_topk:
+            if forward_context.capturing:
+                raise RuntimeError(
+                    "CPU cache-miss topk prepare failed during graph capture")
             topk_indices = self.get_cache_miss_topk_indices(
                 attn_metadata.req_ids_tensor[:num_reqs],
                 self.last_step_topk_indices[:num_reqs],

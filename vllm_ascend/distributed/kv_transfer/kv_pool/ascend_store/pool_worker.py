@@ -792,13 +792,26 @@ class KVPoolWorker:
         ) = args
 
         if workspace is None:
+            print(
+                "[SFA][cache_miss_prepare][worker_cpu] "
+                "prepared=False reason=no_workspace",
+                flush=True,
+            )
             return
 
+        print(
+            "[SFA][cache_miss_prepare][worker_cpu] begin",
+            flush=True,
+        )
         update_topk_indices_cpu(
             req_ids_tensor_cpu.numpy(),
             topk_indices_old_cpu.numpy(),
             topk_indices_new_cpu.numpy(),
             workspace,
+        )
+        print(
+            "[SFA][cache_miss_prepare][worker_cpu] done",
+            flush=True,
         )
 
     def prepare_cache_miss_topk(
@@ -811,8 +824,20 @@ class KVPoolWorker:
         capturing: bool = False,
     ) -> bool:
         if self.cpu_cache_miss_topk_workspace is None:
+            print(
+                "[SFA][cache_miss_prepare][worker] "
+                f"layer={layer_name} capturing={capturing} "
+                "prepared=False reason=no_workspace",
+                flush=True,
+            )
             return False
 
+        print(
+            "[SFA][cache_miss_prepare][worker] "
+            f"layer={layer_name} capturing={capturing} "
+            f"num_reqs={num_reqs} action=copy_d2h",
+            flush=True,
+        )
         topk_indices_new_cpu = self.topk_indices_new_buffer_cpu[:num_reqs]
         topk_indices_old_cpu = self.topk_indices_old_buffer_cpu[:num_reqs]
         req_ids_tensor_cpu = self.req_ids_tensor_buffer_cpu[:num_reqs]
@@ -834,6 +859,11 @@ class KVPoolWorker:
             if current_compute_stream not in subscribed_compute_streams:
                 torch_npu.npu._subscribe_report(current_compute_stream)
                 subscribed_compute_streams.add(current_compute_stream)
+            print(
+                "[SFA][cache_miss_prepare][worker] "
+                f"layer={layer_name} capturing=True action=launch_host_func",
+                flush=True,
+            )
             torch_npu.npu._launch_host_func(
                 current_compute_stream,
                 self.cache_miss_topk_cpu,
@@ -844,6 +874,12 @@ class KVPoolWorker:
 
         topk_indices_new_npu.copy_(topk_indices_new_cpu, non_blocking=capturing)
         topk_indices_old_npu.copy_(topk_indices_old_cpu, non_blocking=capturing)
+        print(
+            "[SFA][cache_miss_prepare][worker] "
+            f"layer={layer_name} capturing={capturing} prepared=True "
+            "action=copy_h2d",
+            flush=True,
+        )
         return True
 
     def load_cpu(self, args):

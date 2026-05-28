@@ -256,7 +256,7 @@ class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
         req_ids_tensor: torch.Tensor,
         capturing: bool = False,
     ) -> bool:
-        return self.connector_worker.prepare_cache_miss_topk(
+        prepared = self.connector_worker.prepare_cache_miss_topk(
             layer_name,
             num_reqs,
             topk_indices_new,
@@ -264,6 +264,12 @@ class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
             req_ids_tensor,
             capturing,
         )
+        print(
+            "[SFA][cache_miss_prepare][connector] "
+            f"layer={layer_name} capturing={capturing} prepared={prepared}",
+            flush=True,
+        )
+        return prepared
 
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str], set[str]]:
         """Get the finished recving and sending requests."""

@@ -336,11 +336,23 @@ def maybe_prepare_cache_miss_topk_graph(
     capturing: bool = False,
 ) -> bool:
     if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
+        print(
+            "[SFA][cache_miss_prepare][utils] "
+            f"layer={layer_name} capturing={capturing} "
+            "prepared=False reason=no_kv_transfer_group",
+            flush=True,
+        )
         return False
     connector = get_kv_transfer_group()
     if not hasattr(connector, "prepare_cache_miss_topk"):
+        print(
+            "[SFA][cache_miss_prepare][utils] "
+            f"layer={layer_name} capturing={capturing} "
+            "prepared=False reason=no_prepare_method",
+            flush=True,
+        )
         return False
-    return connector.prepare_cache_miss_topk(
+    prepared = connector.prepare_cache_miss_topk(
         layer_name,
         num_reqs,
         topk_indices_new,
@@ -348,6 +360,12 @@ def maybe_prepare_cache_miss_topk_graph(
         req_ids_tensor,
         capturing,
     )
+    print(
+        "[SFA][cache_miss_prepare][utils] "
+        f"layer={layer_name} capturing={capturing} prepared={prepared}",
+        flush=True,
+    )
+    return prepared
 
 
 def maybe_save_kv_layer_to_connector_graph(
