@@ -19,7 +19,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_SP"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_FLASHCOMM1"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_MLAPO"] = "0"
-os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "4,5"
+os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "6,7"
 # os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "12,13,14,15"
 from vllm import LLM, SamplingParams, AsyncLLMEngine
 from vllm.config import CompilationConfig
@@ -75,7 +75,7 @@ prompts = [
 # ]
 
 input_len = 32 * 1024
-prompts = generate_prompts_auto(input_len, 2)
+prompts = generate_prompts_auto(input_len, 4)
 
 # Create a sampling params object.
 sampling_params = SamplingParams(max_tokens=15, temperature=0)
@@ -86,8 +86,8 @@ llm = LLM(
     model=model_path,
     # trust_remote_code=True,
     # enforce_eager=True,
-    compilation_config={"cudagraph_mode":"PIECEWISE"},
-    # compilation_config={"cudagraph_mode":"FULL_DECODE_ONLY", "cudagraph_capture_sizes":[1, 2, 4]},
+    # compilation_config={"cudagraph_mode":"PIECEWISE"},
+    compilation_config={"cudagraph_mode":"FULL_DECODE_ONLY", "cudagraph_capture_sizes":[1, 2, 4]},
     tensor_parallel_size=2,
     # decode_context_parallel_size=2,
     # prefill_context_parallel_size=2,
