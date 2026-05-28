@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/Users/xingchenpeng/projects/dev/offload/vllm-ascend/examples/vllm_test.py", line 8, in <module>
+    import torch
+ModuleNotFoundError: No module named 'torch'
