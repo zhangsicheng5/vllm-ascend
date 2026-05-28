@@ -19,7 +19,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_SP"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_FLASHCOMM1"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_MLAPO"] = "0"
-os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "10,11"
+os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "4,5"
 # os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "12,13,14,15"
 from vllm import LLM, SamplingParams, AsyncLLMEngine
 from vllm.config import CompilationConfig
@@ -75,7 +75,7 @@ prompts = [
 # ]
 
 input_len = 32 * 1024
-prompts = generate_prompts_auto(input_len, 4)
+prompts = generate_prompts_auto(input_len, 1)
 
 # Create a sampling params object.
 sampling_params = SamplingParams(max_tokens=15, temperature=0)
@@ -101,7 +101,7 @@ llm = LLM(
     gpu_memory_utilization=0.84, # tp2, 10 layers, 32k, graph, uti 0.84, bs 1
     # gpu_memory_utilization=0.94, # tp16, full, 128k, mock prefill, uti 0.95, bs1
     quantization="ascend",
-    max_num_seqs=4,
+    max_num_seqs=1,
     # max_model_len=4096,
     # max_num_batched_tokens=4096,
     max_model_len=33792,
@@ -144,8 +144,8 @@ llm = LLM(
     }
 )
 
-# for i in range(3):
-#     outputs = llm.generate(prompts, sampling_params)
+for i in range(3):
+    outputs = llm.generate(prompts, sampling_params)
 
 # Generate texts from the prompts.
 llm.start_profile()
