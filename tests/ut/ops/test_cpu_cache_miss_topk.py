@@ -88,32 +88,61 @@ def _cpp_update_topk_indices(req_ids,
                              new,
                              max_token,
                              requested_threads=1,
-                             workspace_threads=4):
+                             workspace_threads=4,
+                             use_hash=False):
     torch = pytest.importorskip("torch")
     backend = _load_cpp_backend()
 
     req_ids_tensor = torch.from_numpy(req_ids.copy())
     old_tensor = torch.from_numpy(old.copy())
     new_tensor = torch.from_numpy(new.copy())
-    mark_workspace = torch.zeros([workspace_threads, max_token],
+    if use_hash:
+        if not hasattr(backend, "cache_miss_topk_hash"):
+            pytest.skip("cpu_sparse_attn.cache_miss_topk_hash is unavailable")
+        hash_capacity = bench_cpu._next_power_of_two(
+            max(8192, new.shape[1] * 4))
+        hash_keys = torch.empty([workspace_threads, hash_capacity],
+                                dtype=torch.int32)
+        hash_marks = torch.zeros([workspace_threads, hash_capacity],
                                  dtype=torch.int32)
-    miss_workspace = torch.empty([workspace_threads, new.shape[1]],
-                                 dtype=torch.int32)
-    epochs = torch.zeros([workspace_threads], dtype=torch.int32)
+        miss_workspace = torch.empty([workspace_threads, new.shape[1]],
+                                     dtype=torch.int32)
+        epochs = torch.zeros([workspace_threads], dtype=torch.int32)
+        backend.cache_miss_topk_hash(
+            req_ids_tensor.data_ptr(),
+            old_tensor.data_ptr(),
+            new_tensor.data_ptr(),
+            hash_keys.data_ptr(),
+            hash_marks.data_ptr(),
+            miss_workspace.data_ptr(),
+            epochs.data_ptr(),
+            req_ids.shape[0],
+            new.shape[1],
+            max_token,
+            hash_capacity,
+            workspace_threads,
+            requested_threads,
+        )
+    else:
+        mark_workspace = torch.zeros([workspace_threads, max_token],
+                                     dtype=torch.int32)
+        miss_workspace = torch.empty([workspace_threads, new.shape[1]],
+                                     dtype=torch.int32)
+        epochs = torch.zeros([workspace_threads], dtype=torch.int32)
 
-    backend.cache_miss_topk(
-        req_ids_tensor.data_ptr(),
-        old_tensor.data_ptr(),
-        new_tensor.data_ptr(),
-        mark_workspace.data_ptr(),
-        miss_workspace.data_ptr(),
-        epochs.data_ptr(),
-        req_ids.shape[0],
-        new.shape[1],
-        max_token,
-        workspace_threads,
-        requested_threads,
-    )
+        backend.cache_miss_topk(
+            req_ids_tensor.data_ptr(),
+            old_tensor.data_ptr(),
+            new_tensor.data_ptr(),
+            mark_workspace.data_ptr(),
+            miss_workspace.data_ptr(),
+            epochs.data_ptr(),
+            req_ids.shape[0],
+            new.shape[1],
+            max_token,
+            workspace_threads,
+            requested_threads,
+        )
     return old_tensor.numpy(), new_tensor.numpy()
 
 
@@ -337,7 +366,7 @@ def test_cpp_backend_matches_reference_when_available():
         np.testing.assert_array_equal(cpp_old, ref_old)
 
 
-@pytest.mark.parametrize("requested_threads", [-1, 1, 2, 4])
+@pytest.mark.parametrize("requested_threads", [-1, 1, 2, 4, 8, 16, 32, 64])
 def test_cpp_backend_thread_counts_match_reference_when_available(
         requested_threads):
     req_ids, old, new = bench_cpu.generate_case(
@@ -358,7 +387,36 @@ def test_cpp_backend_thread_counts_match_reference_when_available(
         new,
         max_token=32768,
         requested_threads=requested_threads,
-        workspace_threads=4,
+        workspace_threads=64,
+    )
+
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(cpp_old, ref_old)
+
+
+@pytest.mark.parametrize("requested_threads", [-1, 1, 2, 4, 8, 16, 32, 64])
+def test_cpp_hash_backend_thread_counts_match_reference_when_available(
+        requested_threads):
+    req_ids, old, new = bench_cpu.generate_case(
+        num_reqs=4,
+        seq_len=32768,
+        topk=512,
+        hit_rate=0.5,
+        seed=23,
+    )
+    ref_old = old.copy()
+    ref_new = new.copy()
+    expected = bench_cpu.reference_update_topk_indices(req_ids, ref_old,
+                                                       ref_new)
+
+    cpp_old, actual = _cpp_update_topk_indices(
+        req_ids,
+        old,
+        new,
+        max_token=32768,
+        requested_threads=requested_threads,
+        workspace_threads=64,
+        use_hash=True,
     )
 
     np.testing.assert_array_equal(actual, expected)

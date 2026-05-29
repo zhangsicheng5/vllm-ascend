@@ -26,6 +26,7 @@ from vllm.utils.math_utils import cdiv
 from vllm.v1.core.kv_cache_utils import BlockHash
 from vllm.v1.utils import CpuGpuBuffer
 
+import vllm_ascend.envs as envs
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import (
     AscendConnectorMetadata,
@@ -60,8 +61,10 @@ backend_map = {
 }
 
 CPU_CACHE_MISS_TOPK_MAX_TOKEN = 131072
-CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS = 4
-CPU_CACHE_MISS_TOPK_REQUESTED_THREADS = 0
+CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS = max(
+    1, envs.VLLM_ASCEND_CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS)
+CPU_CACHE_MISS_TOPK_REQUESTED_THREADS = (
+    envs.VLLM_ASCEND_CPU_CACHE_MISS_TOPK_REQUESTED_THREADS)
 
 # cpu sparse attn kernel related
 # TODO maybe implement this in vllm custom op framework
@@ -845,12 +848,6 @@ class KVPoolWorker:
             )
             return False
 
-        print(
-            "[SFA][cache_miss_prepare][worker] "
-            f"layer={layer_name} capturing={capturing} "
-            f"num_reqs={num_reqs} action=copy_d2h",
-            flush=True,
-        )
         topk_indices_new_cpu = self.topk_indices_new_buffer_cpu[:num_reqs]
         topk_indices_old_cpu = self.topk_indices_old_buffer_cpu[:num_reqs]
         req_ids_tensor_cpu = self.req_ids_tensor_buffer_cpu[:num_reqs]

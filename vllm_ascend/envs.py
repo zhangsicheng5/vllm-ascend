@@ -117,6 +117,15 @@ env_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ASCEND_FUSION_OP_TRANSPOSE_KV_CACHE_BY_BLOCK": lambda: bool(
         int(os.getenv("VLLM_ASCEND_FUSION_OP_TRANSPOSE_KV_CACHE_BY_BLOCK", "1"))
     ),
+    # CPU cache-miss topk OpenMP workspace lanes. 0 is invalid; callers clamp
+    # to at least one lane.
+    "VLLM_ASCEND_CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS": lambda: int(
+        os.getenv("VLLM_ASCEND_CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS", "64")
+    ),
+    # CPU cache-miss topk requested OpenMP threads. 0 means auto.
+    "VLLM_ASCEND_CPU_CACHE_MISS_TOPK_REQUESTED_THREADS": lambda: int(
+        os.getenv("VLLM_ASCEND_CPU_CACHE_MISS_TOPK_REQUESTED_THREADS", "0")
+    ),
 }
 
 # end-env-vars-definition
