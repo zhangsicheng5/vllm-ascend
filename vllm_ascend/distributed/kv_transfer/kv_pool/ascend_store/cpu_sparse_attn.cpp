@@ -7,6 +7,7 @@
 #include <chrono>
 #include <string>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #include <ATen/Parallel.h>
 #include <torch/script.h>
@@ -45,35 +46,148 @@ constexpr int32_t BOTH_FLAG = 3;
 constexpr int64_t REQ_ID_OFFSET_STRIDE = 1LL << 16;
 constexpr int32_t EPOCH_RESET_THRESHOLD = 2'147'483'000;
 
-inline bool has_old(const int32_t* mark, int32_t token, int32_t base) {
+#if defined(__GNUC__) || defined(__clang__)
+#define FORCE_INLINE inline __attribute__((always_inline))
+#define HOT_FUNCTION __attribute__((hot))
+#define RESTRICT __restrict__
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define FORCE_INLINE inline
+#define HOT_FUNCTION
+#define RESTRICT
+#define LIKELY(x) (x)
+#define UNLIKELY(x) (x)
+#endif
+
+FORCE_INLINE bool has_old(const int32_t* RESTRICT mark, int32_t token, int32_t base) {
     const int32_t marker = mark[token];
     return marker == base + OLD_FLAG || marker == base + BOTH_FLAG;
 }
 
-inline bool has_new(const int32_t* mark, int32_t token, int32_t base) {
+FORCE_INLINE bool has_new(const int32_t* RESTRICT mark, int32_t token, int32_t base) {
     const int32_t marker = mark[token];
     return marker == base + NEW_FLAG || marker == base + BOTH_FLAG;
 }
 
-inline void set_old(int32_t* mark, int32_t token, int32_t base) {
+FORCE_INLINE void set_old(int32_t* RESTRICT mark, int32_t token, int32_t base) {
     const int32_t marker = mark[token];
-    if (marker == base + NEW_FLAG) {
+    if (UNLIKELY(marker == base + NEW_FLAG)) {
         mark[token] = base + BOTH_FLAG;
-    } else if (marker != base + OLD_FLAG && marker != base + BOTH_FLAG) {
+    } else if (LIKELY(marker != base + OLD_FLAG && marker != base + BOTH_FLAG)) {
         mark[token] = base + OLD_FLAG;
     }
 }
 
-inline void set_new(int32_t* mark, int32_t token, int32_t base) {
+FORCE_INLINE void set_new(int32_t* RESTRICT mark, int32_t token, int32_t base) {
     const int32_t marker = mark[token];
-    if (marker == base + OLD_FLAG) {
+    if (UNLIKELY(marker == base + OLD_FLAG)) {
         mark[token] = base + BOTH_FLAG;
-    } else if (marker != base + NEW_FLAG && marker != base + BOTH_FLAG) {
+    } else if (LIKELY(marker != base + NEW_FLAG && marker != base + BOTH_FLAG)) {
         mark[token] = base + NEW_FLAG;
     }
 }
 
-void cache_miss_topk(
+FORCE_INLINE int choose_cache_miss_topk_threads(
+    int num_reqs,
+    int workspace_threads,
+    int requested_threads
+) {
+    if (num_reqs <= 1 || workspace_threads <= 1) {
+        return 1;
+    }
+
+    int threads = requested_threads;
+    if (threads <= 0) {
+        threads = num_reqs <= 4 ? num_reqs : 4;
+    }
+
+    threads = std::max(1, threads);
+    threads = std::min(threads, num_reqs);
+    threads = std::min(threads, workspace_threads);
+    return threads;
+}
+
+FORCE_INLINE void process_one_cache_miss_topk_row(
+    int row,
+    const int topk,
+    const int64_t max_token,
+    const int64_t* RESTRICT req_ids,
+    int64_t* RESTRICT topk_indices_old,
+    int32_t* RESTRICT topk_indices_new,
+    int32_t* RESTRICT mark,
+    int32_t* RESTRICT miss,
+    int32_t* RESTRICT epoch
+) {
+    int32_t base = epoch[0] + 4;
+    if (UNLIKELY(base >= EPOCH_RESET_THRESHOLD)) {
+        std::fill(mark, mark + max_token, 0);
+        base = 4;
+    }
+    epoch[0] = base;
+
+    const int64_t offset = req_ids[row] * REQ_ID_OFFSET_STRIDE;
+    int64_t* RESTRICT old_row = topk_indices_old + static_cast<int64_t>(row) * topk;
+    int32_t* RESTRICT new_row = topk_indices_new + static_cast<int64_t>(row) * topk;
+
+    for (int slot = 0; slot < topk; ++slot) {
+        const int64_t value = old_row[slot];
+        if (LIKELY(value >= 0)) {
+            const int64_t raw_value = value - offset;
+            if (LIKELY(raw_value >= 0 && raw_value < max_token)) {
+                set_old(mark, static_cast<int32_t>(raw_value), base);
+            }
+        }
+    }
+
+    int miss_count = 0;
+    for (int slot = 0; slot < topk; ++slot) {
+        const int32_t value = new_row[slot];
+        if (LIKELY(value >= 0 && value < max_token)) {
+            set_new(mark, value, base);
+            if (!has_old(mark, value, base)) {
+                miss[miss_count] = value;
+                ++miss_count;
+                set_old(mark, value, base);
+            }
+        }
+    }
+
+    int miss_pos = 0;
+    for (int slot = 0; slot < topk; ++slot) {
+        new_row[slot] = -1;
+
+        const int64_t old_value = old_row[slot];
+        const int64_t old_raw = old_value >= 0 ? old_value - offset : -1;
+        if (old_raw >= 0 && old_raw < max_token &&
+            !has_new(mark, static_cast<int32_t>(old_raw), base)) {
+            if (miss_pos < miss_count) {
+                const int32_t replacement = miss[miss_pos];
+                ++miss_pos;
+                old_row[slot] = replacement + offset;
+                new_row[slot] = replacement;
+            } else {
+                old_row[slot] = -1;
+            }
+        }
+    }
+
+    if (miss_pos < miss_count) {
+        for (int slot = 0; slot < topk; ++slot) {
+            if (old_row[slot] == -1) {
+                const int32_t replacement = miss[miss_pos];
+                ++miss_pos;
+                old_row[slot] = replacement + offset;
+                new_row[slot] = replacement;
+                if (miss_pos >= miss_count) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+HOT_FUNCTION void cache_miss_topk(
     uintptr_t req_ids_ptr,
     uintptr_t topk_indices_old_ptr,
     uintptr_t topk_indices_new_ptr,
@@ -82,81 +196,59 @@ void cache_miss_topk(
     uintptr_t epochs_ptr,
     int64_t num_reqs,
     int64_t topk,
-    int64_t max_token
+    int64_t max_token,
+    int64_t workspace_threads,
+    int64_t requested_threads
 ) {
-    auto* req_ids = reinterpret_cast<int64_t*>(req_ids_ptr);
-    auto* topk_indices_old = reinterpret_cast<int64_t*>(topk_indices_old_ptr);
-    auto* topk_indices_new = reinterpret_cast<int32_t*>(topk_indices_new_ptr);
-    auto* mark = reinterpret_cast<int32_t*>(mark_workspace_ptr);
-    auto* miss = reinterpret_cast<int32_t*>(miss_workspace_ptr);
-    auto* epochs = reinterpret_cast<int32_t*>(epochs_ptr);
+    auto* RESTRICT req_ids = reinterpret_cast<int64_t*>(req_ids_ptr);
+    auto* RESTRICT topk_indices_old = reinterpret_cast<int64_t*>(topk_indices_old_ptr);
+    auto* RESTRICT topk_indices_new = reinterpret_cast<int32_t*>(topk_indices_new_ptr);
+    auto* RESTRICT mark_workspace = reinterpret_cast<int32_t*>(mark_workspace_ptr);
+    auto* RESTRICT miss_workspace = reinterpret_cast<int32_t*>(miss_workspace_ptr);
+    auto* RESTRICT epochs = reinterpret_cast<int32_t*>(epochs_ptr);
 
-    for (int64_t row = 0; row < num_reqs; ++row) {
-        int32_t base = epochs[0] + 4;
-        if (base >= EPOCH_RESET_THRESHOLD) {
-            std::fill(mark, mark + max_token, 0);
-            base = 4;
+    const int num_reqs_int = static_cast<int>(num_reqs);
+    const int topk_int = static_cast<int>(topk);
+    const int workspace_threads_int = static_cast<int>(workspace_threads);
+    const int requested_threads_int = static_cast<int>(requested_threads);
+    const int active_threads = choose_cache_miss_topk_threads(
+        num_reqs_int,
+        workspace_threads_int,
+        requested_threads_int
+    );
+
+    auto worker = [&](int thread_id) {
+        int32_t* RESTRICT mark = mark_workspace + static_cast<int64_t>(thread_id) * max_token;
+        int32_t* RESTRICT miss = miss_workspace + static_cast<int64_t>(thread_id) * topk_int;
+        int32_t* RESTRICT epoch = epochs + thread_id;
+        for (int row = thread_id; row < num_reqs_int; row += active_threads) {
+            process_one_cache_miss_topk_row(
+                row,
+                topk_int,
+                max_token,
+                req_ids,
+                topk_indices_old,
+                topk_indices_new,
+                mark,
+                miss,
+                epoch
+            );
         }
-        epochs[0] = base;
+    };
 
-        const int64_t offset = req_ids[row] * REQ_ID_OFFSET_STRIDE;
-        const int64_t row_offset = row * topk;
+    if (active_threads == 1) {
+        worker(0);
+        return;
+    }
 
-        for (int64_t slot = 0; slot < topk; ++slot) {
-            const int64_t value = topk_indices_old[row_offset + slot];
-            if (value >= 0) {
-                const int64_t raw_value = value - offset;
-                if (raw_value >= 0 && raw_value < max_token) {
-                    set_old(mark, static_cast<int32_t>(raw_value), base);
-                }
-            }
-        }
-
-        int64_t miss_count = 0;
-        for (int64_t slot = 0; slot < topk; ++slot) {
-            const int32_t value = topk_indices_new[row_offset + slot];
-            if (value >= 0 && value < max_token) {
-                set_new(mark, value, base);
-                if (!has_old(mark, value, base)) {
-                    miss[miss_count] = value;
-                    ++miss_count;
-                    set_old(mark, value, base);
-                }
-            }
-        }
-
-        int64_t miss_pos = 0;
-        for (int64_t slot = 0; slot < topk; ++slot) {
-            topk_indices_new[row_offset + slot] = -1;
-
-            const int64_t old_value = topk_indices_old[row_offset + slot];
-            const int64_t old_raw = old_value >= 0 ? old_value - offset : -1;
-            if (old_raw >= 0 && old_raw < max_token &&
-                !has_new(mark, static_cast<int32_t>(old_raw), base)) {
-                if (miss_pos < miss_count) {
-                    const int32_t replacement = miss[miss_pos];
-                    ++miss_pos;
-                    topk_indices_old[row_offset + slot] = replacement + offset;
-                    topk_indices_new[row_offset + slot] = replacement;
-                } else {
-                    topk_indices_old[row_offset + slot] = -1;
-                }
-            }
-        }
-
-        if (miss_pos < miss_count) {
-            for (int64_t slot = 0; slot < topk; ++slot) {
-                if (topk_indices_old[row_offset + slot] == -1) {
-                    const int32_t replacement = miss[miss_pos];
-                    ++miss_pos;
-                    topk_indices_old[row_offset + slot] = replacement + offset;
-                    topk_indices_new[row_offset + slot] = replacement;
-                    if (miss_pos >= miss_count) {
-                        break;
-                    }
-                }
-            }
-        }
+    std::vector<std::thread> workers;
+    workers.reserve(active_threads - 1);
+    for (int thread_id = 1; thread_id < active_threads; ++thread_id) {
+        workers.emplace_back(worker, thread_id);
+    }
+    worker(0);
+    for (auto& thread : workers) {
+        thread.join();
     }
 }
 

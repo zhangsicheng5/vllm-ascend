@@ -52,6 +52,16 @@ def _parse_float_list(value: str) -> tuple[float, ...]:
                  if item.strip())
 
 
+def _parse_cpp_thread_list(value: str) -> tuple[int, ...]:
+    parsed: list[int] = []
+    for item in value.split(","):
+        item = item.strip().lower()
+        if not item:
+            continue
+        parsed.append(0 if item == "auto" else int(item))
+    return tuple(parsed)
+
+
 def generate_case(
     num_reqs: int,
     seq_len: int,
@@ -386,6 +396,8 @@ def _load_cpp_backend():
             extra_cflags=[
                 "-O3",
                 "-std=c++20",
+                "-funroll-loops",
+                "-fomit-frame-pointer",
                 "-fopenmp",
                 "-march=armv8.2-a+sve+fp16+bf16",
                 "-fPIC",
@@ -413,16 +425,20 @@ def _load_cpp_backend():
     return _CPP_BACKEND
 
 
-def make_cpp_topk_workspace(topk: int, max_token: int):
+def make_cpp_topk_workspace(topk: int,
+                            max_token: int,
+                            workspace_threads: int = 4):
     import torch
 
     backend = _load_cpp_backend()
     if backend is None:
         raise RuntimeError(f"C++ backend unavailable: {_CPP_BACKEND_ERROR}")
-    mark_workspace = torch.zeros([max_token], dtype=torch.int32)
-    miss_workspace = torch.empty([topk], dtype=torch.int32)
-    epochs = torch.zeros([1], dtype=torch.int32)
-    return backend, mark_workspace, miss_workspace, epochs, topk, max_token
+    mark_workspace = torch.zeros([workspace_threads, max_token],
+                                 dtype=torch.int32)
+    miss_workspace = torch.empty([workspace_threads, topk], dtype=torch.int32)
+    epochs = torch.zeros([workspace_threads], dtype=torch.int32)
+    return (backend, mark_workspace, miss_workspace, epochs, topk, max_token,
+            workspace_threads)
 
 
 def update_topk_indices_cpp(
@@ -430,10 +446,19 @@ def update_topk_indices_cpp(
     topk_indices_old: np.ndarray,
     topk_indices_new: np.ndarray,
     workspace,
+    requested_threads: int = 0,
 ) -> np.ndarray:
     import torch
 
-    backend, mark_workspace, miss_workspace, epochs, topk, max_token = workspace
+    (
+        backend,
+        mark_workspace,
+        miss_workspace,
+        epochs,
+        topk,
+        max_token,
+        workspace_threads,
+    ) = workspace
     if topk_indices_old.shape[1] != topk:
         raise ValueError("workspace topk mismatch")
 
@@ -450,6 +475,8 @@ def update_topk_indices_cpp(
         req_ids_tensor.shape[0],
         topk,
         max_token,
+        workspace_threads,
+        requested_threads,
     )
     return topk_indices_new
 
@@ -514,6 +541,7 @@ def run_benchmark(
     csv_path: Path | None = None,
     include_numpy: bool = True,
     backends: tuple[str, ...] = ("numba", "numpy"),
+    cpp_threads: tuple[int, ...] = (0,),
 ) -> list[dict[str, float | int | str]]:
     results: list[dict[str, float | int | str]] = []
     writer = None
@@ -558,21 +586,43 @@ def run_benchmark(
 
             if "cpp" in requested_backends:
                 try:
+                    max_cpp_threads = max((thread for thread in cpp_threads
+                                           if thread > 0),
+                                          default=4)
+                    workspace_threads = max(4, max_cpp_threads)
                     cpp_workspace = make_cpp_topk_workspace(
                         topk=case.topk,
                         max_token=case.seq_len,
+                        workspace_threads=workspace_threads,
                     )
-                    warm_old = old_base.copy()
-                    warm_new = new_base.copy()
-                    update_topk_indices_cpp(req_ids, warm_old, warm_new,
-                                            cpp_workspace)
+                    for requested_threads in cpp_threads:
+                        warm_old = old_base.copy()
+                        warm_new = new_base.copy()
+                        update_topk_indices_cpp(
+                            req_ids,
+                            warm_old,
+                            warm_new,
+                            cpp_workspace,
+                            requested_threads=requested_threads,
+                        )
 
-                    def cpp_impl(old, new, req_ids=req_ids,
-                                 workspace=cpp_workspace):
-                        return update_topk_indices_cpp(req_ids, old, new,
-                                                       workspace)
+                        def cpp_impl(old,
+                                     new,
+                                     req_ids=req_ids,
+                                     workspace=cpp_workspace,
+                                     requested_threads=requested_threads):
+                            return update_topk_indices_cpp(
+                                req_ids,
+                                old,
+                                new,
+                                workspace,
+                                requested_threads=requested_threads,
+                            )
 
-                    impls.append(("cpp", cpp_impl))
+                        thread_name = (
+                            "auto" if requested_threads <= 0 else
+                            str(requested_threads))
+                        impls.append((f"cpp_t{thread_name}", cpp_impl))
                 except Exception as exc:
                     print(
                         f"SKIP impl=cpp reason={exc}",
@@ -660,6 +710,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backends",
                         default="numba,numpy",
                         help="comma-separated backends: cpp,numba,numpy")
+    parser.add_argument("--cpp-threads",
+                        default="auto",
+                        help="comma-separated C++ threads: auto,1,2,4,8")
     return parser.parse_args()
 
 
@@ -676,6 +729,7 @@ def main() -> None:
         include_numpy=not args.skip_numpy,
         backends=tuple(item.strip() for item in args.backends.split(",")
                        if item.strip()),
+        cpp_threads=_parse_cpp_thread_list(args.cpp_threads),
     )
 
 

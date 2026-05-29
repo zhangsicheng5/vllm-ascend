@@ -58,6 +58,8 @@ def _load_cpp_backend():
             extra_cflags=[
                 "-O3",
                 "-std=c++20",
+                "-funroll-loops",
+                "-fomit-frame-pointer",
                 "-fopenmp",
                 "-march=armv8.2-a+sve+fp16+bf16",
                 "-fPIC",
@@ -81,16 +83,23 @@ def _load_cpp_backend():
     return _CPP_BACKEND
 
 
-def _cpp_update_topk_indices(req_ids, old, new, max_token):
+def _cpp_update_topk_indices(req_ids,
+                             old,
+                             new,
+                             max_token,
+                             requested_threads=1,
+                             workspace_threads=4):
     torch = pytest.importorskip("torch")
     backend = _load_cpp_backend()
 
     req_ids_tensor = torch.from_numpy(req_ids.copy())
     old_tensor = torch.from_numpy(old.copy())
     new_tensor = torch.from_numpy(new.copy())
-    mark_workspace = torch.zeros([max_token], dtype=torch.int32)
-    miss_workspace = torch.empty([new.shape[1]], dtype=torch.int32)
-    epochs = torch.zeros([1], dtype=torch.int32)
+    mark_workspace = torch.zeros([workspace_threads, max_token],
+                                 dtype=torch.int32)
+    miss_workspace = torch.empty([workspace_threads, new.shape[1]],
+                                 dtype=torch.int32)
+    epochs = torch.zeros([workspace_threads], dtype=torch.int32)
 
     backend.cache_miss_topk(
         req_ids_tensor.data_ptr(),
@@ -102,6 +111,8 @@ def _cpp_update_topk_indices(req_ids, old, new, max_token):
         req_ids.shape[0],
         new.shape[1],
         max_token,
+        workspace_threads,
+        requested_threads,
     )
     return old_tensor.numpy(), new_tensor.numpy()
 
@@ -291,6 +302,15 @@ def test_cpp_backend_matches_reference_when_available():
         128,
     ))
 
+    req_ids = np.array([5], dtype=np.int64)
+    old_raw = np.array([[-1, -1, -1, -1]], dtype=np.int32)
+    cases.append((
+        req_ids,
+        _offset_old(req_ids, old_raw),
+        np.array([[8, 9, 10, 11]], dtype=np.int32),
+        128,
+    ))
+
     req_ids, old, new = bench_cpu.generate_case(
         num_reqs=4,
         seq_len=32768,
@@ -315,3 +335,31 @@ def test_cpp_backend_matches_reference_when_available():
 
         np.testing.assert_array_equal(actual, expected)
         np.testing.assert_array_equal(cpp_old, ref_old)
+
+
+@pytest.mark.parametrize("requested_threads", [-1, 1, 2, 4])
+def test_cpp_backend_thread_counts_match_reference_when_available(
+        requested_threads):
+    req_ids, old, new = bench_cpu.generate_case(
+        num_reqs=4,
+        seq_len=32768,
+        topk=512,
+        hit_rate=0.7,
+        seed=17,
+    )
+    ref_old = old.copy()
+    ref_new = new.copy()
+    expected = bench_cpu.reference_update_topk_indices(req_ids, ref_old,
+                                                       ref_new)
+
+    cpp_old, actual = _cpp_update_topk_indices(
+        req_ids,
+        old,
+        new,
+        max_token=32768,
+        requested_threads=requested_threads,
+        workspace_threads=4,
+    )
+
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(cpp_old, ref_old)

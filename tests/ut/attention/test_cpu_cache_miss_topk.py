@@ -46,9 +46,14 @@ def test_cpu_topk_workspace_uses_cpu_tensors():
     assert workspace.mark_workspace.dtype == torch.int32
     assert workspace.miss_workspace.dtype == torch.int32
     assert workspace.epochs.dtype == torch.int32
-    assert workspace.mark_workspace.shape == (128,)
-    assert workspace.miss_workspace.shape == (6,)
-    assert workspace.epochs.shape == (1,)
+    assert workspace.mark_workspace.ndim == 2
+    assert workspace.miss_workspace.ndim == 2
+    assert workspace.epochs.ndim == 1
+    assert workspace.mark_workspace.shape[1] == 128
+    assert workspace.miss_workspace.shape[1] == 6
+    assert workspace.epochs.shape[0] == workspace.mark_workspace.shape[0]
+    assert workspace.miss_workspace.shape[0] == workspace.mark_workspace.shape[0]
+    assert workspace.workspace_threads == workspace.mark_workspace.shape[0]
 
 
 def test_cpu_topk_keeps_same_raw_token_isolated_by_req_id():

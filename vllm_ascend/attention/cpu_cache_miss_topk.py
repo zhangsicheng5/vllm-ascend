@@ -37,6 +37,7 @@ class CPUCacheMissTopKWorkspace:
     epochs: Any
     topk: int
     max_token: int
+    workspace_threads: int
 
 
 if NUMBA_AVAILABLE:
@@ -140,24 +141,26 @@ if NUMBA_AVAILABLE:
 def make_cpu_cache_miss_topk_workspace(
     topk: int,
     max_token: int,
+    workspace_threads: int = 4,
 ) -> CPUCacheMissTopKWorkspace:
+    workspace_threads = max(1, int(workspace_threads))
     if TORCH_AVAILABLE:
         assert torch is not None
         mark_workspace = torch.empty(
-            [max_token],
+            [workspace_threads, max_token],
             dtype=torch.int32,
             device="cpu",
             pin_memory=True,
         )
         mark_workspace.zero_()
         miss_workspace = torch.empty(
-            [topk],
+            [workspace_threads, topk],
             dtype=torch.int32,
             device="cpu",
             pin_memory=True,
         )
         epochs = torch.empty(
-            [1],
+            [workspace_threads],
             dtype=torch.int32,
             device="cpu",
             pin_memory=True,
@@ -169,17 +172,19 @@ def make_cpu_cache_miss_topk_workspace(
             epochs=epochs,
             topk=topk,
             max_token=max_token,
+            workspace_threads=workspace_threads,
         )
 
     if NUMBA_AVAILABLE is False:
         raise RuntimeError("torch or numba is required for CPU cache-miss topk")
-    num_threads = get_num_threads() if NUMBA_PARALLEL else 1
+    num_threads = get_num_threads() if NUMBA_PARALLEL else workspace_threads
     return CPUCacheMissTopKWorkspace(
         mark_workspace=np.zeros((num_threads, max_token), dtype=np.int32),
         miss_workspace=np.empty((num_threads, topk), dtype=np.int32),
         epochs=np.zeros((num_threads, ), dtype=np.int32),
         topk=topk,
         max_token=max_token,
+        workspace_threads=num_threads,
     )
 
 
@@ -220,8 +225,8 @@ def update_topk_indices_cpu(
             raise ValueError("miss_workspace must be CPU tensor")
         if epochs.device.type != "cpu":
             raise ValueError("epochs must be CPU tensor")
-        mark_workspace = mark_workspace.reshape(1, workspace.max_token).numpy()
-        miss_workspace = miss_workspace.reshape(1, workspace.topk).numpy()
+        mark_workspace = mark_workspace.reshape(-1, workspace.max_token).numpy()
+        miss_workspace = miss_workspace.reshape(-1, workspace.topk).numpy()
         epochs = epochs.numpy()
 
     return _update_topk_cache_miss_inplace_numba(

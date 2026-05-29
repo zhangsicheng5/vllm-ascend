@@ -60,6 +60,8 @@ backend_map = {
 }
 
 CPU_CACHE_MISS_TOPK_MAX_TOKEN = 131072
+CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS = 4
+CPU_CACHE_MISS_TOPK_REQUESTED_THREADS = 0
 
 # cpu sparse attn kernel related
 # TODO maybe implement this in vllm custom op framework
@@ -89,6 +91,8 @@ cpu_sparse_attn = load(
     extra_cflags=[
         "-O3",
         "-std=c++20",
+        "-funroll-loops",
+        "-fomit-frame-pointer",
         "-fopenmp",
         "-march=armv8.2-a+sve+fp16+bf16",
         # "-march=native",
@@ -449,6 +453,7 @@ class KVPoolWorker:
                 self.cpu_cache_miss_topk_workspace = make_cpu_cache_miss_topk_workspace(
                     topk=self.topk,
                     max_token=CPU_CACHE_MISS_TOPK_MAX_TOKEN,
+                    workspace_threads=CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS,
                 )
             self.onload_topk_buffer_k_npu = torch.empty([self.max_num_reqs, self.topk, 1, 512], dtype=torch.bfloat16, device='npu')
             self.onload_topk_buffer_v_npu = torch.empty([self.max_num_reqs, self.topk, 1, 64], dtype=torch.bfloat16, device='npu')
@@ -795,6 +800,8 @@ class KVPoolWorker:
             num_reqs,
             topk,
             max_token,
+            workspace_threads,
+            requested_threads,
         ) = args
 
         if self.cpu_sparse_attn is None or not hasattr(
@@ -806,10 +813,6 @@ class KVPoolWorker:
             )
             return
 
-        print(
-            "[SFA][cache_miss_prepare][worker_cpu] begin",
-            flush=True,
-        )
         self.cpu_sparse_attn.cache_miss_topk(
             req_ids_ptr,
             topk_indices_old_ptr,
@@ -820,10 +823,8 @@ class KVPoolWorker:
             num_reqs,
             topk,
             max_token,
-        )
-        print(
-            "[SFA][cache_miss_prepare][worker_cpu] done",
-            flush=True,
+            workspace_threads,
+            requested_threads,
         )
 
     def prepare_cache_miss_topk(
@@ -868,6 +869,8 @@ class KVPoolWorker:
             num_reqs,
             self.cpu_cache_miss_topk_workspace.topk,
             self.cpu_cache_miss_topk_workspace.max_token,
+            self.cpu_cache_miss_topk_workspace.workspace_threads,
+            CPU_CACHE_MISS_TOPK_REQUESTED_THREADS,
         )
 
         if capturing:
