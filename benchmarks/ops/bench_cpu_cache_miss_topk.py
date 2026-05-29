@@ -622,7 +622,7 @@ def run_benchmark(
                         thread_name = (
                             "auto" if requested_threads <= 0 else
                             str(requested_threads))
-                        impls.append((f"cpp_t{thread_name}", cpp_impl))
+                        impls.append((f"cpp_omp_t{thread_name}", cpp_impl))
                 except Exception as exc:
                     print(
                         f"SKIP impl=cpp reason={exc}",

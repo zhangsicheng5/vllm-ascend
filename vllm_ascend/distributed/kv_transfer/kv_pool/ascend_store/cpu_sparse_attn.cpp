@@ -7,7 +7,6 @@
 #include <chrono>
 #include <string>
 #include <stdexcept>
-#include <thread>
 #include <vector>
 #include <ATen/Parallel.h>
 #include <torch/script.h>
@@ -217,7 +216,26 @@ HOT_FUNCTION void cache_miss_topk(
         requested_threads_int
     );
 
-    auto worker = [&](int thread_id) {
+    if (active_threads == 1) {
+        for (int row = 0; row < num_reqs_int; ++row) {
+            process_one_cache_miss_topk_row(
+                row,
+                topk_int,
+                max_token,
+                req_ids,
+                topk_indices_old,
+                topk_indices_new,
+                mark_workspace,
+                miss_workspace,
+                epochs
+            );
+        }
+        return;
+    }
+
+    #pragma omp parallel num_threads(active_threads)
+    {
+        const int thread_id = omp_get_thread_num();
         int32_t* RESTRICT mark = mark_workspace + static_cast<int64_t>(thread_id) * max_token;
         int32_t* RESTRICT miss = miss_workspace + static_cast<int64_t>(thread_id) * topk_int;
         int32_t* RESTRICT epoch = epochs + thread_id;
@@ -234,21 +252,6 @@ HOT_FUNCTION void cache_miss_topk(
                 epoch
             );
         }
-    };
-
-    if (active_threads == 1) {
-        worker(0);
-        return;
-    }
-
-    std::vector<std::thread> workers;
-    workers.reserve(active_threads - 1);
-    for (int thread_id = 1; thread_id < active_threads; ++thread_id) {
-        workers.emplace_back(worker, thread_id);
-    }
-    worker(0);
-    for (auto& thread : workers) {
-        thread.join();
     }
 }
 
@@ -434,6 +437,6 @@ get_kv_topk(
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     namespace py = pybind11;
-    m.def("cache_miss_topk", &cache_miss_topk, "CPU cache-miss topk with single-thread epoch marking");
+    m.def("cache_miss_topk", &cache_miss_topk, "CPU cache-miss topk with OpenMP row-level parallelism");
     m.def("get_kv_topk", &get_kv_topk, "High performance topk combine");
 }
