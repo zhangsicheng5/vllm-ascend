@@ -122,9 +122,10 @@ env_variables: dict[str, Callable[[], Any]] = {
     "VLLM_ASCEND_CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS": lambda: int(
         os.getenv("VLLM_ASCEND_CPU_CACHE_MISS_TOPK_WORKSPACE_THREADS", "64")
     ),
-    # CPU cache-miss topk requested OpenMP threads. 0 means auto.
+    # CPU cache-miss topk requested OpenMP threads. The C++ implementation
+    # clamps this to min(num_reqs, workspace_threads).
     "VLLM_ASCEND_CPU_CACHE_MISS_TOPK_REQUESTED_THREADS": lambda: int(
-        os.getenv("VLLM_ASCEND_CPU_CACHE_MISS_TOPK_REQUESTED_THREADS", "0")
+        os.getenv("VLLM_ASCEND_CPU_CACHE_MISS_TOPK_REQUESTED_THREADS", "64")
     ),
 }
 
