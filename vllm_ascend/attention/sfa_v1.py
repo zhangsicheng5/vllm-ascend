@@ -151,6 +151,7 @@ class AscendSFAMetadata:
     num_decodes: int = 0
     num_decode_tokens: int = 0
     num_prefills: int = 0
+    seq_lens_cpu: torch.Tensor | None = None
     indexer_block_table_tensor: torch.Tensor | None = None
     indexer_slot_mapping: torch.Tensor | None = None
     num_offloaded_blocks: torch.Tensor | None = None
@@ -354,6 +355,7 @@ class AscendSFAMetadataBuilder(MLACommonMetadataBuilder[AscendSFAMetadata]):
             num_decodes=self.num_decodes,
             num_decode_tokens=self.num_decode_tokens,
             num_prefills=self.num_prefills,
+            seq_lens_cpu=common_attn_metadata.seq_lens_cpu[:num_reqs],
             indexer_block_table_tensor=indexer_block_table_tensor,
             indexer_slot_mapping=indexer_slot_mapping,
             num_offloaded_blocks=num_offloaded_blocks,
@@ -1186,10 +1188,18 @@ class AscendSFAImpl(MLAAttentionImpl):
         topk_buffer_k = kv_cache[3][:num_reqs]
         topk_buffer_v = kv_cache[4][:num_reqs]
         topk_indices = topk_indices.squeeze(1).contiguous() # TODO maybe consider dim1 (head_num?)
+        seq_lens_cpu = getattr(attn_metadata, "seq_lens_cpu", None)
+        if seq_lens_cpu is not None:
+            seq_lens_for_log = seq_lens_cpu[:num_reqs].tolist()
+            step_hint = max(seq_lens_for_log) if seq_lens_for_log else -1
+        else:
+            seq_lens_for_log = None
+            step_hint = -1
 
         print(
             "[SFA][topk_buffer][before_op] "
             f"layer={layer_name} capturing={forward_context.capturing} "
+            f"step_hint={step_hint} seq_lens={seq_lens_for_log} "
             f"num_reqs={num_reqs} topk_shape={tuple(topk_indices.shape)} "
             f"topk_dtype={topk_indices.dtype} topk_device={topk_indices.device} "
             f"last_step_shape={tuple(self.last_step_topk_indices[:num_reqs].shape)} "
