@@ -1206,6 +1206,22 @@ class AscendSFAImpl(MLAAttentionImpl):
             f"req_ids_shape={tuple(attn_metadata.req_ids_tensor[:num_reqs].shape)}",
             flush=True,
         )
+        if forward_context.capturing:
+            req_ids_for_log = "<skip_d2h_in_capture>"
+            last_req_ids_for_log = "<skip_d2h_in_capture>"
+        else:
+            req_ids_for_log = (
+                attn_metadata.req_ids_tensor[:num_reqs].detach().cpu().tolist())
+            last_req_ids_for_log = (
+                self.last_step_req_ids[:num_reqs].detach().cpu().tolist())
+        print(
+            "[SFA][row_owner] "
+            f"layer={layer_name} capturing={forward_context.capturing} "
+            f"step_hint={step_hint} seq_lens={seq_lens_for_log} "
+            f"num_reqs={num_reqs} req_ids={req_ids_for_log} "
+            f"last_req_ids={last_req_ids_for_log}",
+            flush=True,
+        )
         # topk_indices_result = torch.ops.npu.get_cache_miss_topk_indices(
         #     topk_indices,
         #     self.last_step_topk_indices[:num_reqs],
