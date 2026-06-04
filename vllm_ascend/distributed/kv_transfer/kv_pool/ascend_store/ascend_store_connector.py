@@ -228,51 +228,6 @@ class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
     def set_req_ids(self, req_ids: list):
         return self.connector_worker.set_req_ids(req_ids)
 
-    # def wait_for_load_kv_token_wise(self):
-    #     self.connector_worker.wait_for_load_kv_token_wise()
-
-    def load_kv_token_wise(
-        self,
-        layer_name: str,
-        num_reqs: int,
-        token_indices: torch.Tensor,
-        cpu_mask: torch.Tensor,
-        capturing: bool = False,
-    ):
-        self.connector_worker.load_kv_token_wise(
-            layer_name,
-            num_reqs,
-            token_indices,
-            cpu_mask,
-            capturing,
-        )
-
-    def prepare_cache_miss_topk(
-        self,
-        layer_name: str,
-        num_reqs: int,
-        topk_indices_new: torch.Tensor,
-        topk_indices_old: torch.Tensor,
-        req_ids_tensor: torch.Tensor,
-        last_req_ids_tensor: torch.Tensor,
-        capturing: bool = False,
-    ) -> bool:
-        prepared = self.connector_worker.prepare_cache_miss_topk(
-            layer_name,
-            num_reqs,
-            topk_indices_new,
-            topk_indices_old,
-            req_ids_tensor,
-            last_req_ids_tensor,
-            capturing,
-        )
-        print(
-            "[SFA][cache_miss_prepare][connector] "
-            f"layer={layer_name} capturing={capturing} prepared={prepared}",
-            flush=True,
-        )
-        return prepared
-
     def prepare_and_load_cache_miss_topk(
         self,
         layer_name: str,

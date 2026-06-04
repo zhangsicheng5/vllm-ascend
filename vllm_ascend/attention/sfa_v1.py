@@ -28,9 +28,7 @@ from vllm_ascend.attention.utils import (
     AscendCommonAttentionMetadata,
     ascend_chunked_prefill_workspace_size,
     enable_cp,
-    maybe_load_kv_token_wise_graph,
     maybe_prepare_and_load_cache_miss_topk_graph,
-    maybe_prepare_cache_miss_topk_graph,
     maybe_save_kv_layer_to_connector,
     maybe_save_kv_layer_to_connector_graph,
     trans_rope_weight,
@@ -1310,38 +1308,7 @@ class AscendSFAImpl(MLAAttentionImpl):
             flush=True,
         )
         if not prepared_cache_miss_load:
-            if forward_context.capturing:
-                raise RuntimeError(
-                    "CPU cache-miss topk prepare/load failed during graph capture")
-
-            prepared_cache_miss_topk = False
-            if CPU_CACHE_MISS_TOPK_AVAILABLE:
-                prepared_cache_miss_topk = maybe_prepare_cache_miss_topk_graph(
-                    layer_name,
-                    num_reqs,
-                    topk_indices,
-                    self.last_step_topk_indices[:num_reqs],
-                    attn_metadata.req_ids_tensor[:num_reqs],
-                    self.last_step_req_ids[:num_reqs],
-                    forward_context.capturing,
-                )
-            if not prepared_cache_miss_topk:
-                topk_indices = self.get_cache_miss_topk_indices(
-                    attn_metadata.req_ids_tensor[:num_reqs],
-                    self.last_step_req_ids[:num_reqs],
-                    self.last_step_topk_indices[:num_reqs],
-                    topk_indices,
-                )
-
-            # load cpu
-            cpu_token_indices = torch.where(cpu_mask, topk_indices, -1)
-            maybe_load_kv_token_wise_graph(
-                layer_name,
-                num_reqs,
-                cpu_token_indices,
-                cpu_mask,
-                forward_context.capturing,
-            )
+            raise RuntimeError("CPU cache-miss topk prepare/load failed")
 
         # generate new block_table & indices
         topk_buffer_k = topk_buffer_k.reshape([-1, self.block_size, 1, 512])

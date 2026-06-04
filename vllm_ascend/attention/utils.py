@@ -306,27 +306,6 @@ def set_connector_req_ids(req_ids):
     connector.set_req_ids(req_ids)
 
 
-def maybe_load_kv_token_wise_graph(
-    layer_name: str,
-    num_reqs: int,
-    token_indices: torch.Tensor, # [num_reqs, topk]
-    cpu_mask: torch.Tensor,
-    capturing: bool = False,
-):
-    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
-        return
-    connector = get_kv_transfer_group()
-    if not hasattr(connector, 'load_kv_token_wise'):
-        return
-    connector.load_kv_token_wise(
-        layer_name,
-        num_reqs,
-        token_indices,
-        cpu_mask,
-        capturing,
-    )
-
-
 def maybe_prepare_and_load_cache_miss_topk_graph(
     layer_name: str,
     num_reqs: int,
@@ -366,49 +345,6 @@ def maybe_prepare_and_load_cache_miss_topk_graph(
     )
     print(
         "[SFA][cache_miss_load][utils] "
-        f"layer={layer_name} capturing={capturing} prepared={prepared}",
-        flush=True,
-    )
-    return prepared
-
-
-def maybe_prepare_cache_miss_topk_graph(
-    layer_name: str,
-    num_reqs: int,
-    topk_indices_new: torch.Tensor,
-    topk_indices_old: torch.Tensor,
-    req_ids_tensor: torch.Tensor,
-    last_req_ids_tensor: torch.Tensor,
-    capturing: bool = False,
-) -> bool:
-    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
-        print(
-            "[SFA][cache_miss_prepare][utils] "
-            f"layer={layer_name} capturing={capturing} "
-            "prepared=False reason=no_kv_transfer_group",
-            flush=True,
-        )
-        return False
-    connector = get_kv_transfer_group()
-    if not hasattr(connector, "prepare_cache_miss_topk"):
-        print(
-            "[SFA][cache_miss_prepare][utils] "
-            f"layer={layer_name} capturing={capturing} "
-            "prepared=False reason=no_prepare_method",
-            flush=True,
-        )
-        return False
-    prepared = connector.prepare_cache_miss_topk(
-        layer_name,
-        num_reqs,
-        topk_indices_new,
-        topk_indices_old,
-        req_ids_tensor,
-        last_req_ids_tensor,
-        capturing,
-    )
-    print(
-        "[SFA][cache_miss_prepare][utils] "
         f"layer={layer_name} capturing={capturing} prepared={prepared}",
         flush=True,
     )
