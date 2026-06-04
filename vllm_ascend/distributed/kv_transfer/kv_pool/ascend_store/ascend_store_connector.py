@@ -273,6 +273,34 @@ class AscendStoreConnector(KVConnectorBase_V1, SupportsHMA):
         )
         return prepared
 
+    def prepare_and_load_cache_miss_topk(
+        self,
+        layer_name: str,
+        num_reqs: int,
+        topk_indices_new: torch.Tensor,
+        topk_indices_old: torch.Tensor,
+        req_ids_tensor: torch.Tensor,
+        last_req_ids_tensor: torch.Tensor,
+        cpu_mask: torch.Tensor,
+        capturing: bool = False,
+    ) -> bool:
+        prepared = self.connector_worker.prepare_and_load_cache_miss_topk(
+            layer_name,
+            num_reqs,
+            topk_indices_new,
+            topk_indices_old,
+            req_ids_tensor,
+            last_req_ids_tensor,
+            cpu_mask,
+            capturing,
+        )
+        print(
+            "[SFA][cache_miss_load][connector] "
+            f"layer={layer_name} capturing={capturing} prepared={prepared}",
+            flush=True,
+        )
+        return prepared
+
     def get_finished(self, finished_req_ids: set[str]) -> tuple[set[str], set[str]]:
         """Get the finished recving and sending requests."""
         assert self.connector_worker is not None

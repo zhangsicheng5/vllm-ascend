@@ -433,6 +433,12 @@ class KVPoolWorker:
                 device='cpu',
                 pin_memory=True,
             )
+            self.cpu_mask_buffer_cpu = torch.empty(
+                [self.max_num_reqs, self.topk],
+                dtype=torch.bool,
+                device='cpu',
+                pin_memory=True,
+            )
             self.topk_indices_new_buffer_cpu = torch.empty(
                 [self.max_num_reqs, self.topk],
                 dtype=torch.int32,
@@ -838,6 +844,39 @@ class KVPoolWorker:
             requested_threads,
         )
 
+    def cache_miss_topk_and_load_cpu(self, args):
+        (
+            cache_miss_args,
+            filter_args,
+            load_args,
+        ) = args
+
+        if self.cpu_sparse_attn is None:
+            print(
+                "[SFA][cache_miss_load][worker_cpu] "
+                "prepared=False reason=no_cpp_backend",
+                flush=True,
+            )
+            return
+        if not hasattr(self.cpu_sparse_attn, "cache_miss_topk"):
+            print(
+                "[SFA][cache_miss_load][worker_cpu] "
+                "prepared=False reason=no_cache_miss_topk",
+                flush=True,
+            )
+            return
+        if not hasattr(self.cpu_sparse_attn, "filter_cpu_token_indices"):
+            print(
+                "[SFA][cache_miss_load][worker_cpu] "
+                "prepared=False reason=no_filter_cpu_token_indices",
+                flush=True,
+            )
+            return
+
+        self.cpu_sparse_attn.cache_miss_topk(*cache_miss_args)
+        self.cpu_sparse_attn.filter_cpu_token_indices(*filter_args)
+        self.load_cpu(load_args)
+
     def prepare_cache_miss_topk(
         self,
         layer_name: str,
@@ -908,6 +947,175 @@ class KVPoolWorker:
             "[SFA][cache_miss_prepare][worker] "
             f"layer={layer_name} capturing={capturing} prepared=True "
             "action=copy_h2d",
+            flush=True,
+        )
+        return True
+
+    def prepare_and_load_cache_miss_topk(
+        self,
+        layer_name: str,
+        num_reqs: int,
+        topk_indices_new_npu: torch.Tensor,
+        topk_indices_old_npu: torch.Tensor,
+        req_ids_tensor_npu: torch.Tensor,
+        last_req_ids_tensor_npu: torch.Tensor,
+        cpu_mask: torch.Tensor,
+        capturing: bool = False,
+    ) -> bool:
+        if self.cpu_cache_miss_topk_workspace is None:
+            print(
+                "[SFA][cache_miss_load][worker] "
+                f"layer={layer_name} capturing={capturing} "
+                "prepared=False reason=no_workspace",
+                flush=True,
+            )
+            return False
+        if self.cpu_sparse_attn is None:
+            print(
+                "[SFA][cache_miss_load][worker] "
+                f"layer={layer_name} capturing={capturing} "
+                "prepared=False reason=no_cpp_backend",
+                flush=True,
+            )
+            return False
+        if not hasattr(self.cpu_sparse_attn, "filter_cpu_token_indices"):
+            print(
+                "[SFA][cache_miss_load][worker] "
+                f"layer={layer_name} capturing={capturing} "
+                "prepared=False reason=no_filter_cpu_token_indices",
+                flush=True,
+            )
+            return False
+
+        thread_num = 16
+        topk_indices_new_cpu = self.topk_indices_new_buffer_cpu[:num_reqs]
+        topk_indices_old_cpu = self.topk_indices_old_buffer_cpu[:num_reqs]
+        req_ids_tensor_cpu = self.req_ids_tensor_buffer_cpu[:num_reqs]
+        last_req_ids_tensor_cpu = self.last_req_ids_tensor_buffer_cpu[:num_reqs]
+        cpu_mask_cpu = self.cpu_mask_buffer_cpu[:num_reqs]
+        token_indices_cpu = self.topk_indices_buffer_cpu[:num_reqs]
+
+        topk_indices_new_cpu.copy_(topk_indices_new_npu,
+                                   non_blocking=capturing)
+        topk_indices_old_cpu.copy_(topk_indices_old_npu,
+                                   non_blocking=capturing)
+        req_ids_tensor_cpu.copy_(req_ids_tensor_npu, non_blocking=capturing)
+        last_req_ids_tensor_cpu.copy_(last_req_ids_tensor_npu,
+                                      non_blocking=capturing)
+        cpu_mask_cpu.copy_(cpu_mask, non_blocking=capturing)
+
+        if not capturing and self.current_layer_load == 0 and self.tp_rank == 0:
+            original_cpu_mask_count = cpu_mask_cpu.sum().item()
+            logger.info(
+                f'>>>>> cache miss load combined, original_cpu_mask_count = {original_cpu_mask_count}'
+            )
+
+        current_compute_stream = torch_npu.npu.current_stream()
+        subscribed_compute_streams = get_subscribed_compute_streams()
+        if current_compute_stream not in subscribed_compute_streams:
+            torch_npu.npu._subscribe_report(current_compute_stream)
+            subscribed_compute_streams.add(current_compute_stream)
+
+        k_cache_cpu = self.k_caches_cpu[self.current_layer_load]
+        v_cache_cpu = self.v_caches_cpu[self.current_layer_load]
+        token_indices_cpu_3d = token_indices_cpu.unsqueeze(1)
+        actual_seq_len_q = self.actual_seq_len_q[:num_reqs]
+        cpu_block_table = self.cpu_block_table_host_buffer[:num_reqs]
+        cpu_block_table.copy_(self.cpu_block_table.gpu[:num_reqs],
+                              non_blocking=capturing)
+        onload_topk_buffer_k_cpu = self.onload_topk_buffer_k_cpu[:num_reqs]
+        onload_topk_buffer_v_cpu = self.onload_topk_buffer_v_cpu[:num_reqs]
+
+        cache_miss_args = (
+            req_ids_tensor_cpu.data_ptr(),
+            last_req_ids_tensor_cpu.data_ptr(),
+            topk_indices_old_cpu.data_ptr(),
+            topk_indices_new_cpu.data_ptr(),
+            self.cpu_cache_miss_topk_workspace.mark_workspace.data_ptr(),
+            self.cpu_cache_miss_topk_workspace.miss_workspace.data_ptr(),
+            self.cpu_cache_miss_topk_workspace.epochs.data_ptr(),
+            num_reqs,
+            self.cpu_cache_miss_topk_workspace.topk,
+            self.cpu_cache_miss_topk_workspace.max_token,
+            self.cpu_cache_miss_topk_workspace.workspace_threads,
+            CPU_CACHE_MISS_TOPK_REQUESTED_THREADS,
+        )
+        filter_args = (
+            topk_indices_new_cpu.data_ptr(),
+            cpu_mask_cpu.data_ptr(),
+            token_indices_cpu.data_ptr(),
+            num_reqs,
+            self.cpu_cache_miss_topk_workspace.topk,
+        )
+        load_args = (
+            k_cache_cpu.data_ptr(),
+            v_cache_cpu.data_ptr(),
+            token_indices_cpu_3d.data_ptr(),
+            actual_seq_len_q.data_ptr(),
+            cpu_block_table.data_ptr(),
+            onload_topk_buffer_k_cpu.data_ptr(),
+            onload_topk_buffer_v_cpu.data_ptr(),
+            k_cache_cpu.shape,
+            v_cache_cpu.shape,
+            token_indices_cpu_3d.shape,
+            actual_seq_len_q.shape,
+            cpu_block_table.shape,
+            onload_topk_buffer_k_cpu.shape,
+            onload_topk_buffer_v_cpu.shape,
+            thread_num,
+        )
+        args = (
+            cache_miss_args,
+            filter_args,
+            load_args,
+        )
+
+        if capturing:
+            print(
+                "[SFA][cache_miss_load][worker] "
+                f"layer={layer_name} capturing=True action=launch_host_func",
+                flush=True,
+            )
+            torch_npu.npu._launch_host_func(
+                current_compute_stream,
+                self.cache_miss_topk_and_load_cpu,
+                args,
+            )
+        else:
+            self.cache_miss_topk_and_load_cpu(args)
+
+        topk_indices_new_npu.copy_(topk_indices_new_cpu,
+                                   non_blocking=capturing)
+        topk_indices_old_npu.copy_(topk_indices_old_cpu,
+                                   non_blocking=capturing)
+        last_req_ids_tensor_npu.copy_(last_req_ids_tensor_cpu,
+                                      non_blocking=capturing)
+
+        onload_topk_buffer_k_npu = self.onload_topk_buffer_k_npu[:num_reqs]
+        onload_topk_buffer_v_npu = self.onload_topk_buffer_v_npu[:num_reqs]
+        onload_topk_buffer_k_npu.copy_(onload_topk_buffer_k_cpu,
+                                       non_blocking=capturing)
+        onload_topk_buffer_v_npu.copy_(onload_topk_buffer_v_cpu,
+                                       non_blocking=capturing)
+
+        cpu_mask_for_merge = cpu_mask.unsqueeze(-1).unsqueeze(-1)
+        topk_buffer_k = self.topk_buffers_k[self.current_layer_load][:num_reqs]
+        topk_buffer_v = self.topk_buffers_v[self.current_layer_load][:num_reqs]
+        topk_buffer_k[...] = torch.where(cpu_mask_for_merge,
+                                         onload_topk_buffer_k_npu,
+                                         topk_buffer_k)
+        topk_buffer_v[...] = torch.where(cpu_mask_for_merge,
+                                         onload_topk_buffer_v_npu,
+                                         topk_buffer_v)
+
+        self.current_layer_load += 1
+        if self.current_layer_load == self.num_layers:
+            self.current_layer_load = 0
+
+        print(
+            "[SFA][cache_miss_load][worker] "
+            f"layer={layer_name} capturing={capturing} prepared=True "
+            "action=copy_h2d_and_merge",
             flush=True,
         )
         return True

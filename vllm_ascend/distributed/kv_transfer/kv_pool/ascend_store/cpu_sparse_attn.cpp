@@ -591,6 +591,23 @@ HOT_FUNCTION void cache_miss_topk_hash(
     }
 }
 
+HOT_FUNCTION void filter_cpu_token_indices(
+    uintptr_t topk_indices_new_ptr,
+    uintptr_t cpu_mask_ptr,
+    uintptr_t cpu_token_indices_ptr,
+    int64_t num_reqs,
+    int64_t topk
+) {
+    auto* RESTRICT topk_indices_new = reinterpret_cast<int32_t*>(topk_indices_new_ptr);
+    auto* RESTRICT cpu_mask = reinterpret_cast<bool*>(cpu_mask_ptr);
+    auto* RESTRICT cpu_token_indices = reinterpret_cast<int32_t*>(cpu_token_indices_ptr);
+
+    const int64_t total = num_reqs * topk;
+    for (int64_t i = 0; i < total; ++i) {
+        cpu_token_indices[i] = cpu_mask[i] ? topk_indices_new[i] : -1;
+    }
+}
+
 // std::tuple<at::Tensor, at::Tensor>
 void
 get_kv_topk_kernel(
@@ -775,5 +792,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     namespace py = pybind11;
     m.def("cache_miss_topk", &cache_miss_topk, "CPU cache-miss topk with OpenMP row-level parallelism");
     m.def("cache_miss_topk_hash", &cache_miss_topk_hash, "CPU cache-miss topk hash-table experiment");
+    m.def("filter_cpu_token_indices", &filter_cpu_token_indices, "Filter cache-miss topk indices by the original CPU mask");
     m.def("get_kv_topk", &get_kv_topk, "High performance topk combine");
 }
