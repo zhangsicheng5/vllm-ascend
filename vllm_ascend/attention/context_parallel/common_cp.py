@@ -27,13 +27,18 @@ class AscendPCPMetadata:
     q_full_idx: torch.Tensor = None
     pcp_use_hybrid_attn: bool = False
     pcp_unpad_mask: torch.Tensor = None
-    pcp_allgather_restore_idx: list[int] | None = None
+    pcp_allgather_restore_idx: torch.Tensor = None
+    prefill_allgather_restore_idx: torch.Tensor = None
     pcp_fa_query_idx: torch.Tensor = None
     pcp_padded_tokens_fla: int = 0
     pcp_enter_fa_restore_idx: torch.Tensor = None
     block_table_cp: torch.Tensor = None
     valid_block_ids: torch.Tensor = None
     prefill_q_cum_seqlens: torch.Tensor = None
+    max_num_tokens_across_pcp: int = 0
+    total_num_scheduled_tokens: int = 0
+    block_arange: torch.Tensor = None
+    decode_actual_seq_lengths_key: torch.Tensor = None
 
 
 @dataclass

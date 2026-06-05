@@ -22,10 +22,8 @@
 #ifndef MOE_DISTRIBUTE_BASE_H
 #define MOE_DISTRIBUTE_BASE_H
 
-#include "kernel_operator.h"
-
 constexpr uint32_t LOCAL_NOTIFY_MAX_NUM = 64;
-constexpr uint32_t LOCAL_STREAM_MAX_NUM = 19U;
+constexpr uint32_t LOCAL_STREAM_MAX_NUM = 19;
 constexpr uint32_t AICPU_OP_NOTIFY_MAX_NUM = 2;
 constexpr uint32_t AICPU_MAX_RANK_NUM = static_cast<uint32_t>(128 * 1024);
 
@@ -249,9 +247,6 @@ struct HcclAiRMAInfo {
     uint64_t memPtr{0};
     // 可往后追加字段
 };
-struct CombinedCapability {
-    uint64_t dataplaneModeBitmap;
-};
 
 struct HcclA2CombineOpParam {
     uint64_t workSpace;                         // Address for communication between client and server,
@@ -273,14 +268,6 @@ struct HcclA2CombineOpParam {
     // 追加字段
     uint64_t sizeOfAiRMAInfo; // sizeof(HcclAiRMAInfo)
     uint64_t aiRMAInfo; // HcclAiRMAInfo* 单个结构体指针
-
-    CombinedCapability* capability;             // address of the communication capability information structure on the Device
-    uint64_t capabilitySize;                    // size of the communication capability information structure
-};
-enum class DataplaneMode : uint32_t {
-    HOST = 0,
-    AICPU = 1,
-    AIV = 2,
 };
 
 enum class DBMode : int32_t {
@@ -341,18 +328,5 @@ __aicore__ inline void cacheWriteThrough(__gm__ uint8_t* sourceAddr, uint64_t le
             AscendC::DcciDst::CACHELINE_OUT>(global[i]);
     }
 }
-__aicore__ inline DataplaneMode GetDataplaneMode(GM_ADDR contextGM0) {
-    __gm__ HcclA2CombineOpParam *winContext_ = (__gm__ HcclA2CombineOpParam *)contextGM0;
-    CombinedCapability* capability = winContext_->capability;
-    uint64_t capabilitySize = winContext_->capabilitySize;
-    DataplaneMode dataplaneMode = DataplaneMode::AICPU;
-    if (capability == 0) {
-        return dataplaneMode;
-    }
-    uint64_t dataplaneModeBitmap = capability->dataplaneModeBitmap;
-    if ((dataplaneModeBitmap & 0x04) == 0x04) {
-        dataplaneMode = DataplaneMode::AIV;
-    }
-    return dataplaneMode;
-}
+
 #endif // MOE_DISTRIBUTE_BASE_H
