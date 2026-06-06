@@ -1315,6 +1315,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                 layout_query="TND",
                 layout_kv="PA_BSND",
                 sparse_mode=3,
+                return_softmax_lse=True,
             ) # torch.Size([1, 64, 512])
             softmax_lse_npu = _compute_sparse_softmax_lse(
                 softmax_max_npu,

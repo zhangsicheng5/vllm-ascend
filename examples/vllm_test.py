@@ -19,7 +19,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_SP"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_FLASHCOMM1"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_MLAPO"] = "0"
-os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "14,15"
+os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "0,1"
 # os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "12,13,14,15"
 from vllm import LLM, SamplingParams, AsyncLLMEngine
 from vllm.config import CompilationConfig
