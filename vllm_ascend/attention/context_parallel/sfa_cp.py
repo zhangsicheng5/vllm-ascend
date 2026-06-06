@@ -1039,4 +1039,3 @@ class AscendSFACPImpl(AscendSFAImpl):
             k = get_pcp_group().all_gather(k.contiguous(), 0)
             k = torch.index_select(k, 0, attn_metadata.sfa_cp_metadata.pcp_allgather_restore_idx)
             return k
->>>>>>> 1a154cd1 (update)

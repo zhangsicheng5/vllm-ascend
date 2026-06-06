@@ -68,6 +68,20 @@ if TYPE_CHECKING:
 BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
 
 
+def _compute_sparse_softmax_lse(
+    softmax_max: torch.Tensor,
+    softmax_sum: torch.Tensor,
+    no_valid_kv_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    softmax_lse = torch.log(softmax_sum.to(torch.float32)) + softmax_max.to(
+        torch.float32)
+    if no_valid_kv_mask is None:
+        return softmax_lse
+    return torch.where(no_valid_kv_mask,
+                       torch.full_like(softmax_lse, float("-inf")),
+                       softmax_lse)
+
+
 class AscendSFABackend(AttentionBackend):
     accept_output_buffer: bool = True
 
@@ -1010,7 +1024,11 @@ class AscendSFAImpl(MLAAttentionImpl):
                     # block_table_decode,
                     # actual_seq_lengths_key_decode,
                 )
-                attn_output_decode_cpu = torch.ops._C_ascend.npu_sparse_flash_attention(
+                (
+                    attn_output_decode_cpu,
+                    softmax_max_decode_cpu,
+                    softmax_sum_decode_cpu,
+                ) = torch.ops._C_ascend.npu_sparse_flash_attention(
                     query=ql_nope_decode,
                     key=topk_buffer[0],
                     value=topk_buffer[0],
@@ -1026,11 +1044,11 @@ class AscendSFAImpl(MLAAttentionImpl):
                     layout_kv="PA_BSND",
                     sparse_mode=3,
                 )
-                softmax_lse_decode_cpu = torch.empty([num_decode_tokens, 64], dtype=torch.bfloat16, device='npu')
-                # For tokens which have no kv to compute here, set it's lse to -inf,
-                # if the sfa op has already done this, we can remove the two lines below.
-                no_valid_kv_mask = torch.all(cpu_mask, dim=-1).unsqueeze(-1)
-                softmax_lse_decode_cpu = torch.where(no_valid_kv_mask, float('-inf'), softmax_lse_decode_cpu)
+                softmax_lse_decode_cpu = _compute_sparse_softmax_lse(
+                    softmax_max_decode_cpu,
+                    softmax_sum_decode_cpu,
+                    ~torch.any(cpu_mask, dim=-1, keepdim=True),
+                )
                 # TODO remove the else branch after sfa lse op is ready and accuracy ensured.
                 if attn_output_decode_npu is not None:
                     attn_output_decode, _ = torch_npu.npu_attention_update(
@@ -1047,7 +1065,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                 if actual_seq_lengths_query_decode is not None and actual_seq_lengths_query_decode.numel() != 0:
                     actual_seq_lengths_query_prefill = actual_seq_lengths_query_prefill - actual_seq_lengths_query_decode[-1]
 
-                attn_output_prefill = torch.ops._C_ascend.npu_sparse_flash_attention(
+                attn_output_prefill,_,_ = torch.ops._C_ascend.npu_sparse_flash_attention(
                     query=ql_nope_prefill,                                      # [N, 64, 512]
                     key=kv,                                                     # [block_num, block_size, 1, 512]
                     value=kv,
@@ -1073,7 +1091,7 @@ class AscendSFAImpl(MLAAttentionImpl):
 
             return attn_output
 
-        attn_output = torch.ops._C_ascend.npu_sparse_flash_attention(
+        attn_output,_,_ = torch.ops._C_ascend.npu_sparse_flash_attention(
             query=ql_nope,
             key=kv,
             value=kv,
@@ -1236,34 +1254,34 @@ class AscendSFAImpl(MLAAttentionImpl):
         # if topk_indices_result is not None:
         #     topk_indices = topk_indices_result
         # cache miss prepare: D2H -> C++ cache-miss update -> H2D writeback
-        prepared_cache_miss_topk = False
-        if CPU_CACHE_MISS_TOPK_AVAILABLE:
-            prepared_cache_miss_topk = maybe_prepare_cache_miss_topk_graph(
-                layer_name,
-                num_reqs,
-                topk_indices,
-                self.last_step_topk_indices[:num_reqs],
-                attn_metadata.req_ids_tensor[:num_reqs],
-                self.last_step_req_ids[:num_reqs],
-                forward_context.capturing,
-            )
-        print(
-            "[SFA][cache_miss_prepare] "
-            f"layer={layer_name} capturing={forward_context.capturing} "
-            f"available={CPU_CACHE_MISS_TOPK_AVAILABLE} "
-            f"prepared={prepared_cache_miss_topk}",
-            flush=True,
-        )
-        if not prepared_cache_miss_topk:
-            if forward_context.capturing:
-                raise RuntimeError(
-                    "CPU cache-miss topk prepare failed during graph capture")
-            topk_indices = self.get_cache_miss_topk_indices(
-                attn_metadata.req_ids_tensor[:num_reqs],
-                self.last_step_req_ids[:num_reqs],
-                self.last_step_topk_indices[:num_reqs],
-                topk_indices,
-            )
+        # prepared_cache_miss_topk = False
+        # if CPU_CACHE_MISS_TOPK_AVAILABLE:
+        #     prepared_cache_miss_topk = maybe_prepare_cache_miss_topk_graph(
+        #         layer_name,
+        #         num_reqs,
+        #         topk_indices,
+        #         self.last_step_topk_indices[:num_reqs],
+        #         attn_metadata.req_ids_tensor[:num_reqs],
+        #         self.last_step_req_ids[:num_reqs],
+        #         forward_context.capturing,
+        #     )
+        # print(
+        #     "[SFA][cache_miss_prepare] "
+        #     f"layer={layer_name} capturing={forward_context.capturing} "
+        #     f"available={CPU_CACHE_MISS_TOPK_AVAILABLE} "
+        #     f"prepared={prepared_cache_miss_topk}",
+        #     flush=True,
+        # )
+        # if not prepared_cache_miss_topk:
+        #     if forward_context.capturing:
+        #         raise RuntimeError(
+        #             "CPU cache-miss topk prepare failed during graph capture")
+        #     topk_indices = self.get_cache_miss_topk_indices(
+        #         attn_metadata.req_ids_tensor[:num_reqs],
+        #         self.last_step_req_ids[:num_reqs],
+        #         self.last_step_topk_indices[:num_reqs],
+        #         topk_indices,
+        #     )
 
         # common
         valid_mask = topk_indices >= 0
@@ -1278,12 +1296,12 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         # load npu (or compute npu attn directly)
         # TODO remove the else branch after sfa lse op is ready and accuracy ensured.
-        compute_npu_kv_directly = False
+        compute_npu_kv_directly = True
         if compute_npu_kv_directly:
             # new, compute gpu kv directly based on kv_cache
             npu_token_indices = torch.where(npu_mask, topk_indices, -1)
             seq_len_q = attn_metadata.cum_query_lens[:num_reqs]
-            attn_out_npu = torch.ops._C_ascend.npu_sparse_flash_attention(
+            attn_out_npu, softmax_max_npu, softmax_sum_npu = torch.ops._C_ascend.npu_sparse_flash_attention(
                 query=ql_nope_decode,
                 key=kv_cache[0],
                 value=kv_cache[0],
@@ -1299,12 +1317,11 @@ class AscendSFAImpl(MLAAttentionImpl):
                 layout_kv="PA_BSND",
                 sparse_mode=3,
             ) # torch.Size([1, 64, 512])
-            softmax_lse_npu = torch.empty([num_reqs, 64], dtype=torch.bfloat16, device='npu')
-            # softmax_lse = torch.log(softmax_sum) + softmax_max
-            # For tokens which have no kv to compute here, set it's lse to -inf,
-            # if the sfa op has already done this, we can remove the two lines below.
-            no_valid_kv_mask = torch.all(npu_mask, dim=-1).unsqueeze(-1)
-            softmax_lse_npu = torch.where(no_valid_kv_mask, float('-inf'), softmax_lse_npu)
+            softmax_lse_npu = _compute_sparse_softmax_lse(
+                softmax_max_npu,
+                softmax_sum_npu,
+                ~torch.any(npu_mask, dim=-1, keepdim=True),
+            )
         else:
             block_indices = torch.clamp(topk_indices // self.block_size, min=0)
             block_ids = torch.gather(block_table, 1, block_indices)
@@ -1331,8 +1348,12 @@ class AscendSFAImpl(MLAAttentionImpl):
         sparse_block_table = self.sparse_block_table[:num_reqs]
         sparse_seq_len_kv = torch.clamp(seq_len_kv, max=2048)
         sparse_topk_indices = self.sparse_topk_indices[:num_reqs]
-        sparse_topk_indices = torch.where(sparse_topk_indices < sparse_seq_len_kv.unsqueeze(1), sparse_topk_indices, -1)
-        sparse_topk_indices = sparse_topk_indices.unsqueeze(1)
+        valid_sparse_slots = sparse_topk_indices < sparse_seq_len_kv.unsqueeze(1)
+        sparse_topk_indices = torch.where(
+            cpu_mask & valid_sparse_slots,
+            sparse_topk_indices,
+            -1,
+        ).unsqueeze(1)
 
         return (
             (topk_buffer_k, topk_buffer_v),

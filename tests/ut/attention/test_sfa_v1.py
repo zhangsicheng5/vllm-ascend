@@ -11,10 +11,140 @@ from vllm.distributed.parallel_state import GroupCoordinator
 if 'torch_npu._inductor' not in sys.modules:
     sys.modules['torch_npu._inductor'] = MagicMock()
 
-from vllm_ascend.attention.sfa_v1 import (AscendSFABackend, AscendSFAImpl,
-                                          AscendSFAMetadata,
-                                          AscendSFAMetadataBuilder)
+from vllm_ascend.attention.sfa_v1 import (
+    AscendSFABackend,
+    AscendSFAImpl,
+    AscendSFAMetadata,
+    AscendSFAMetadataBuilder,
+    _compute_sparse_softmax_lse,
+)
 from vllm_ascend.utils import enable_dsa_cp
+
+
+class TestSFAOffloadHelpers(TestBase):
+
+    def test_compute_sparse_softmax_lse_uses_log_sum_plus_max(self):
+        softmax_max = torch.tensor([[1.0, -2.0], [0.5, 3.0]],
+                                   dtype=torch.float16)
+        softmax_sum = torch.tensor([[2.0, 4.0], [1.0, 0.5]],
+                                   dtype=torch.float16)
+
+        actual = _compute_sparse_softmax_lse(softmax_max, softmax_sum)
+
+        expected = torch.log(
+            softmax_sum.to(torch.float32)) + softmax_max.to(torch.float32)
+        assert actual.dtype == torch.float32
+        torch.testing.assert_close(actual, expected)
+
+    def test_compute_sparse_softmax_lse_masks_rows_without_valid_kv(self):
+        softmax_max = torch.tensor([[13.0, -7.0], [0.5, 3.0]],
+                                   dtype=torch.float16)
+        softmax_sum = torch.tensor([[-2.0, 4.0], [1.0, 0.5]],
+                                   dtype=torch.float16)
+        no_valid_kv_mask = torch.tensor([[True], [False]])
+
+        actual = _compute_sparse_softmax_lse(
+            softmax_max,
+            softmax_sum,
+            no_valid_kv_mask,
+        )
+
+        expected_valid_row = torch.log(
+            softmax_sum[1:].to(torch.float32)) + softmax_max[1:].to(
+                torch.float32)
+        assert torch.isneginf(actual[0]).all()
+        torch.testing.assert_close(actual[1:], expected_valid_row)
+
+    def test_npu_sparse_flash_attention_all_negative_indices_returns_safe_lse(
+            self):
+        torch_npu_module = getattr(torch, "npu", None)
+        is_npu_available = getattr(torch_npu_module, "is_available",
+                                   lambda: False)
+        if not is_npu_available():
+            self.skipTest("NPU is not available")
+        ascend_ops = getattr(torch.ops, "_C_ascend", None)
+        if ascend_ops is None or not hasattr(ascend_ops,
+                                             "npu_sparse_flash_attention"):
+            self.skipTest("npu_sparse_flash_attention is not available")
+
+        cases = (
+            ("npu_direct_kv_cache", 100, 10, 1280),
+            ("cpu_topk_buffer", 16, 16, 2048),
+        )
+        for name, num_blocks, block_table_width, seq_len_kv in cases:
+            with self.subTest(name=name):
+                sparse_indices = torch.full([1, 1, 2048],
+                                            -1,
+                                            dtype=torch.int32,
+                                            device="npu")
+                query = torch.randn([1, 64, 512],
+                                    dtype=torch.bfloat16,
+                                    device="npu")
+                key = torch.randn([num_blocks, 128, 1, 512],
+                                  dtype=torch.bfloat16,
+                                  device="npu")
+                key_rope = torch.randn([num_blocks, 128, 1, 64],
+                                       dtype=torch.bfloat16,
+                                       device="npu")
+                block_table = torch.zeros([1, block_table_width],
+                                          dtype=torch.int32,
+                                          device="npu")
+                seq_lens_q = torch.tensor([1], dtype=torch.int32, device="npu")
+                seq_lens_kv = torch.tensor([seq_len_kv],
+                                           dtype=torch.int32,
+                                           device="npu")
+
+                attn_out, softmax_max, softmax_sum = (
+                    torch.ops._C_ascend.npu_sparse_flash_attention(
+                        query=query,
+                        key=key,
+                        value=key,
+                        sparse_indices=sparse_indices,
+                        block_table=block_table,
+                        actual_seq_lengths_query=seq_lens_q,
+                        actual_seq_lengths_kv=seq_lens_kv,
+                        query_rope=query[..., :64],
+                        key_rope=key_rope,
+                        scale_value=0.0625,
+                        sparse_block_size=1,
+                        layout_query="TND",
+                        layout_kv="PA_BSND",
+                        sparse_mode=3,
+                    ))
+                raw_lse = (torch.log(softmax_sum.to(torch.float32)) +
+                           softmax_max.to(torch.float32))
+                protected_lse = _compute_sparse_softmax_lse(
+                    softmax_max,
+                    softmax_sum,
+                    torch.ones([1, 1], dtype=torch.bool, device="npu"),
+                )
+                stats = (
+                    f"name={name} softmax_max={softmax_max.detach().cpu()} "
+                    f"softmax_sum={softmax_sum.detach().cpu()} "
+                    f"raw_lse={raw_lse.detach().cpu()}")
+
+                assert not torch.isnan(attn_out).any(), stats
+                assert not torch.isnan(softmax_max).any(), stats
+                assert not torch.isnan(softmax_sum).any(), stats
+                assert torch.isneginf(raw_lse).all(), stats
+                assert torch.isneginf(protected_lse).all(), stats
+
+    def test_sfa_v1_no_empty_lse_stubs_remain(self):
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        source = (repo_root / "vllm_ascend" / "attention" /
+                  "sfa_v1.py").read_text()
+
+        assert "softmax_lse_decode_cpu = torch.empty" not in source
+        assert "softmax_lse_npu = torch.empty" not in source
+        assert "no_valid_kv_mask = torch.all" not in source
+        assert (
+            "torch.where(cpu_mask, cpu_token_indices, -1).unsqueeze(1)"
+            not in source)
+        assert "cpu_mask & valid_sparse_slots" in source
+        assert "~torch.any(npu_mask, dim=-1, keepdim=True)" in source
+        assert "~torch.any(cpu_mask, dim=-1, keepdim=True)" in source
 
 
 class TestAscendSFABackend(TestBase):
