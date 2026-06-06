@@ -19,7 +19,7 @@ os.environ["OMP_NUM_THREADS"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_SP"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_FLASHCOMM1"] = "1"
 # os.environ["VLLM_ASCEND_ENABLE_MLAPO"] = "0"
-os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "4,5"
+os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "14,15"
 # os.environ["ASCEND_RT_VISIBLE_DEVICES"] = "12,13,14,15"
 from vllm import LLM, SamplingParams, AsyncLLMEngine
 from vllm.config import CompilationConfig
@@ -33,7 +33,7 @@ from vllm.config import CompilationConfig
 # model_path="/home/z00911889/data/model_from_hf/DeepSeek-V3.2-Exp-W8A8"
 # model_path="/mnt/share/weights/DeepSeek-V2-Lite/"
 # model_path="/mnt/data2/DeepSeek-V2-Lite-Chat"
-model_path="/home/s886374/weights/ds-V3.2-Exp-W8A8"
+model_path="/home/s886374/weight/"
 
 
 def generate_prompts_auto(input_len, batchsize):
