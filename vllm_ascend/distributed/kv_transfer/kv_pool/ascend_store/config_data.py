@@ -5,6 +5,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import numpy as np
 import torch
 from vllm.distributed.kv_transfer.kv_connector.v1.base import KVConnectorMetadata, KVConnectorWorkerMetadata
 from vllm.logger import logger
@@ -435,6 +436,8 @@ class ChunkedTokenDatabase:
 
 
 def normalize_block_ids_by_group(block_ids: tuple[list[int], ...] | list[int] | list[list[int]]) -> list[list[int]]:
+    if block_ids is None:
+        return [[]]
     if isinstance(block_ids, tuple):
         return [group.copy() for group in block_ids]
     if isinstance(block_ids, list):
@@ -511,6 +514,9 @@ class RequestTracker:
     # NOTE: This field will only be used when you enable kv-event
     token_ids: list[int] | None = None
 
+    # dsa offload
+    allocated_block_ids_cpu: list[int] | None = None
+
     def __init__(
         self,
         req_id: str,
@@ -519,6 +525,7 @@ class RequestTracker:
         allocated_block_ids: list[int] | list[list[int]] | None = None,
         num_saved_tokens: int = 0,
         token_ids: list[int] | None = None,
+        allocated_block_ids_cpu: list[int] | None = None,
     ) -> None:
         self.req_id = req_id
         self.token_len = token_len
@@ -528,6 +535,7 @@ class RequestTracker:
         self.allocated_block_ids_by_group = block_ids
         self.num_saved_tokens = num_saved_tokens
         self.token_ids = token_ids
+        self.allocated_block_ids_cpu = allocated_block_ids_cpu
 
     @property
     def allocated_block_ids(self) -> list[int]:
@@ -554,6 +562,7 @@ class RequestTracker:
     def update(
         self,
         new_block_ids: tuple[list[int], ...] | list[int],
+        new_block_ids_cpu: list[int]
     ) -> None:
         """Update the request tracker when a running request is scheduled again."""
         normalized = normalize_block_ids_by_group(new_block_ids)
@@ -563,6 +572,7 @@ class RequestTracker:
             )
         for group_id, ids in enumerate(normalized):
             self.allocated_block_ids_by_group[group_id].extend(ids)
+        self.allocated_block_ids_cpu.extend(new_block_ids_cpu)
 
 
 @dataclass(init=False)
@@ -595,6 +605,11 @@ class ReqMeta:
 
     event_id: int | None = None
 
+    # dsa offload
+    block_ids_cpu: list[int] | None = None
+    need_save: bool = True
+    num_new_offload_blocks: int = 0
+
     def __init__(
         self,
         req_id: str,
@@ -613,6 +628,9 @@ class ReqMeta:
         original_block_size: list[int] | int | None = None,
         block_ids: list[int] | list[list[int]] | None = None,
         event_id: int | None = None,
+        block_ids_cpu: list[int] | None = None,
+        need_save: bool = True,
+        num_new_offload_blocks: int = 0,
     ) -> None:
         self.req_id = req_id
         self.token_len_chunk = token_len_chunk
@@ -631,6 +649,9 @@ class ReqMeta:
         self.token_ids = token_ids
         self.original_block_size = original_block_size
         self.event_id = event_id
+        self.block_ids_cpu = block_ids_cpu
+        self.need_save = need_save
+        self.num_new_offload_blocks = num_new_offload_blocks
 
     @property
     def block_ids(self) -> list[int]:
@@ -651,6 +672,8 @@ class ReqMeta:
         discard_partial_chunks: bool = True,
         original_block_size: list[int] | int | None = None,
         kv_cache_group_families: list[str] | None = None,
+        need_save: bool = True,
+        num_new_offload_blocks: int = 0,
     ) -> ReqMeta | None:
         """Create the request metadata from a request tracker."""
         if block_hashes is None:
@@ -703,12 +726,15 @@ class ReqMeta:
             original_block_size=original_block_size,
             kv_cache_group_ids=list(range(len(tracker.allocated_block_ids_by_group))),
             kv_cache_families_by_group=kv_cache_group_families,
+            need_save=need_save,
+            num_new_offload_blocks=num_new_offload_blocks,
+            block_ids_cpu=tracker.allocated_block_ids_cpu,
         )
 
 
 class AscendConnectorMetadata(KVConnectorMetadata):
     def __init__(self, unfinished_request_ids, preempted_req_ids):
-        self.requests = []
+        self.requests: list[ReqMeta] = []
         self.unfinished_request_ids = unfinished_request_ids
         self.preempted_req_ids = preempted_req_ids
 
@@ -731,6 +757,11 @@ class LayerMultiBlockReqMeta:
     token_ids: list[int] | None = None
     original_block_size: list[int] | int | None = None
     kv_cache_group_id: int = 0
+    # dsa offload related
+    block_ids_npu: list[int] | None = None # old block_ids is not used now
+    block_ids_cpu: list[int] | None = None
+    cache_npu: tuple[torch.Tensor, torch.Tensor] | None = None
+    cache_cpu: tuple[torch.Tensor, torch.Tensor] | None = None
 
     def __init__(
         self,
@@ -747,6 +778,10 @@ class LayerMultiBlockReqMeta:
         original_block_size: list[int] | int | None = None,
         block_hashes: list[Any] | None = None,
         kv_cache_group_id: int = 0,
+        block_ids_npu: list[int] | None = None,
+        block_ids_cpu: list[int] | None = None,
+        cache_npu: tuple[torch.Tensor, torch.Tensor] | None = None,
+        cache_cpu: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> None:
         self.req_id = req_id
         self.keys = keys
@@ -762,6 +797,10 @@ class LayerMultiBlockReqMeta:
         self.original_block_size = original_block_size
         self.block_hashes = [] if block_hashes is None else block_hashes
         self.kv_cache_group_id = kv_cache_group_id
+        self.block_ids_npu = block_ids_npu
+        self.block_ids_cpu = block_ids_cpu
+        self.cache_npu = cache_npu
+        self.cache_cpu = cache_cpu
 
     @property
     def block_ids(self) -> list[int]:

@@ -1,4 +1,6 @@
 import math
+from abc import ABC
+from collections import deque
 from typing import Any, cast
 
 import vllm.envs as envs
@@ -23,6 +25,7 @@ from vllm.v1.outputs import KVConnectorOutput
 from vllm.v1.request import Request
 from vllm.v1.serial_utils import MsgpackEncoder
 
+from vllm_ascend.ascend_config import get_ascend_config, init_ascend_config
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import (
     AscendConnectorMetadata,
     AscendStoreKVConnectorWorkerMetadata,
@@ -33,6 +36,24 @@ from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import
     infer_group_cache_families,
     normalize_block_ids_by_group,
 )
+
+
+class CPUBlockManager(ABC):
+    def __init__(self, block_num: int) -> None:
+        self.block_num = block_num
+        self.block_pool = deque(range(1, block_num))
+
+    def allocate_block(self, new_block_num: int) -> list[int]:
+        # logger.info(f'>>>>> pool scheduler allocate cpu block, require: {new_block_num}, resource: {len(self.block_pool)}')
+        if len(self.block_pool) < new_block_num:
+            raise ValueError("No enough cpu block to allocate")
+        allocated_blocks = []
+        for _ in range(new_block_num):
+            allocated_blocks.append(self.block_pool.popleft())
+        return allocated_blocks
+    
+    def free(self, to_free_blocks: list[int]):
+        self.block_pool.extend(to_free_blocks)
 
 
 class KVPoolScheduler:
@@ -52,6 +73,9 @@ class KVPoolScheduler:
             self.compress_ratios = getattr(hf_config, "compress_ratios", None)
         self.use_compress = self.compress_ratios is not None
         self.use_hybrid = self._uses_hybrid_kv_cache(vllm_config, kv_cache_config)
+        init_ascend_config(vllm_config)
+        ascend_config = get_ascend_config()
+        self.use_offload = ascend_config.use_offload
         self.kv_cache_group_ids = (
             list(range(len(kv_cache_config.kv_cache_groups)))
             if kv_cache_config is not None and self.use_hybrid
@@ -69,7 +93,7 @@ class KVPoolScheduler:
                     raise NotImplementedError(
                         "AscendStore hybrid linear-attention support currently requires mamba_cache_mode='align'."
                     )
-        if self.use_layerwise and len(self.kv_cache_group_ids) > 1:
+        if self.use_layerwise and len(self.kv_cache_group_ids) > 1 and not self.use_offload:
             raise NotImplementedError("AscendStore layerwise mode does not yet support hybrid KV cache groups.")
         self.kv_role = vllm_config.kv_transfer_config.kv_role
         self.consumer_is_to_load = vllm_config.kv_transfer_config.kv_connector_extra_config.get(
@@ -97,7 +121,7 @@ class KVPoolScheduler:
         ) * cp_scale
         for group_block_size in self.grouped_block_size:
             assert group_block_size % self.hash_block_size == 0, "block_size must be divisible by hash_block_size"
-        self._block_size = self.grouped_block_size[0]
+        self._block_size = self.grouped_block_size[0] if not self.use_offload else self.grouped_block_size[-1]
         self.lcm_block_size = math.lcm(*self.grouped_block_size)
         self.cache_transfer_granularity = self._infer_cache_transfer_granularity()
         # request_id -> full_token_ids
@@ -105,7 +129,7 @@ class KVPoolScheduler:
         self._preempted_req_ids: set[str] = set()
         # Whether to discard partial chunks
         self._discard_partial_chunks = vllm_config.kv_transfer_config.get_from_extra_config(
-            "discard_partial_chunks", True
+            "discard_partial_chunks", not self.use_offload
         )
         self._unfinished_requests: dict[str, tuple[Request, list[list[int]]]] = {}
         self._unfinished_request_ids: set[str] = set()
@@ -116,6 +140,10 @@ class KVPoolScheduler:
         # {event_id, completed_woke_count}
         self.sending_events: dict[int, int] = {}
         self._expected_worker_count = vllm_config.parallel_config.world_size
+
+        # dsa offload related
+        cpu_block_num = 2048 # TODO get this from kv cache config
+        self.cpu_block_manager = CPUBlockManager(cpu_block_num)
 
     def _infer_group_families(self) -> list[str]:
         kv_cache_groups = self.kv_cache_config.kv_cache_groups if self.kv_cache_config is not None else None
@@ -355,7 +383,7 @@ class KVPoolScheduler:
         Also, calling this function will reset the state of the connector.
         """
 
-        force_skip_save = self.kv_role == "kv_consumer" and not self.consumer_is_to_put
+        force_skip_save = self.kv_role == "kv_consumer" and not self.consumer_is_to_put if not self.use_offload else False
 
         for finished_req_id in scheduler_output.finished_req_ids:
             self._request_trackers.pop(finished_req_id, None)
@@ -388,10 +416,15 @@ class KVPoolScheduler:
             num_tokens_to_compute = request.num_computed_tokens + scheduler_output.num_scheduled_tokens[request.req_id]
             request_tuple = self._unfinished_requests.get(request.req_id)
             request_real = request_tuple[0]  # type: ignore[index]
+            if not isinstance(request.block_ids[0], list):
+                unfolded_block_ids = [request.block_ids.copy()]
+            else:
+                unfolded_block_ids = [request.block_ids[-1].copy()] # NOTE dskv32 sparse offload, 0 for indexer and 1 for ori kv_cache
             request_tracker = RequestTracker(
                 req_id=request.req_id,
                 token_len=num_tokens_to_compute,
-                allocated_block_ids_by_group=normalize_block_ids_by_group(request.block_ids),
+                # allocated_block_ids_by_group=normalize_block_ids_by_group(request.block_ids),
+                allocated_block_ids_by_group=unfolded_block_ids,
                 num_saved_tokens=0,
                 token_ids=request.prompt_token_ids[:num_tokens_to_compute].copy(),
             )
@@ -401,6 +434,9 @@ class KVPoolScheduler:
                 if self._discard_partial_chunks
                 else len(request.prompt_token_ids)
             )
+            num_new_offload_blocks = num_tokens_to_compute // self._block_size
+            block_ids_cpu = self.cpu_block_manager.allocate_block(num_new_offload_blocks)
+            request_tracker.allocated_block_ids_cpu = block_ids_cpu
 
             req_meta = ReqMeta.from_request_tracker(
                 request_tracker,
@@ -412,6 +448,8 @@ class KVPoolScheduler:
                 discard_partial_chunks=self._discard_partial_chunks,
                 original_block_size=self.original_block_size,
                 kv_cache_group_families=self.kv_cache_group_families,
+                need_save=num_new_offload_blocks > 0,
+                num_new_offload_blocks=num_new_offload_blocks,
             )
             if req_meta is not None:
                 self.touch_sending_mamba_blocks(req_meta)
@@ -422,9 +460,13 @@ class KVPoolScheduler:
             for i, req_id in enumerate(cached_reqs.req_ids):
                 # resumed request
                 new_block_ids = cached_reqs.new_block_ids[i]
-                if not new_block_ids:
-                    continue
+                if isinstance(new_block_ids, tuple):
+                    # NOTE dskv32 sparse offload, 0 for indexer and 1 for ori kv_cache
+                    new_block_ids = new_block_ids[-1]
+                # if not new_block_ids:
+                #     continue
                 if req_id in self._preempted_req_ids:
+                    raise ValueError('preempted reqs not implemented')
                     self._preempted_req_ids.discard(req_id)
                     load_spec = self.load_specs.pop(req_id, None)
                     request_tuple = self._unfinished_requests.get(req_id)
@@ -472,9 +514,16 @@ class KVPoolScheduler:
                             f"Request {req_id} is not in _unfinished_requests, but it is scheduled to be cached"
                         )
                     num_computed_token = cached_reqs.num_computed_tokens[i]
-                    if num_computed_token >= len(request.prompt_token_ids):
+                    if 0 and num_computed_token >= len(request.prompt_token_ids):
                         continue
-                    request_tracker.update(new_block_ids)
+                    # in offload case, can't continue even there's no new blocks,
+                    # since we need metadata for onload
+                    num_tokens_after_step = num_computed_token + num_new_tokens
+                    num_blocks_after_step = num_tokens_after_step // self._block_size # pcp/dcp not considered now
+                    num_offloaded_blocks = len(request_tracker.allocated_block_ids_cpu)
+                    num_new_offload_blocks = num_blocks_after_step - num_offloaded_blocks
+                    new_block_ids_cpu = self.cpu_block_manager.allocate_block(num_new_offload_blocks)
+                    request_tracker.update(new_block_ids, new_block_ids_cpu)
 
                     last_chunk_tokens_num = (
                         self._floor_to_cache_transfer_granularity(len(request.prompt_token_ids))
@@ -491,6 +540,8 @@ class KVPoolScheduler:
                         discard_partial_chunks=self._discard_partial_chunks,
                         original_block_size=self.original_block_size,
                         kv_cache_group_families=self.kv_cache_group_families,
+                        need_save=num_new_offload_blocks > 0,
+                        num_new_offload_blocks=num_new_offload_blocks,
                     )
                 if req_meta is not None:
                     self.touch_sending_mamba_blocks(req_meta)
@@ -594,6 +645,7 @@ class KVPoolScheduler:
         if self.kv_role == "kv_consumer" and not self.consumer_is_to_put:
             return False, None
         tracker = self._request_trackers.get(request.request_id)
+        self.cpu_block_manager.free(tracker.allocated_block_ids_cpu)
         if tracker is not None and tracker.num_saved_tokens <= 0:
             return False, None
         delay_free_blocks = len(block_ids) > 0
