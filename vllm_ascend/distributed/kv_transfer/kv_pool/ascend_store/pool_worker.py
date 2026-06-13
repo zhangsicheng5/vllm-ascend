@@ -1053,21 +1053,21 @@ class KVPoolWorker:
         # current_compute_stream.wait_stream(self.side_compute_stream)
 
         # load gpu & cpu kv and compute one sfa, need to combine cpu/npu kv here
-        cpu_mask = cpu_mask.unsqueeze(-1).unsqueeze(-1)
-        onload_topk_buffer_k_npu = self.onload_topk_buffer_k_npu[:num_reqs]
-        onload_topk_buffer_v_npu = self.onload_topk_buffer_v_npu[:num_reqs]
-        onload_topk_buffer_k_npu.copy_(onload_topk_buffer_k_cpu, non_blocking=capturing)
-        onload_topk_buffer_v_npu.copy_(onload_topk_buffer_v_cpu, non_blocking=capturing)
-        topk_buffer_k = self.topk_buffers_k[self.current_layer_load][:num_reqs]
-        topk_buffer_v = self.topk_buffers_v[self.current_layer_load][:num_reqs]
-        topk_buffer_k[...] = torch.where(cpu_mask, onload_topk_buffer_k_npu, topk_buffer_k)
-        topk_buffer_v[...] = torch.where(cpu_mask, onload_topk_buffer_v_npu, topk_buffer_v)
-
-        # compute gpu attn direcly, no need to combine cpu/gpu kv, directly copy to topk_buffer
+        # cpu_mask = cpu_mask.unsqueeze(-1).unsqueeze(-1)
+        # onload_topk_buffer_k_npu = self.onload_topk_buffer_k_npu[:num_reqs]
+        # onload_topk_buffer_v_npu = self.onload_topk_buffer_v_npu[:num_reqs]
+        # onload_topk_buffer_k_npu.copy_(onload_topk_buffer_k_cpu, non_blocking=capturing)
+        # onload_topk_buffer_v_npu.copy_(onload_topk_buffer_v_cpu, non_blocking=capturing)
         # topk_buffer_k = self.topk_buffers_k[self.current_layer_load][:num_reqs]
         # topk_buffer_v = self.topk_buffers_v[self.current_layer_load][:num_reqs]
-        # topk_buffer_k.copy_(onload_topk_buffer_k_cpu, non_blocking=capturing)
-        # topk_buffer_v.copy_(onload_topk_buffer_v_cpu, non_blocking=capturing)
+        # topk_buffer_k[...] = torch.where(cpu_mask, onload_topk_buffer_k_npu, topk_buffer_k)
+        # topk_buffer_v[...] = torch.where(cpu_mask, onload_topk_buffer_v_npu, topk_buffer_v)
+
+        # compute gpu attn direcly, no need to combine cpu/gpu kv, directly copy to topk_buffer
+        topk_buffer_k = self.topk_buffers_k[self.current_layer_load][:num_reqs]
+        topk_buffer_v = self.topk_buffers_v[self.current_layer_load][:num_reqs]
+        topk_buffer_k.copy_(onload_topk_buffer_k_cpu, non_blocking=capturing)
+        topk_buffer_v.copy_(onload_topk_buffer_v_cpu, non_blocking=capturing)
 
         self.current_layer_load += 1
         if self.current_layer_load == self.num_layers:

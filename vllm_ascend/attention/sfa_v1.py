@@ -1153,6 +1153,10 @@ class AscendSFAImpl(MLAAttentionImpl):
                     attn_metadata,
                     layer_name,
                 )
+                compute_npu_kv_directly = attn_output_decode_npu is not None
+                if compute_npu_kv_directly:
+                    # TODO sfa kernel do not support discrete sparse_indices input, have to sort this, try to find a better way
+                    sparse_topk_indices, _ = sparse_topk_indices.sort(dim=-1, descending=True)
                 attn_output_decode_cpu, softmax_max, softmax_sum = torch.ops._C_ascend.npu_sparse_flash_attention(
                     query=ql_nope_decode,
                     key=topk_buffer[0],
@@ -1168,20 +1172,28 @@ class AscendSFAImpl(MLAAttentionImpl):
                     layout_query="TND",
                     layout_kv="PA_BSND",
                     sparse_mode=3,
+                    attention_mode=2,
+                    return_softmax_lse=compute_npu_kv_directly,
                 )
-                softmax_lse_decode_cpu = torch.empty([num_decode_tokens, 64], dtype=torch.bfloat16, device='npu')
-                # For tokens which have no kv to compute here, set it's lse to -inf,
-                # if the sfa op has already done this, we can remove the two lines below.
-                no_valid_kv_mask = torch.all(cpu_mask, dim=-1).unsqueeze(-1)
-                softmax_lse_decode_cpu = torch.where(no_valid_kv_mask, float('-inf'), softmax_lse_decode_cpu)
-                # TODO remove the else branch after sfa lse op is ready and accuracy ensured.
-                if attn_output_decode_npu is not None:
+                if compute_npu_kv_directly:
+                    softmax_lse_decode_cpu = (torch.log(softmax_sum) + softmax_max).squeeze(1)
+                    # For tokens which have no kv to compute here, set it's lse to -inf,
+                    # if the sfa op has already done this, we can remove the two lines below.
+                    no_valid_kv_mask = torch.all(cpu_mask, dim=-1).unsqueeze(-1)
+                    softmax_lse_decode_cpu = torch.where(no_valid_kv_mask, float('-inf'), softmax_lse_decode_cpu)
+                    # TODO remove the else branch after sfa lse op is ready and accuracy ensured.
                     attn_output_decode, _ = torch_npu.npu_attention_update(
-                        [softmax_lse_decode_npu.reshape([num_decode_tokens * 64]).to(torch.float32), softmax_lse_decode_cpu.reshape([num_decode_tokens * 64]).to(torch.float32)],
-                        [attn_output_decode_npu.reshape([num_decode_tokens * 64, -1]).to(torch.float32), attn_output_decode_cpu.reshape([num_decode_tokens * 64, -1]).to(torch.float32)],
+                        [
+                            softmax_lse_decode_npu.reshape([num_decode_tokens * self.local_num_heads]),
+                            softmax_lse_decode_cpu.reshape([num_decode_tokens * self.local_num_heads])
+                        ],
+                        [
+                            attn_output_decode_npu.reshape([num_decode_tokens * self.local_num_heads, -1]).to(torch.float32),
+                            attn_output_decode_cpu.reshape([num_decode_tokens * self.local_num_heads, -1]).to(torch.float32)
+                        ],
                         update_type=0,
                     )
-                    attn_output_decode = attn_output_decode.reshape([num_decode_tokens, 64, -1]).to(torch.bfloat16)
+                    attn_output_decode = attn_output_decode.reshape([num_decode_tokens, self.local_num_heads, -1]).to(torch.bfloat16)
                 else:
                     attn_output_decode = attn_output_decode_cpu
 
@@ -1205,6 +1217,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                     layout_query="TND",
                     layout_kv="PA_BSND",
                     sparse_mode=3,
+                    attention_mode=2,
                 )
 
             if num_decodes <= 0:
@@ -1573,10 +1586,11 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         # load npu (or compute npu attn directly)
         # TODO remove the else branch after sfa lse op is ready and accuracy ensured.
-        compute_npu_kv_directly = False
+        compute_npu_kv_directly = True
         if compute_npu_kv_directly:
-            # new, compute gpu kv directly based on kv_cache
             npu_token_indices = torch.where(npu_mask, topk_indices, -1)
+            # sfa kernel do not support discrete sparse_indices input, have to sort this, try to find a better way
+            npu_token_indices, _ = npu_token_indices.sort(dim=-1, descending=True)
             seq_len_q = attn_metadata.cum_query_lens[:num_reqs]
             attn_out_npu, softmax_max, softmax_sum = torch.ops._C_ascend.npu_sparse_flash_attention(
                 query=ql_nope_decode,
@@ -1593,9 +1607,10 @@ class AscendSFAImpl(MLAAttentionImpl):
                 layout_query="TND",
                 layout_kv="PA_BSND",
                 sparse_mode=3,
-            ) # torch.Size([1, 64, 512])
-            softmax_lse_npu = torch.empty([num_reqs, 64], dtype=torch.bfloat16, device='npu')
-            # softmax_lse = torch.log(softmax_sum) + softmax_max
+                attention_mode=2,
+                return_softmax_lse=True,
+            )
+            softmax_lse_npu = (torch.log(softmax_sum) + softmax_max).squeeze(1)
             # For tokens which have no kv to compute here, set it's lse to -inf,
             # if the sfa op has already done this, we can remove the two lines below.
             no_valid_kv_mask = torch.all(npu_mask, dim=-1).unsqueeze(-1)
