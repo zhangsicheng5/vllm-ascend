@@ -142,7 +142,12 @@ class KVPoolScheduler:
         self._expected_worker_count = vllm_config.parallel_config.world_size
 
         # dsa offload related
-        cpu_block_num = 2048 # TODO get this from kv cache config
+        npu_block_num = self.kv_cache_config.num_blocks
+        # we need 4 * npu_blocks of cpu_blocks to fully store all offload blocks (dskv32, 512/128)
+        # but you may want to set this to 1 in debug case in case of allocating to much dram
+        # TODO remove this and directly compute from model config before merge
+        cpu_block_num_multiple = 4
+        cpu_block_num = npu_block_num * cpu_block_num_multiple
         self.cpu_block_manager = CPUBlockManager(cpu_block_num)
 
     def _infer_group_families(self) -> list[str]:

@@ -30,6 +30,7 @@ from vllm.v1.kv_cache_interface import (
     UniformTypeKVCacheSpecs,
 )
 from vllm.v1.utils import CpuGpuBuffer
+from zbal import zbal_init, zbal_uninit, empty_tensor, batch_copy, zbal_h2d_init
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.config_data import (
@@ -301,8 +302,12 @@ class KVPoolWorker:
         self.cpu_sparse_attn = cpu_sparse_attn
 
         self.load_stream = None
+        self.load_stream = torch_npu.npu.Stream()
         self.save_stream = None
         self.side_compute_stream = torch_npu.npu.Stream()
+        self.kv_cache_config.num_blocks
+        allocate_dram_size = 32 * 1024 * 1024 * 1024 # 32GB, TODO get from config
+        zbal_h2d_init(allocate_dram_size, self.max_num_reqs * self.topk * 2)
 
     def _infer_group_families(self) -> list[str]:
         kv_cache_groups = self.kv_cache_config.kv_cache_groups if self.kv_cache_config is not None else None
@@ -566,12 +571,24 @@ class KVPoolWorker:
             self.onload_topk_buffer_v_cpu = torch.empty([self.max_num_reqs, self.topk, 1, 64], dtype=torch.bfloat16, device='cpu', pin_memory=True)
 
             npu_block_num = self.num_blocks
-            cpu_block_num_multiple = 1 # 512 / 128
+            # we need 4 * npu_blocks of cpu_blocks to fully store all offload blocks (dskv32, 512/128)
+            # but you may want to set this to 1 in debug case in case of allocating to much dram
+            # TODO remove this and directly compute from model config before merge
+            cpu_block_num_multiple = 4
             cpu_block_num = npu_block_num * cpu_block_num_multiple
             cpu_cache_size_single_card = cpu_block_num * self.block_size * (512 + 64) * torch.bfloat16.itemsize * self.num_layers
             logger.info(f'KV offload allocate {cpu_block_num} cpu blocks, size = {cpu_cache_size_single_card / 1024 / 1024 / 1024} GB per rank')
-            self.k_caches_cpu: list[torch.Tensor] = [torch.empty([cpu_block_num, self.block_size, 1, 512], dtype=torch.bfloat16, pin_memory=True) for _ in range(self.num_layers)]
-            self.v_caches_cpu: list[torch.Tensor] = [torch.empty([cpu_block_num, self.block_size, 1, 64], dtype=torch.bfloat16, pin_memory=True) for _ in range(self.num_layers)]
+            self.k_caches_cpu: list[torch.Tensor] = [empty_tensor([cpu_block_num, self.block_size, 1, 512], dtype=torch.bfloat16, pin_memory=True) for _ in range(self.num_layers)]
+            self.v_caches_cpu: list[torch.Tensor] = [empty_tensor([cpu_block_num, self.block_size, 1, 64], dtype=torch.bfloat16, pin_memory=True) for _ in range(self.num_layers)]
+
+            # sparse h2d
+            self.addr_k_bases: list[int] = [t.data_ptr() for t in self.topk_buffers_k]
+            self.addr_v_bases: list[int] = [t.data_ptr() for t in self.topk_buffers_v]
+            self.gvas_k_bases: list[int] = [t.data_ptr() for t in self.k_caches_cpu]
+            self.gvas_v_bases: list[int] = [t.data_ptr() for t in self.v_caches_cpu]
+            self.gvas_buffer = torch.zeros([self.max_num_reqs * self.topk * 2], dtype=torch.int64, device='cpu')
+            self.addr_buffer = torch.zeros([self.max_num_reqs * self.topk * 2], dtype=torch.int64, device='cpu')
+            self.size_buffer = torch.zeros([self.max_num_reqs * self.topk * 2], dtype=torch.int32, device='cpu')
 
     def start_load_kv(self, metadata: AscendConnectorMetadata):
         # return
@@ -968,7 +985,7 @@ class KVPoolWorker:
     def set_req_ids(self, req_ids: list):
         self.req_ids = req_ids
 
-    def load_cpu(self, args):
+    def load_cpu_compact(self, args):
         (
             k_cache_cpu,
             v_cache_cpu,
@@ -997,7 +1014,7 @@ class KVPoolWorker:
             thread_num,
         )
 
-    def load_kv_token_wise(
+    def load_kv_token_wise_compact(
         self,
         layer_name: str,
         num_reqs: int,
@@ -1044,11 +1061,11 @@ class KVPoolWorker:
                 subscribed_compute_streams.add(current_compute_stream)
             torch_npu.npu._launch_host_func(
                 current_compute_stream,
-                self.load_cpu,
+                self.load_cpu_compact,
                 args,
             )
         else:
-            self.load_cpu(args)
+            self.load_cpu_compact(args)
         # self.side_compute_stream.synchronize()
         # current_compute_stream.wait_stream(self.side_compute_stream)
 
@@ -1068,6 +1085,97 @@ class KVPoolWorker:
         topk_buffer_v = self.topk_buffers_v[self.current_layer_load][:num_reqs]
         topk_buffer_k.copy_(onload_topk_buffer_k_cpu, non_blocking=capturing)
         topk_buffer_v.copy_(onload_topk_buffer_v_cpu, non_blocking=capturing)
+
+        self.current_layer_load += 1
+        if self.current_layer_load == self.num_layers:
+            self.current_layer_load = 0
+
+    def load_cpu(self, args):
+        (
+            token_indices,
+            block_table,
+            block_size,
+            token_size_bytes_k,
+            token_size_bytes_v,
+            gvas_k_bases,
+            gvas_v_bases,
+            addr_k_bases,
+            addr_v_bases,
+            max_num_threads,
+            gvas_buffer,
+            addr_buffer,
+            size_buffer,
+        ) = args
+        num_tokens_to_load = cpu_sparse_attn.compute_addrs(
+            token_indices,
+            block_table,
+            block_size,
+            token_size_bytes_k,
+            token_size_bytes_v,
+            gvas_k_bases,
+            gvas_v_bases,
+            addr_k_bases,
+            addr_v_bases,
+            max_num_threads,
+            gvas_buffer,
+            addr_buffer,
+            size_buffer,
+        )
+        gvas = gvas_buffer[:num_tokens_to_load * 2]
+        addr = addr_buffer[:num_tokens_to_load * 2]
+        size = size_buffer[:num_tokens_to_load * 2]
+        # TODO maybe move batch_copy into main stream after adapt with graph mode itself
+        with self.load_stream:
+            batch_copy(gvas, addr, size, self.topk_buffers_k[0].dtype, self.topk_buffers_k[0].device)
+        self.load_stream.synchronize()
+        # if self.current_layer_load == 0 and self.tp_rank == 0:
+        #     logger.info(f'>>>>> load_kv_token_wise, num_tokens_to_load={num_tokens_to_load}')
+
+    def load_kv_token_wise(
+        self,
+        layer_name: str,
+        num_reqs: int,
+        token_indices_npu: torch.tensor,
+        cpu_mask: torch.tensor,
+        capturing: bool = False,
+    ):
+        # sparse_mask = torch.rand_like(token_indices_npu, dtype=torch.bfloat16) < 0.9
+        # token_indices_npu = torch.where(sparse_mask, -1, token_indices_npu)
+        token_indices_cpu = self.topk_indices_buffer_cpu[:num_reqs]
+        token_indices_cpu.copy_(token_indices_npu, non_blocking=capturing)
+        cpu_block_table = self.cpu_block_table_host_buffer[:num_reqs]
+        cpu_block_table.copy_(self.cpu_block_table.gpu[:num_reqs], non_blocking=capturing)
+
+        max_num_threads = 8
+        args = (
+            token_indices_cpu,
+            cpu_block_table,
+            self.block_size,
+            self.token_size_bytes_k,
+            self.token_size_bytes_v,
+            self.gvas_k_bases[self.current_layer_load],
+            self.gvas_v_bases[self.current_layer_load],
+            self.addr_k_bases[self.current_layer_load],
+            self.addr_v_bases[self.current_layer_load],
+            max_num_threads,
+            self.gvas_buffer,
+            self.addr_buffer,
+            self.size_buffer,
+        )
+
+        if capturing:
+            current_compute_stream = torch_npu.npu.current_stream()
+            subscribed_compute_streams = get_subscribed_compute_streams()
+            if current_compute_stream not in subscribed_compute_streams:
+                torch_npu.npu._subscribe_report(current_compute_stream)
+                subscribed_compute_streams.add(current_compute_stream)
+            torch_npu.npu._launch_host_func(
+                current_compute_stream,
+                self.load_cpu,
+                args,
+            )
+        else:
+            self.load_cpu(args)
 
         self.current_layer_load += 1
         if self.current_layer_load == self.num_layers:

@@ -250,8 +250,106 @@ get_kv_topk(
     return;
 }
 
+int32_t
+compute_addrs(
+    const at::Tensor& topk_idx,
+    const at::Tensor& block_table,
+    const int32_t block_size,
+    const int32_t token_size_bytes_k,
+    const int32_t token_size_bytes_v,
+    const int64_t gvas_k_base,
+    const int64_t gvas_v_base,
+    const int64_t addr_k_base,
+    const int64_t addr_v_base,
+    const int32_t max_num_threads,
+    at::Tensor& gvas_buffer, // int64
+    at::Tensor& addr_buffer, // int64
+    at::Tensor& size_buffer // int32
+) {
+    const int32_t num_reqs = topk_idx.size(0);
+    const int32_t topk = topk_idx.size(1);
+    const int32_t max_num_tokens_to_load = num_reqs * topk;
+    const int32_t max_num_blocks = block_table.size(1);
+    const int32_t block_size_bytes_k = block_size * token_size_bytes_k;
+    const int32_t block_size_bytes_v = block_size * token_size_bytes_v;
+    TORCH_CHECK(gvas_buffer.size(0) >= max_num_tokens_to_load * 2,
+        "gvas_buffer size not enough for loading.");
+    TORCH_CHECK(addr_buffer.size(0) >= max_num_tokens_to_load * 2,
+        "addr_buffer size not enough for loading.");
+    TORCH_CHECK(size_buffer.size(0) >= max_num_tokens_to_load * 2,
+        "size_buffer size not enough for loading.");
+    TORCH_CHECK(gvas_buffer.scalar_type() == at::kLong,
+        "gvas_buffer wrong dtype, should be int64.");
+    TORCH_CHECK(addr_buffer.scalar_type() == at::kLong,
+        "addr_buffer wrong dtype, should be int64.");
+    TORCH_CHECK(size_buffer.scalar_type() == at::kInt,
+        "size_buffer wrong dtype, should be int32.");
+
+    const int32_t* topk_idx_ptr = static_cast<int32_t*>(topk_idx.data_ptr());
+    const int32_t* block_table_ptr = static_cast<int32_t*>(block_table.data_ptr());
+    int64_t* gvas_buffer_ptr = static_cast<int64_t*>(gvas_buffer.data_ptr());
+    int64_t* addr_buffer_ptr = static_cast<int64_t*>(addr_buffer.data_ptr());
+    int32_t* size_buffer_ptr = static_cast<int32_t*>(size_buffer.data_ptr());
+
+    // int n_threads = 8;
+    int n_threads = std::min(num_reqs, max_num_threads);
+
+    std::vector<int32_t> num_tokens_to_load_req(num_reqs);
+#pragma omp parallel for num_threads(n_threads)
+    for (size_t req_idx = 0; req_idx < num_reqs; ++req_idx) {
+        int32_t num_tokens_to_load = 0;
+        for (size_t token_idx = 0; token_idx < topk; ++token_idx) {
+            int32_t token_indice = topk_idx_ptr[req_idx * topk + token_idx];
+            if (token_indice > -1) {
+                ++num_tokens_to_load;
+            }
+        }
+        num_tokens_to_load_req[req_idx] = num_tokens_to_load;
+    }
+    int32_t num_tokens_to_load_sum = std::accumulate(num_tokens_to_load_req.begin(), num_tokens_to_load_req.end(), 0);
+    std::vector<int32_t> req_start_locs(num_reqs);
+    int32_t cumsum = 0;
+    for (size_t req_idx = 0; req_idx < num_reqs; ++req_idx) {
+        req_start_locs[req_idx] = cumsum;
+        cumsum += num_tokens_to_load_req[req_idx];
+    }
+
+#pragma omp parallel for num_threads(n_threads)
+    for (size_t req_idx = 0; req_idx < num_reqs; ++req_idx) {
+        int32_t req_start_loc_k = req_start_locs[req_idx];
+        int32_t req_start_loc_v = num_tokens_to_load_sum + req_start_loc_k;
+        int32_t req_offset = 0;
+        for (size_t token_idx = 0; token_idx < topk; ++token_idx) {
+            int32_t token_indice = topk_idx_ptr[req_idx * topk + token_idx];
+            if (token_indice == -1) {
+                continue;
+            }
+            // gvas
+            int32_t block_id = token_indice / block_size;
+            int32_t offset_in_block = token_indice % block_size;
+            int32_t block_indice = block_table_ptr[req_idx * max_num_blocks + block_id];
+            int64_t gvas_k = gvas_k_base + block_indice * block_size_bytes_k + offset_in_block * token_size_bytes_k;
+            int64_t gvas_v = gvas_v_base + block_indice * block_size_bytes_v + offset_in_block * token_size_bytes_v;
+            gvas_buffer_ptr[req_start_loc_k + req_offset] = gvas_k;
+            gvas_buffer_ptr[req_start_loc_v + req_offset] = gvas_v;
+            // addr
+            int64_t addr_k = addr_k_base + (req_idx * topk + token_idx) * token_size_bytes_k;
+            int64_t addr_v = addr_v_base + (req_idx * topk + token_idx) * token_size_bytes_v;
+            addr_buffer_ptr[req_start_loc_k + req_offset] = addr_k;
+            addr_buffer_ptr[req_start_loc_v + req_offset] = addr_v;
+            ++req_offset;
+        }
+    }
+    // size
+    std::fill_n(size_buffer_ptr, num_tokens_to_load_sum, token_size_bytes_k / 2);
+    std::fill_n(&(size_buffer_ptr[num_tokens_to_load_sum]), num_tokens_to_load_sum, token_size_bytes_v / 2);
+
+    return num_tokens_to_load_sum;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     namespace py = pybind11;
     m.def("get_kv_topk", &get_kv_topk, "High performance topk combine");
+    m.def("compute_addrs", &compute_addrs, "Compute sparse h2d needed src(cpu) and dst(npu) address");
 }
