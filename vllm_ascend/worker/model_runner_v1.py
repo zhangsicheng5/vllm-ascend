@@ -3963,8 +3963,19 @@ class NPUModelRunner(GPUModelRunner):
                     dsa_k_cache = raw_dsa_k_tensor.view(dtype).view(dsa_k_cache_shape)
 
                     max_num_reqs = self.vllm_config.scheduler_config.max_num_seqs
-                    topk_buffer_k = torch.zeros([max_num_reqs, 2048, 1, 512], dtype=torch.bfloat16, device='npu')
-                    topk_buffer_v = torch.zeros([max_num_reqs, 2048, 1, 64], dtype=torch.bfloat16, device='npu')
+                    lru_resident_config = self.ascend_config.lru_resident_cache_config
+                    lru_resident_enabled = self.ascend_config.use_offload and lru_resident_config.enabled
+                    resident_capacity = lru_resident_config.buffer_size if lru_resident_enabled else 2048
+                    topk_buffer_k = torch.zeros(
+                        [max_num_reqs, resident_capacity, 1, 512],
+                        dtype=torch.bfloat16,
+                        device='npu',
+                    )
+                    topk_buffer_v = torch.zeros(
+                        [max_num_reqs, resident_capacity, 1, 64],
+                        dtype=torch.bfloat16,
+                        device='npu',
+                    )
 
                     kv_caches[layer_name] = (k_cache, v_cache, dsa_k_cache, topk_buffer_k, topk_buffer_v)
                 elif self.use_compress and isinstance(current_kv_cache_spec, (MLAAttentionSpec, SlidingWindowMLASpec)):

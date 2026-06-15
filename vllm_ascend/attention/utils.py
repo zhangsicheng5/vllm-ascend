@@ -370,6 +370,45 @@ def maybe_load_kv_token_wise_graph(
     connector.load_kv_token_wise(layer_name, num_reqs, token_indices, cpu_mask, capturing)
 
 
+def maybe_prepare_lru_resident_and_load_graph(
+    layer_name: str,
+    num_reqs: int,
+    topk_indices: torch.Tensor,
+    slot_to_token: torch.Tensor,
+    lru_slots: torch.Tensor,
+    current_slots: torch.Tensor,
+    miss_count: torch.Tensor,
+    miss_tokens: torch.Tensor,
+    miss_slots: torch.Tensor,
+    req_ids: torch.Tensor,
+    last_req_ids: torch.Tensor,
+    max_token: int,
+    capturing: bool = False,
+) -> bool:
+    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
+        raise RuntimeError("LRU resident cache requires v1 KV transfer group")
+    connector = get_kv_transfer_group()
+    if not hasattr(connector, "prepare_lru_resident_and_load"):
+        raise RuntimeError(
+            "LRU resident cache requires prepare_lru_resident_and_load connector method"
+        )
+    return connector.prepare_lru_resident_and_load(
+        layer_name,
+        num_reqs,
+        topk_indices,
+        slot_to_token,
+        lru_slots,
+        current_slots,
+        miss_count,
+        miss_tokens,
+        miss_slots,
+        req_ids,
+        last_req_ids,
+        max_token,
+        capturing,
+    )
+
+
 def maybe_save_kv_layer_to_connector_graph(
     layer_name: str,
     capturing: bool = False,

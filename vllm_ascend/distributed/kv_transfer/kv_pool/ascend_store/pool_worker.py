@@ -73,6 +73,23 @@ _SUBSCRIBED_COMPUTE_STREAMS = set()
 def get_subscribed_compute_streams() -> set:
     return _SUBSCRIBED_COMPUTE_STREAMS
 
+
+def _is_current_stream_capturing() -> bool:
+    for npu_runtime in (getattr(torch_npu, "npu", None), getattr(torch, "npu", None)):
+        if npu_runtime is None:
+            continue
+        for attr_name in ("is_current_stream_capturing", "_is_current_stream_capturing"):
+            capture_state = getattr(npu_runtime, attr_name, None)
+            if not callable(capture_state):
+                continue
+            try:
+                if bool(capture_state()):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 # cpu sparse attn kernel related
 # TODO maybe implement this in vllm custom op framework
 os.environ["TORCH_EXTENSIONS_ALWAYS_BUILD"] = "1"
@@ -283,9 +300,14 @@ class KVPoolWorker:
 
         # dsa offload related
         self.layer_save_tasks = [[] for _ in range(self.num_layers)]
-        # TODO get from config
         self.max_num_reqs = vllm_config.scheduler_config.max_num_seqs
-        self.topk = 2048
+        lru_resident_config = ascend_config.lru_resident_cache_config
+        self.lru_resident_enabled = self.use_offload and lru_resident_config.enabled
+        self.sfa_sparse_topk = lru_resident_config.topk
+        self.lru_resident_capacity = (
+            lru_resident_config.buffer_size if self.lru_resident_enabled else self.sfa_sparse_topk
+        )
+        self.topk = self.lru_resident_capacity
         head_num = 1
         head_dim_k = 512
         head_dim_v = 64
@@ -293,6 +315,7 @@ class KVPoolWorker:
         self.token_size_bytes_k = head_num * head_dim_k * dtype.itemsize
         self.token_size_bytes_v = head_num * head_dim_v * dtype.itemsize
         max_model_len = vllm_config.model_config.max_model_len
+        self.max_model_len = max_model_len
         max_block_num = cdiv(max_model_len, self.block_size)
         self.cpu_block_table = CpuGpuBuffer(self.max_num_reqs, max_block_num, dtype=torch.int32, device='npu', pin_memory=True)
         self.cpu_block_table_host_buffer = torch.zeros([self.max_num_reqs, max_block_num], dtype=torch.int32, device='cpu', pin_memory=True)
@@ -589,6 +612,78 @@ class KVPoolWorker:
             self.gvas_buffer = torch.zeros([self.max_num_reqs * self.topk * 2], dtype=torch.int64, device='cpu')
             self.addr_buffer = torch.zeros([self.max_num_reqs * self.topk * 2], dtype=torch.int64, device='cpu')
             self.size_buffer = torch.zeros([self.max_num_reqs * self.topk * 2], dtype=torch.int32, device='cpu')
+            self.lru_workspace_threads = 8
+            self.lru_topk_indices_cpu = torch.empty(
+                [self.max_num_reqs, self.sfa_sparse_topk],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_slot_to_token_cpu = torch.empty(
+                [self.max_num_reqs, self.lru_resident_capacity],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_slots_cpu = torch.empty(
+                [self.max_num_reqs, self.lru_resident_capacity],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_current_slots_cpu = torch.empty(
+                [self.max_num_reqs, self.sfa_sparse_topk],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_miss_count_cpu = torch.empty(
+                [self.max_num_reqs],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_miss_tokens_cpu = torch.empty(
+                [self.max_num_reqs, self.sfa_sparse_topk],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_miss_slots_cpu = torch.empty(
+                [self.max_num_reqs, self.sfa_sparse_topk],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_req_ids_cpu = torch.empty([self.max_num_reqs], dtype=torch.int64, device='cpu', pin_memory=True)
+            self.lru_last_req_ids_cpu = torch.empty(
+                [self.max_num_reqs],
+                dtype=torch.int64,
+                device='cpu',
+                pin_memory=True,
+            )
+            self.lru_token_mark_workspace = torch.zeros(
+                [self.lru_workspace_threads, self.max_model_len],
+                dtype=torch.int32,
+                device='cpu',
+            )
+            self.lru_token_pos_workspace = torch.full(
+                [self.lru_workspace_threads, self.max_model_len],
+                -1,
+                dtype=torch.int32,
+                device='cpu',
+            )
+            self.lru_slot_workspace = torch.empty(
+                [self.lru_workspace_threads, self.lru_resident_capacity * 3],
+                dtype=torch.int32,
+                device='cpu',
+            )
+            self.lru_miss_position_workspace = torch.empty(
+                [self.lru_workspace_threads, self.sfa_sparse_topk],
+                dtype=torch.int32,
+                device='cpu',
+            )
+            self.lru_epochs = torch.zeros([self.lru_workspace_threads], dtype=torch.int32, device='cpu')
 
     def start_load_kv(self, metadata: AscendConnectorMetadata):
         # return
@@ -1130,6 +1225,195 @@ class KVPoolWorker:
         self.load_stream.synchronize()
         # if self.current_layer_load == 0 and self.tp_rank == 0:
         #     logger.info(f'>>>>> load_kv_token_wise, num_tokens_to_load={num_tokens_to_load}')
+
+    def prepare_lru_resident_and_load_cpu(self, args):
+        (
+            req_ids,
+            last_req_ids,
+            topk_indices,
+            slot_to_token,
+            lru_slots,
+            current_slots,
+            miss_count,
+            miss_tokens,
+            miss_slots,
+            block_table,
+            block_size,
+            token_size_bytes_k,
+            token_size_bytes_v,
+            gvas_k_bases,
+            gvas_v_bases,
+            addr_k_bases,
+            addr_v_bases,
+            resident_capacity,
+            max_token,
+            workspace_threads,
+            requested_threads,
+            token_mark_workspace,
+            token_pos_workspace,
+            slot_workspace,
+            miss_position_workspace,
+            epochs,
+            gvas_buffer,
+            addr_buffer,
+            size_buffer,
+        ) = args
+        num_reqs = topk_indices.shape[0]
+        topk = topk_indices.shape[1]
+        cpu_sparse_attn.lru_resident_compact(
+            req_ids.data_ptr(),
+            last_req_ids.data_ptr(),
+            topk_indices.data_ptr(),
+            slot_to_token.data_ptr(),
+            lru_slots.data_ptr(),
+            current_slots.data_ptr(),
+            miss_count.data_ptr(),
+            miss_tokens.data_ptr(),
+            miss_slots.data_ptr(),
+            token_mark_workspace.data_ptr(),
+            token_pos_workspace.data_ptr(),
+            slot_workspace.data_ptr(),
+            miss_position_workspace.data_ptr(),
+            epochs.data_ptr(),
+            num_reqs,
+            topk,
+            resident_capacity,
+            max_token,
+            workspace_threads,
+            requested_threads,
+        )
+        num_tokens_to_load = cpu_sparse_attn.compute_lru_resident_addrs(
+            miss_count,
+            miss_tokens,
+            miss_slots,
+            block_table,
+            block_size,
+            token_size_bytes_k,
+            token_size_bytes_v,
+            gvas_k_bases,
+            gvas_v_bases,
+            addr_k_bases,
+            addr_v_bases,
+            resident_capacity,
+            requested_threads,
+            gvas_buffer,
+            addr_buffer,
+            size_buffer,
+        )
+        if num_tokens_to_load <= 0:
+            return
+        gvas = gvas_buffer[:num_tokens_to_load * 2]
+        addr = addr_buffer[:num_tokens_to_load * 2]
+        size = size_buffer[:num_tokens_to_load * 2]
+        with self.load_stream:
+            batch_copy(gvas, addr, size, self.topk_buffers_k[0].dtype, self.topk_buffers_k[0].device)
+        self.load_stream.synchronize()
+
+    def prepare_lru_resident_and_load(
+        self,
+        layer_name: str,
+        num_reqs: int,
+        topk_indices_npu: torch.Tensor,
+        slot_to_token_npu: torch.Tensor,
+        lru_slots_npu: torch.Tensor,
+        current_slots_npu: torch.Tensor,
+        miss_count_npu: torch.Tensor,
+        miss_tokens_npu: torch.Tensor,
+        miss_slots_npu: torch.Tensor,
+        req_ids_npu: torch.Tensor,
+        last_req_ids_npu: torch.Tensor,
+        max_token: int,
+        capturing: bool = False,
+    ) -> bool:
+        if not self.lru_resident_enabled:
+            return False
+        capturing = capturing or _is_current_stream_capturing()
+        topk = topk_indices_npu.shape[1]
+        capacity = slot_to_token_npu.shape[1]
+        if topk > self.sfa_sparse_topk or capacity > self.lru_resident_capacity:
+            raise ValueError(
+                "LRU resident tensors exceed configured workspace, "
+                f"topk={topk}, capacity={capacity}, "
+                f"configured_topk={self.sfa_sparse_topk}, "
+                f"configured_capacity={self.lru_resident_capacity}"
+            )
+        topk_indices_cpu = self.lru_topk_indices_cpu[:num_reqs, :topk]
+        slot_to_token_cpu = self.lru_slot_to_token_cpu[:num_reqs, :capacity]
+        lru_slots_cpu = self.lru_slots_cpu[:num_reqs, :capacity]
+        current_slots_cpu = self.lru_current_slots_cpu[:num_reqs, :topk]
+        miss_count_cpu = self.lru_miss_count_cpu[:num_reqs]
+        miss_tokens_cpu = self.lru_miss_tokens_cpu[:num_reqs, :topk]
+        miss_slots_cpu = self.lru_miss_slots_cpu[:num_reqs, :topk]
+        req_ids_cpu = self.lru_req_ids_cpu[:num_reqs]
+        last_req_ids_cpu = self.lru_last_req_ids_cpu[:num_reqs]
+        cpu_block_table = self.cpu_block_table_host_buffer[:num_reqs]
+
+        topk_indices_cpu.copy_(topk_indices_npu[:num_reqs, :topk].to(torch.int32), non_blocking=capturing)
+        slot_to_token_cpu.copy_(slot_to_token_npu[:num_reqs, :capacity], non_blocking=capturing)
+        lru_slots_cpu.copy_(lru_slots_npu[:num_reqs, :capacity], non_blocking=capturing)
+        req_ids_cpu.copy_(req_ids_npu[:num_reqs], non_blocking=capturing)
+        last_req_ids_cpu.copy_(last_req_ids_npu[:num_reqs], non_blocking=capturing)
+        cpu_block_table.copy_(self.cpu_block_table.gpu[:num_reqs], non_blocking=capturing)
+
+        requested_threads = self.lru_workspace_threads
+        args = (
+            req_ids_cpu,
+            last_req_ids_cpu,
+            topk_indices_cpu,
+            slot_to_token_cpu,
+            lru_slots_cpu,
+            current_slots_cpu,
+            miss_count_cpu,
+            miss_tokens_cpu,
+            miss_slots_cpu,
+            cpu_block_table,
+            self.block_size,
+            self.token_size_bytes_k,
+            self.token_size_bytes_v,
+            self.gvas_k_bases[self.current_layer_load],
+            self.gvas_v_bases[self.current_layer_load],
+            self.addr_k_bases[self.current_layer_load],
+            self.addr_v_bases[self.current_layer_load],
+            capacity,
+            max_token,
+            self.lru_workspace_threads,
+            requested_threads,
+            self.lru_token_mark_workspace,
+            self.lru_token_pos_workspace,
+            self.lru_slot_workspace,
+            self.lru_miss_position_workspace,
+            self.lru_epochs,
+            self.gvas_buffer,
+            self.addr_buffer,
+            self.size_buffer,
+        )
+
+        if capturing:
+            current_compute_stream = torch_npu.npu.current_stream()
+            subscribed_compute_streams = get_subscribed_compute_streams()
+            if current_compute_stream not in subscribed_compute_streams:
+                torch_npu.npu._subscribe_report(current_compute_stream)
+                subscribed_compute_streams.add(current_compute_stream)
+            torch_npu.npu._launch_host_func(
+                current_compute_stream,
+                self.prepare_lru_resident_and_load_cpu,
+                args,
+            )
+        else:
+            self.prepare_lru_resident_and_load_cpu(args)
+
+        current_slots_npu[:num_reqs, :topk].copy_(current_slots_cpu, non_blocking=capturing)
+        miss_count_npu[:num_reqs].copy_(miss_count_cpu, non_blocking=capturing)
+        miss_tokens_npu[:num_reqs, :topk].copy_(miss_tokens_cpu, non_blocking=capturing)
+        miss_slots_npu[:num_reqs, :topk].copy_(miss_slots_cpu, non_blocking=capturing)
+        slot_to_token_npu[:num_reqs, :capacity].copy_(slot_to_token_cpu, non_blocking=capturing)
+        lru_slots_npu[:num_reqs, :capacity].copy_(lru_slots_cpu, non_blocking=capturing)
+        last_req_ids_npu[:num_reqs].copy_(last_req_ids_cpu, non_blocking=capturing)
+
+        self.current_layer_load += 1
+        if self.current_layer_load == self.num_layers:
+            self.current_layer_load = 0
+        return True
 
     def load_kv_token_wise(
         self,
