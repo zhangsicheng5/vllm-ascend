@@ -36,7 +36,7 @@ extern aclnnStatus aclnnInnerSparseFlashAttentionGetWorkspaceSize(
     const aclTensor *queryRopeOptional, const aclTensor *keyRopeOptional, double scaleValue,
     int64_t sparseBlockSizeOptional, char *layoutQueryOptional, char *layoutKvOptional,
     int64_t sparseMode, int64_t preTokens, int64_t nextTokens, int64_t attentionMode,
-    bool returnSoftmaxLse, const aclTensor *attentionOut, const aclTensor *softmaxMax,
+    bool returnSoftmaxLse, bool sparseIndicesDiscrete, const aclTensor *attentionOut, const aclTensor *softmaxMax,
     const aclTensor *softmaxSum, uint64_t *workspaceSize, aclOpExecutor **executor);
 
 extern aclnnStatus aclnnInnerSparseFlashAttention(void *workspace, uint64_t workspaceSize, aclOpExecutor *executor,
@@ -100,6 +100,7 @@ aclnnStatus aclnnSparseFlashAttentionGetWorkspaceSize(
     int64_t          nextTokens,
     int64_t          attentionMode,
     bool             returnSoftmaxLse,
+    bool             sparseIndicesDiscrete,
     const aclTensor *attentionOut,
     const aclTensor *softmaxMax,
     const aclTensor *softmaxSum,
@@ -128,7 +129,7 @@ aclnnStatus aclnnSparseFlashAttentionGetWorkspaceSize(
     return aclnnInnerSparseFlashAttentionGetWorkspaceSize(
         query, key, value, sparseIndices, blockTableOptional, actualSeqLengthsQueryOptional, actualSeqLengthsKvOptional, queryRopeOptional, keyRopeOptional,
         scaleValue, sparseBlockSizeOptional, layoutQueryOptional, layoutKvOptional, sparseMode, preTokens,
-        nextTokens, attentionMode, returnSoftmaxLse, attentionOut,
+        nextTokens, attentionMode, returnSoftmaxLse, sparseIndicesDiscrete, attentionOut,
         softmaxMax, softmaxSum, workspaceSize, executor);
 }
 

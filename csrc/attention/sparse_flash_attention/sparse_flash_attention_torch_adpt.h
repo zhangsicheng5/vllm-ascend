@@ -100,7 +100,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> npu_sparse_flash_attention(
     const c10::optional<at::Tensor> &key_rope, int64_t sparse_block_size,
     c10::string_view layout_query, c10::string_view layout_kv,
     int64_t sparse_mode, int64_t pre_tokens, int64_t next_tokens,
-    int64_t attention_mode, bool return_softmax_lse)
+    int64_t attention_mode, bool return_softmax_lse, bool sparse_indices_discrete)
 {
     TORCH_CHECK(query.numel() > 0, "Tensor query is empty.");
     TORCH_CHECK(key.numel() > 0, "Tensor key is empty.");
@@ -141,6 +141,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> npu_sparse_flash_attention(
         next_tokens,
         attention_mode,
         return_softmax_lse,
+        sparse_indices_discrete,
         attention_output,
         softmax_max,
         softmax_sum);

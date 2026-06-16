@@ -1154,9 +1154,6 @@ class AscendSFAImpl(MLAAttentionImpl):
                     layer_name,
                 )
                 compute_npu_kv_directly = attn_output_decode_npu is not None
-                if compute_npu_kv_directly:
-                    # TODO sfa kernel do not support discrete sparse_indices input, have to sort this, try to find a better way
-                    sparse_topk_indices, _ = sparse_topk_indices.sort(dim=-1, descending=True)
                 attn_output_decode_cpu, softmax_max, softmax_sum = torch.ops._C_ascend.npu_sparse_flash_attention(
                     query=ql_nope_decode,
                     key=topk_buffer[0],
@@ -1174,6 +1171,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                     sparse_mode=3,
                     attention_mode=2,
                     return_softmax_lse=compute_npu_kv_directly,
+                    sparse_indices_discrete=compute_npu_kv_directly,
                 )
                 if compute_npu_kv_directly:
                     softmax_lse_decode_cpu = (torch.log(softmax_sum) + softmax_max).squeeze(1)
@@ -1589,8 +1587,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         compute_npu_kv_directly = True
         if compute_npu_kv_directly:
             npu_token_indices = torch.where(npu_mask, topk_indices, -1)
-            # sfa kernel do not support discrete sparse_indices input, have to sort this, try to find a better way
-            npu_token_indices, _ = npu_token_indices.sort(dim=-1, descending=True)
             seq_len_q = attn_metadata.cum_query_lens[:num_reqs]
             attn_out_npu, softmax_max, softmax_sum = torch.ops._C_ascend.npu_sparse_flash_attention(
                 query=ql_nope_decode,
@@ -1609,6 +1605,7 @@ class AscendSFAImpl(MLAAttentionImpl):
                 sparse_mode=3,
                 attention_mode=2,
                 return_softmax_lse=True,
+                sparse_indices_discrete=True,
             )
             softmax_lse_npu = (torch.log(softmax_sum) + softmax_max).squeeze(1)
             # For tokens which have no kv to compute here, set it's lse to -inf,

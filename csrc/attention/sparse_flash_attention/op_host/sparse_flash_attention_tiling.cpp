@@ -368,6 +368,7 @@ void SFAMlaTiling::FillTilingBaseParamsMla()
     tilingData_.baseParams.set_sparseBlockCount(sfaInfo_->sparseBlockCount);
     tilingData_.baseParams.set_attentionMode(sfaInfo_->attentionMode);
     tilingData_.baseParams.set_returnSoftmaxLse(sfaInfo_->returnSoftmaxLse);
+    tilingData_.baseParams.set_sparseIndicesDiscrete(sfaInfo_->sparseIndicesDiscrete ? 1U : 0U);
     tilingData_.baseParams.set_isActualLenDimsNull(sfaInfo_->actualQSeqLenFlag ? 0U : 1U);
     tilingData_.baseParams.set_isActualLenDimsKVNull(sfaInfo_->actualSeqLenFlag ? 0U : 1U);
 }
@@ -1676,6 +1677,7 @@ ge::graphStatus SFAInfoParser::GetAttrParaInfo()
     opParamInfo_.nextTokens = attrs->GetAttrPointer<int64_t>(NEXT_TOKENS_ATTR_INDEX);
     opParamInfo_.attentionMode = attrs->GetAttrPointer<int64_t>(ATTENTION_MODE_ATTR_INDEX);
     opParamInfo_.returnSoftmaxLse = attrs->GetAttrPointer<bool>(RETURN_SOFTMAX_LSE_ATTR_INDEX);
+    opParamInfo_.sparseIndicesDiscrete = attrs->GetAttrPointer<bool>(SPARSE_INDICES_DISCRETE_ATTR_INDEX);
     return ge::GRAPH_SUCCESS;
 }
 
@@ -2009,6 +2011,8 @@ void SFAInfoParser::GenerateInfo(SFATilingInfo &sfaInfo)
     sfaInfo.nextTokens = *opParamInfo_.nextTokens;
     sfaInfo.attentionMode = *opParamInfo_.attentionMode;
     sfaInfo.returnSoftmaxLse = *opParamInfo_.returnSoftmaxLse;
+    sfaInfo.sparseIndicesDiscrete =
+        (opParamInfo_.sparseIndicesDiscrete != nullptr) ? *opParamInfo_.sparseIndicesDiscrete : false;
 
     sfaInfo.qLayout = qLayout_;
     sfaInfo.topkLayout = topkLayout_;
