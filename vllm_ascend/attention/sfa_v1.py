@@ -31,12 +31,10 @@ from vllm_ascend.attention.utils import (
     ascend_chunked_prefill_workspace_size,
     enable_cp,
     maybe_save_kv_layer_to_connector,
-    maybe_save_kv_layer_to_connector_graph,
     trans_rope_weight,
     transdata,
     wait_for_kv_layer_from_connector,
     split_decodes_and_prefills,
-    maybe_load_kv_token_wise_graph,
     maybe_prepare_lru_resident_and_load_graph,
 )
 from vllm_ascend.device.device_op import DeviceOperator
@@ -103,6 +101,13 @@ def _normalize_sfa_lse(
 
 # token count limits within bmm_transpose operator
 BMM_TRANS_MAX_SUPPORTED_TOKENS = 1024
+
+_SIDE_COMPUTE_STREAM = None
+def get_side_compute_stream() -> torch.npu.Stream:
+    global _SIDE_COMPUTE_STREAM
+    if _SIDE_COMPUTE_STREAM is None:
+        _SIDE_COMPUTE_STREAM = torch_npu.npu.Stream()
+    return _SIDE_COMPUTE_STREAM
 
 
 class AscendSFABackend(AttentionBackend):
@@ -491,7 +496,6 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.use_offload = ascend_config.use_offload
         self.enable_shared_expert_dp = ascend_config.enable_shared_expert_dp
         self.lru_resident_cache_config = ascend_config.lru_resident_cache_config
-        self.lru_resident_cache_enabled = self.use_offload and self.lru_resident_cache_config.enabled
 
         # The MLAPO operator fuses the pre-processing steps on Q/K/V in MLA into a single operator
         # NOTE: it imposes a limit on the number of input tokens and conflicts with FlashComm
@@ -563,9 +567,7 @@ class AscendSFAImpl(MLAAttentionImpl):
         self.block_size = self.vllm_config.cache_config.block_size
         max_num_reqs = self.vllm_config.scheduler_config.max_num_seqs
         self.sfa_sparse_topk = self.lru_resident_cache_config.topk
-        self.lru_resident_capacity = (
-            self.lru_resident_cache_config.buffer_size if self.lru_resident_cache_enabled else self.sfa_sparse_topk
-        )
+        self.lru_resident_capacity = self.lru_resident_cache_config.buffer_size
         if self.lru_resident_capacity % self.block_size != 0:
             raise ValueError(
                 "lru_resident_cache_config.buffer_size must be divisible by "
@@ -590,47 +592,46 @@ class AscendSFAImpl(MLAAttentionImpl):
             device='npu',
         )
         self.max_model_len = self.vllm_config.model_config.max_model_len
-        if self.lru_resident_cache_enabled:
-            self.lru_slot_to_token = torch.full(
-                [max_num_reqs, self.lru_resident_capacity],
-                -1,
-                dtype=torch.int32,
-                device='npu',
-            )
-            self.lru_slots = torch.arange(
-                self.lru_resident_capacity,
-                dtype=torch.int32,
-                device='npu',
-            ).view(1, -1).repeat(max_num_reqs, 1)
-            self.lru_current_slots = torch.full(
-                [max_num_reqs, self.sfa_sparse_topk],
-                -1,
-                dtype=torch.int32,
-                device='npu',
-            )
-            self.lru_miss_count = torch.zeros(
-                [max_num_reqs],
-                dtype=torch.int32,
-                device='npu',
-            )
-            self.lru_miss_tokens = torch.full(
-                [max_num_reqs, self.sfa_sparse_topk],
-                -1,
-                dtype=torch.int32,
-                device='npu',
-            )
-            self.lru_miss_slots = torch.full(
-                [max_num_reqs, self.sfa_sparse_topk],
-                -1,
-                dtype=torch.int32,
-                device='npu',
-            )
-            self.last_step_req_ids = torch.full(
-                [max_num_reqs],
-                -1,
-                dtype=torch.int64,
-                device='npu',
-            )
+        self.lru_slot_to_token = torch.full(
+            [max_num_reqs, self.lru_resident_capacity],
+            -1,
+            dtype=torch.int32,
+            device='npu',
+        )
+        self.lru_slots = torch.arange(
+            self.lru_resident_capacity,
+            dtype=torch.int32,
+            device='npu',
+        ).view(1, -1).repeat(max_num_reqs, 1)
+        self.lru_current_slots = torch.full(
+            [max_num_reqs, self.sfa_sparse_topk],
+            -1,
+            dtype=torch.int32,
+            device='npu',
+        )
+        self.lru_miss_count = torch.zeros(
+            [max_num_reqs],
+            dtype=torch.int32,
+            device='npu',
+        )
+        self.lru_miss_tokens = torch.full(
+            [max_num_reqs, self.sfa_sparse_topk],
+            -1,
+            dtype=torch.int32,
+            device='npu',
+        )
+        self.lru_miss_slots = torch.full(
+            [max_num_reqs, self.sfa_sparse_topk],
+            -1,
+            dtype=torch.int32,
+            device='npu',
+        )
+        self.last_step_req_ids = torch.full(
+            [max_num_reqs],
+            -1,
+            dtype=torch.int64,
+            device='npu',
+        )
 
     @staticmethod
     def update_graph_params(
@@ -1254,7 +1255,6 @@ class AscendSFAImpl(MLAAttentionImpl):
                     attn_metadata,
                     layer_name,
                 )
-                compute_npu_kv_directly = attn_output_decode_npu is not None
                 attn_output_decode_cpu, softmax_max, softmax_sum = torch.ops._C_ascend.npu_sparse_flash_attention(
                     query=ql_nope_decode,
                     key=topk_buffer[0],
@@ -1271,35 +1271,27 @@ class AscendSFAImpl(MLAAttentionImpl):
                     layout_kv="PA_BSND",
                     sparse_mode=3,
                     attention_mode=2,
-                    return_softmax_lse=compute_npu_kv_directly,
-                    sparse_indices_discrete=compute_npu_kv_directly,
+                    return_softmax_lse=True,
+                    sparse_indices_discrete=True,
                 )
-                if compute_npu_kv_directly:
-                    softmax_lse_decode_cpu = _normalize_sfa_lse(
-                        softmax_max,
-                        softmax_sum,
-                        num_tokens=num_decode_tokens,
-                        num_heads=self.local_num_heads,
-                    )
-                    # For tokens which have no kv to compute here, set it's lse to -inf,
-                    # if the sfa op has already done this, we can remove the two lines below.
-                    no_valid_kv_mask = ~torch.any(cpu_mask, dim=-1).unsqueeze(-1)
-                    softmax_lse_decode_cpu = torch.where(no_valid_kv_mask, float('-inf'), softmax_lse_decode_cpu)
-                    # TODO remove the else branch after sfa lse op is ready and accuracy ensured.
-                    attn_output_decode, _ = torch_npu.npu_attention_update(
-                        [
-                            softmax_lse_decode_npu.reshape([num_decode_tokens * self.local_num_heads]),
-                            softmax_lse_decode_cpu.reshape([num_decode_tokens * self.local_num_heads])
-                        ],
-                        [
-                            attn_output_decode_npu.reshape([num_decode_tokens * self.local_num_heads, -1]).to(torch.float32),
-                            attn_output_decode_cpu.reshape([num_decode_tokens * self.local_num_heads, -1]).to(torch.float32)
-                        ],
-                        update_type=0,
-                    )
-                    attn_output_decode = attn_output_decode.reshape([num_decode_tokens, self.local_num_heads, -1]).to(torch.bfloat16)
-                else:
-                    attn_output_decode = attn_output_decode_cpu
+                softmax_lse_decode_cpu = _normalize_sfa_lse(
+                    softmax_max,
+                    softmax_sum,
+                    num_tokens=num_decode_tokens,
+                    num_heads=self.local_num_heads,
+                )
+                attn_output_decode, _ = torch_npu.npu_attention_update(
+                    [
+                        softmax_lse_decode_npu.reshape([num_decode_tokens * self.local_num_heads]),
+                        softmax_lse_decode_cpu.reshape([num_decode_tokens * self.local_num_heads])
+                    ],
+                    [
+                        attn_output_decode_npu.reshape([num_decode_tokens * self.local_num_heads, -1]).to(torch.float32),
+                        attn_output_decode_cpu.reshape([num_decode_tokens * self.local_num_heads, -1]).to(torch.float32)
+                    ],
+                    update_type=0,
+                )
+                attn_output_decode = attn_output_decode.reshape([num_decode_tokens, self.local_num_heads, -1]).to(torch.bfloat16)
 
             if num_prefills > 0:
 
@@ -1594,8 +1586,7 @@ class AscendSFAImpl(MLAAttentionImpl):
 
         output[...] = self.o_proj(attn_output)[0]
 
-        # maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
-        maybe_save_kv_layer_to_connector_graph(layer_name, forward_context.capturing)
+        maybe_save_kv_layer_to_connector(layer_name, list(kv_cache))
 
         return output_padded
 
@@ -1678,10 +1669,11 @@ class AscendSFAImpl(MLAAttentionImpl):
         block_table = attn_metadata.block_table[:num_reqs]
         seq_len_kv = attn_metadata.seq_lens[:num_reqs]
 
-        # load npu (or compute npu attn directly)
-        # TODO(szy) 这里统一用 直接计算的方式
-        compute_npu_kv_directly = True
-        if compute_npu_kv_directly:
+        # compute npu attn (kv which are not offloaded yet)
+        side_compute_stream = get_side_compute_stream()
+        side_compute_event = torch.npu.current_stream().record_event()
+        with torch_npu.npu.stream(side_compute_stream):
+            torch.npu.current_stream().wait_event(side_compute_event)
             npu_token_indices = torch.where(npu_mask, topk_indices, -1)
             seq_len_q = attn_metadata.cum_query_lens[:num_reqs]
             attn_out_npu, softmax_max, softmax_sum = torch.ops._C_ascend.npu_sparse_flash_attention(
@@ -1709,61 +1701,34 @@ class AscendSFAImpl(MLAAttentionImpl):
                 num_tokens=num_reqs,
                 num_heads=self.local_num_heads,
             )
-            # For tokens which have no kv to compute here, set it's lse to -inf,
-            # if the sfa op has already done this, we can remove the two lines below.
-            no_valid_kv_mask = ~torch.any(npu_mask, dim=-1).unsqueeze(-1)
-            softmax_lse_npu = torch.where(no_valid_kv_mask, float('-inf'), softmax_lse_npu)
-        else:
-            block_indices = torch.clamp(topk_indices // self.block_size, min=0)
-            block_ids = torch.gather(block_table, 1, block_indices)
-            offsets_in_block = topk_indices % self.block_size
-            npu_mask = npu_mask.unsqueeze(-1).unsqueeze(-1)
-            topk_buffer_k[...] = torch.where(npu_mask, kv_cache[0][block_ids, offsets_in_block], topk_buffer_k)
-            topk_buffer_v[...] = torch.where(npu_mask, kv_cache[1][block_ids, offsets_in_block], topk_buffer_v)
-            attn_out_npu = None
-            softmax_lse_npu = None
 
         cpu_token_indices = torch.where(cpu_mask, topk_indices, -1)
-        if self.lru_resident_cache_enabled:
-            maybe_prepare_lru_resident_and_load_graph(
-                layer_name,
-                num_reqs,
-                cpu_token_indices.to(torch.int32),
-                self.lru_slot_to_token[:num_reqs],
-                self.lru_slots[:num_reqs],
-                self.lru_current_slots[:num_reqs],
-                self.lru_miss_count[:num_reqs],
-                self.lru_miss_tokens[:num_reqs],
-                self.lru_miss_slots[:num_reqs],
-                attn_metadata.req_ids_tensor[:num_reqs],
-                self.last_step_req_ids[:num_reqs],
-                self.max_model_len,
-                forward_context.capturing,
-            )
-        else:
-            maybe_load_kv_token_wise_graph(layer_name, num_reqs, cpu_token_indices, cpu_mask, forward_context.capturing)
+        maybe_prepare_lru_resident_and_load_graph(
+            layer_name,
+            num_reqs,
+            cpu_token_indices.to(torch.int32),
+            self.lru_slot_to_token[:num_reqs],
+            self.lru_slots[:num_reqs],
+            self.lru_current_slots[:num_reqs],
+            self.lru_miss_count[:num_reqs],
+            self.lru_miss_tokens[:num_reqs],
+            self.lru_miss_slots[:num_reqs],
+            attn_metadata.req_ids_tensor[:num_reqs],
+            self.last_step_req_ids[:num_reqs],
+            self.max_model_len,
+            forward_context.capturing,
+        )
 
         topk_buffer_k = topk_buffer_k.reshape([-1, self.block_size, 1, 512])
         topk_buffer_v = topk_buffer_v.reshape([-1, self.block_size, 1, 64])
         sparse_block_table = self.sparse_block_table[:num_reqs]
-        if self.lru_resident_cache_enabled:
-            sparse_seq_len_kv = torch.full_like(seq_len_kv, self.lru_resident_capacity)
-            sparse_topk_indices = _build_cpu_sparse_indices_from_slots(
-                self.lru_current_slots[:num_reqs],
-                cpu_mask,
-            )
-        else:
-            sparse_seq_len_kv = torch.clamp(seq_len_kv, max=self.sfa_sparse_topk)
-            sparse_topk_indices = self.sparse_topk_indices[:num_reqs]
-            sparse_topk_indices = torch.where(
-                sparse_topk_indices < sparse_seq_len_kv.unsqueeze(1),
-                sparse_topk_indices,
-                -1,
-            )
-            if compute_npu_kv_directly:
-                sparse_topk_indices = torch.where(cpu_mask, sparse_topk_indices, -1)
-            sparse_topk_indices = sparse_topk_indices.unsqueeze(1)
+        sparse_seq_len_kv = torch.full_like(seq_len_kv, self.lru_resident_capacity)
+        sparse_topk_indices = _build_cpu_sparse_indices_from_slots(
+            self.lru_current_slots[:num_reqs],
+            cpu_mask,
+        )
 
+        torch_npu.npu.current_stream().wait_stream(side_compute_stream)
         return (
             (topk_buffer_k, topk_buffer_v),
             sparse_topk_indices,

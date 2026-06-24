@@ -79,3 +79,9 @@ def register_connector():
             "vllm_ascend.distributed.kv_transfer.kv_pool.simple_cpu_offload.simple_cpu_offload_connector",  # noqa: E501
             "AscendSimpleCPUOffloadConnector",
         )
+
+    KVConnectorFactory.register_connector(
+        "SFAKVOffloadConnector",
+        "vllm_ascend.distributed.kv_transfer.sfa_kv_offload.sfa_kv_offload_connector",
+        "SFAKVOffloadConnector",
+    )

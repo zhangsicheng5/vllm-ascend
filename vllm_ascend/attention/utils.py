@@ -355,21 +355,6 @@ def set_connector_req_ids(req_ids):
     connector.set_req_ids(req_ids)
 
 
-def maybe_load_kv_token_wise_graph(
-    layer_name: str,
-    num_reqs: int,
-    token_indices: torch.Tensor, # [num_reqs, topk]
-    cpu_mask: torch.Tensor,
-    capturing: bool = False,
-):
-    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
-        return
-    connector = get_kv_transfer_group()
-    if not hasattr(connector, 'load_kv_token_wise'):
-        return
-    connector.load_kv_token_wise(layer_name, num_reqs, token_indices, cpu_mask, capturing)
-
-
 def maybe_prepare_lru_resident_and_load_graph(
     layer_name: str,
     num_reqs: int,
@@ -407,18 +392,6 @@ def maybe_prepare_lru_resident_and_load_graph(
         max_token,
         capturing,
     )
-
-
-def maybe_save_kv_layer_to_connector_graph(
-    layer_name: str,
-    capturing: bool = False,
-):
-    if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
-        return
-    connector = get_kv_transfer_group()
-    if not hasattr(connector, 'save_kv_offload'):
-        return
-    connector.save_kv_offload(layer_name, capturing)
 
 
 def round_up(val: int, align: int) -> int:
