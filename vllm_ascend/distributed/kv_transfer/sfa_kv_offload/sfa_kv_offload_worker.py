@@ -262,71 +262,96 @@ class SFAKVOffloadWorker:
                 device='cpu',
                 pin_memory=True,
             )
-            self.lru_slot_to_token_cpu = torch.empty(
+            self.lru_slot_to_token_cpu_list = [torch.full(
                 [self.max_num_reqs, self.lru_resident_capacity],
+                -1,
                 dtype=torch.int32,
                 device='cpu',
                 pin_memory=True,
-            )
-            self.lru_slots_cpu = torch.empty(
-                [self.max_num_reqs, self.lru_resident_capacity],
+            ) for _ in range(self.num_layers)]
+            self.lru_slots_cpu_list = [torch.arange(
+                self.lru_resident_capacity,
                 dtype=torch.int32,
                 device='cpu',
-                pin_memory=True,
-            )
+            ).view(1, -1).repeat(self.max_num_reqs, 1).pin_memory() for _ in range(self.num_layers)]
             self.lru_current_slots_cpu = torch.empty(
                 [self.max_num_reqs, self.sfa_sparse_topk],
                 dtype=torch.int32,
                 device='cpu',
                 pin_memory=True,
             )
-            self.lru_miss_count_cpu = torch.empty(
+            self.lru_miss_count_cpu_list = [torch.empty(
                 [self.max_num_reqs],
                 dtype=torch.int32,
                 device='cpu',
                 pin_memory=True,
-            )
-            self.lru_miss_tokens_cpu = torch.empty(
+            ) for _ in range(self.num_layers)]
+            self.lru_miss_tokens_cpu_list = [torch.empty(
                 [self.max_num_reqs, self.sfa_sparse_topk],
                 dtype=torch.int32,
                 device='cpu',
                 pin_memory=True,
-            )
-            self.lru_miss_slots_cpu = torch.empty(
+            ) for _ in range(self.num_layers)]
+            self.lru_miss_slots_cpu_list = [torch.empty(
                 [self.max_num_reqs, self.sfa_sparse_topk],
                 dtype=torch.int32,
                 device='cpu',
                 pin_memory=True,
-            )
+            ) for _ in range(self.num_layers)]
             self.lru_req_ids_cpu = torch.empty([self.max_num_reqs], dtype=torch.int64, device='cpu', pin_memory=True)
-            self.lru_last_req_ids_cpu = torch.empty(
+            self.lru_last_req_ids_cpu_list = [torch.full(
                 [self.max_num_reqs],
+                -1,
                 dtype=torch.int64,
                 device='cpu',
                 pin_memory=True,
-            )
+            ) for _  in range(self.num_layers)]
             self.lru_token_mark_workspace = torch.zeros(
                 [self.lru_workspace_threads, self.max_model_len],
                 dtype=torch.int32,
                 device='cpu',
+                pin_memory=True,
             )
             self.lru_token_pos_workspace = torch.full(
                 [self.lru_workspace_threads, self.max_model_len],
                 -1,
                 dtype=torch.int32,
                 device='cpu',
+                pin_memory=True,
             )
             self.lru_slot_workspace = torch.empty(
                 [self.lru_workspace_threads, self.lru_resident_capacity * 3],
                 dtype=torch.int32,
                 device='cpu',
+                pin_memory=True,
             )
             self.lru_miss_position_workspace = torch.empty(
                 [self.lru_workspace_threads, self.sfa_sparse_topk],
                 dtype=torch.int32,
                 device='cpu',
+                pin_memory=True,
             )
-            self.lru_epochs = torch.zeros([self.lru_workspace_threads], dtype=torch.int32, device='cpu')
+            self.lru_epochs = torch.zeros(
+                [self.lru_workspace_threads],
+                dtype=torch.int32,
+                device='cpu',
+                pin_memory=True,
+            )
+
+            self.lru_req_ids_ptr = self.lru_req_ids_cpu.data_ptr()
+            self.lru_last_req_ids_ptrs = [lru_last_req_ids_cpu.data_ptr() for lru_last_req_ids_cpu in self.lru_last_req_ids_cpu_list]
+            self.lru_topk_indices_ptr = self.lru_topk_indices_cpu.data_ptr()
+            self.lru_slot_to_token_ptrs = [lru_slot_to_token_cpu.data_ptr() for lru_slot_to_token_cpu in self.lru_slot_to_token_cpu_list]
+            self.lru_slots_ptrs = [lru_slots_cpu.data_ptr() for lru_slots_cpu in self.lru_slots_cpu_list]
+            self.lru_current_slots_ptr = self.lru_current_slots_cpu.data_ptr()
+            self.lru_miss_count_ptrs = [lru_miss_count_cpu.data_ptr() for lru_miss_count_cpu in self.lru_miss_count_cpu_list]
+            self.lru_miss_tokens_ptrs = [lru_miss_tokens_cpu.data_ptr() for lru_miss_tokens_cpu in self.lru_miss_tokens_cpu_list]
+            self.lru_miss_slots_ptrs = [lru_miss_slots_cpu.data_ptr() for lru_miss_slots_cpu in self.lru_miss_slots_cpu_list]
+            self.lru_token_mark_workspace_ptr = self.lru_token_mark_workspace.data_ptr()
+            self.lru_token_pos_workspace_ptr = self.lru_token_pos_workspace.data_ptr()
+            self.lru_slot_workspace_ptr = self.lru_slot_workspace.data_ptr()
+            self.lru_miss_position_workspace_ptr = self.lru_miss_position_workspace.data_ptr()
+            self.lru_epochs_ptr = self.lru_epochs.data_ptr()
 
             # sparse h2d (batch_copy related)
             self.addr_k_bases: list[int] = [t.data_ptr() for t in self.topk_buffers_k]
@@ -391,15 +416,19 @@ class SFAKVOffloadWorker:
 
     def prepare_lru_resident_and_load_cpu(self, args):
         (
-            req_ids,
-            last_req_ids,
-            topk_indices,
-            slot_to_token,
-            lru_slots,
-            current_slots,
+            num_reqs,
             miss_count,
             miss_tokens,
             miss_slots,
+            lru_req_ids_ptr,
+            lru_last_req_ids_ptr,
+            lru_topk_indices_ptr,
+            lru_slot_to_token_ptr,
+            lru_slots_ptr,
+            lru_current_slots_ptr,
+            lru_miss_count_ptr,
+            lru_miss_tokens_ptr,
+            lru_miss_slots_ptr,
             block_table,
             block_size,
             token_size_bytes_k,
@@ -408,44 +437,38 @@ class SFAKVOffloadWorker:
             gvas_v_bases,
             addr_k_bases,
             addr_v_bases,
-            resident_capacity,
-            max_token,
-            workspace_threads,
-            requested_threads,
-            token_mark_workspace,
-            token_pos_workspace,
-            slot_workspace,
-            miss_position_workspace,
-            epochs,
+            lru_token_mark_workspace_ptr,
+            lru_token_pos_workspace_ptr,
+            lru_slot_workspace_ptr,
+            lru_miss_position_workspace_ptr,
+            lru_epochs_ptr,
             gvas_buffer,
             addr_buffer,
             size_buffer,
             num_tokens_buffer,
             do_offload,
         ) = args
-        num_reqs = topk_indices.shape[0]
-        topk = topk_indices.shape[1]
         cpu_sparse_attn.lru_resident_compact(
-            req_ids.data_ptr(),
-            last_req_ids.data_ptr(),
-            topk_indices.data_ptr(),
-            slot_to_token.data_ptr(),
-            lru_slots.data_ptr(),
-            current_slots.data_ptr(),
-            miss_count.data_ptr(),
-            miss_tokens.data_ptr(),
-            miss_slots.data_ptr(),
-            token_mark_workspace.data_ptr(),
-            token_pos_workspace.data_ptr(),
-            slot_workspace.data_ptr(),
-            miss_position_workspace.data_ptr(),
-            epochs.data_ptr(),
+            lru_req_ids_ptr,
+            lru_last_req_ids_ptr,
+            lru_topk_indices_ptr,
+            lru_slot_to_token_ptr,
+            lru_slots_ptr,
+            lru_current_slots_ptr,
+            lru_miss_count_ptr,
+            lru_miss_tokens_ptr,
+            lru_miss_slots_ptr,
+            lru_token_mark_workspace_ptr,
+            lru_token_pos_workspace_ptr,
+            lru_slot_workspace_ptr,
+            lru_miss_position_workspace_ptr,
+            lru_epochs_ptr,
             num_reqs,
-            topk,
-            resident_capacity,
-            max_token,
-            workspace_threads,
-            requested_threads,
+            self.sfa_sparse_topk,
+            self.lru_resident_capacity,
+            self.max_model_len,
+            self.lru_workspace_threads,
+            self.lru_workspace_threads,
         )
         num_tokens_to_load = cpu_sparse_attn.compute_lru_resident_addrs(
             miss_count,
@@ -459,8 +482,8 @@ class SFAKVOffloadWorker:
             gvas_v_bases,
             addr_k_bases,
             addr_v_bases,
-            resident_capacity,
-            requested_threads,
+            self.lru_resident_capacity,
+            self.lru_workspace_threads,
             gvas_buffer,
             addr_buffer,
             size_buffer,
@@ -480,20 +503,13 @@ class SFAKVOffloadWorker:
         layer_name: str,
         num_reqs: int,
         topk_indices_npu: torch.Tensor,
-        slot_to_token_npu: torch.Tensor,
-        lru_slots_npu: torch.Tensor,
         current_slots_npu: torch.Tensor,
-        miss_count_npu: torch.Tensor,
-        miss_tokens_npu: torch.Tensor,
-        miss_slots_npu: torch.Tensor,
         req_ids_npu: torch.Tensor,
-        last_req_ids_npu: torch.Tensor,
-        max_token: int,
         capturing: bool = False,
     ) -> bool:
         capturing = capturing or _is_current_stream_capturing()
-        topk = topk_indices_npu.shape[1]
-        capacity = slot_to_token_npu.shape[1]
+        topk = self.sfa_sparse_topk
+        capacity = self.lru_resident_capacity
         if topk > self.sfa_sparse_topk or capacity > self.lru_resident_capacity:
             raise ValueError(
                 "LRU resident tensors exceed configured workspace, "
@@ -501,35 +517,27 @@ class SFAKVOffloadWorker:
                 f"configured_topk={self.sfa_sparse_topk}, "
                 f"configured_capacity={self.lru_resident_capacity}"
             )
-        topk_indices_cpu = self.lru_topk_indices_cpu[:num_reqs, :topk]
-        slot_to_token_cpu = self.lru_slot_to_token_cpu[:num_reqs, :capacity]
-        lru_slots_cpu = self.lru_slots_cpu[:num_reqs, :capacity]
-        current_slots_cpu = self.lru_current_slots_cpu[:num_reqs, :topk]
-        miss_count_cpu = self.lru_miss_count_cpu[:num_reqs]
-        miss_tokens_cpu = self.lru_miss_tokens_cpu[:num_reqs, :topk]
-        miss_slots_cpu = self.lru_miss_slots_cpu[:num_reqs, :topk]
-        req_ids_cpu = self.lru_req_ids_cpu[:num_reqs]
-        last_req_ids_cpu = self.lru_last_req_ids_cpu[:num_reqs]
         cpu_block_table = self.cpu_block_table_host_buffer[:num_reqs]
-
-        topk_indices_cpu.copy_(topk_indices_npu[:num_reqs, :topk].to(torch.int32), non_blocking=capturing)
-        slot_to_token_cpu.copy_(slot_to_token_npu[:num_reqs, :capacity], non_blocking=capturing)
-        lru_slots_cpu.copy_(lru_slots_npu[:num_reqs, :capacity], non_blocking=capturing)
-        req_ids_cpu.copy_(req_ids_npu[:num_reqs], non_blocking=capturing)
-        last_req_ids_cpu.copy_(last_req_ids_npu[:num_reqs], non_blocking=capturing)
         cpu_block_table.copy_(self.cpu_block_table.gpu[:num_reqs], non_blocking=capturing)
+        topk_indices_cpu = self.lru_topk_indices_cpu[:num_reqs]
+        topk_indices_cpu.copy_(topk_indices_npu[:num_reqs], non_blocking=capturing)
+        req_ids_cpu = self.lru_req_ids_cpu[:num_reqs]
+        req_ids_cpu.copy_(req_ids_npu[:num_reqs], non_blocking=capturing)
 
-        requested_threads = self.lru_workspace_threads
         args = (
-            req_ids_cpu,
-            last_req_ids_cpu,
-            topk_indices_cpu,
-            slot_to_token_cpu,
-            lru_slots_cpu,
-            current_slots_cpu,
-            miss_count_cpu,
-            miss_tokens_cpu,
-            miss_slots_cpu,
+            num_reqs,
+            self.lru_miss_count_cpu_list[self.current_layer_load][:num_reqs],
+            self.lru_miss_tokens_cpu_list[self.current_layer_load][:num_reqs],
+            self.lru_miss_slots_cpu_list[self.current_layer_load][:num_reqs],
+            self.lru_req_ids_ptr,
+            self.lru_last_req_ids_ptrs[self.current_layer_load],
+            self.lru_topk_indices_ptr,
+            self.lru_slot_to_token_ptrs[self.current_layer_load],
+            self.lru_slots_ptrs[self.current_layer_load],
+            self.lru_current_slots_ptr,
+            self.lru_miss_count_ptrs[self.current_layer_load],
+            self.lru_miss_tokens_ptrs[self.current_layer_load],
+            self.lru_miss_slots_ptrs[self.current_layer_load],
             cpu_block_table,
             self.block_size,
             self.token_size_bytes_k,
@@ -538,15 +546,11 @@ class SFAKVOffloadWorker:
             self.gvas_v_bases[self.current_layer_load],
             self.addr_k_bases[self.current_layer_load],
             self.addr_v_bases[self.current_layer_load],
-            capacity,
-            max_token,
-            self.lru_workspace_threads,
-            requested_threads,
-            self.lru_token_mark_workspace,
-            self.lru_token_pos_workspace,
-            self.lru_slot_workspace,
-            self.lru_miss_position_workspace,
-            self.lru_epochs,
+            self.lru_token_mark_workspace_ptr,
+            self.lru_token_pos_workspace_ptr,
+            self.lru_slot_workspace_ptr,
+            self.lru_miss_position_workspace_ptr,
+            self.lru_epochs_ptr,
             self.gvas_buffer_cpu,
             self.addr_buffer_cpu,
             self.size_buffer_cpu,
@@ -573,17 +577,11 @@ class SFAKVOffloadWorker:
             self.addr_buffer_cpu,
             self.size_buffer_cpu,
             self.num_tokens_buffer_cpu,
-            self.topk_buffers_k[0].dtype,
             self.topk_buffers_k[0].device,
         )
 
+        current_slots_cpu = self.lru_current_slots_cpu[:num_reqs]
         current_slots_npu[:num_reqs, :topk].copy_(current_slots_cpu, non_blocking=capturing)
-        miss_count_npu[:num_reqs].copy_(miss_count_cpu, non_blocking=capturing)
-        miss_tokens_npu[:num_reqs, :topk].copy_(miss_tokens_cpu, non_blocking=capturing)
-        miss_slots_npu[:num_reqs, :topk].copy_(miss_slots_cpu, non_blocking=capturing)
-        slot_to_token_npu[:num_reqs, :capacity].copy_(slot_to_token_cpu, non_blocking=capturing)
-        lru_slots_npu[:num_reqs, :capacity].copy_(lru_slots_cpu, non_blocking=capturing)
-        last_req_ids_npu[:num_reqs].copy_(last_req_ids_cpu, non_blocking=capturing)
 
         self.current_layer_load += 1
         if self.current_layer_load == self.num_layers:
