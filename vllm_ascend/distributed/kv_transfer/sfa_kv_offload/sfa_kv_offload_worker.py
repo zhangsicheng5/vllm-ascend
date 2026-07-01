@@ -173,8 +173,8 @@ class SFAKVOffloadWorker:
         self.save_stream = None
         self.side_compute_stream = torch_npu.npu.Stream()
         self.kv_cache_config.num_blocks
-        allocate_dram_size = 64 * 1024 * 1024 * 1024 # 64GB, TODO get from config
-        zbal_h2d_init(allocate_dram_size, self.max_num_reqs * self.sfa_sparse_topk * 2)
+        self.allocate_dram_size = 64 * 1024 * 1024 * 1024 # 64GB, TODO get from config
+        zbal_h2d_init(self.allocate_dram_size, self.max_num_reqs * self.sfa_sparse_topk * 2)
 
     def _infer_group_block_sizes(
         self,
@@ -247,6 +247,12 @@ class SFAKVOffloadWorker:
             cpu_block_num = npu_block_num * cpu_block_num_multiple
             cpu_cache_size_single_card = cpu_block_num * self.block_size * (512 + 64) * torch.bfloat16.itemsize * self.num_layers
             logger.info(f'KV offload allocate {cpu_block_num} cpu blocks, size = {cpu_cache_size_single_card / 1024 / 1024 / 1024} GB per rank')
+            if cpu_cache_size_single_card > self.allocate_dram_size:
+                raise ValueError(
+                    f"Needed cpu memory ({cpu_cache_size_single_card / 1024 / 1024 / 1024} GB/rank) is greater than "
+                    f"available cpu memory ({self.allocate_dram_size / 1024 / 1024 / 1024} GB/rank), "
+                    "try to decrease gpu_memory_utilization or allocate more cpu memory during init."
+                )
             self.k_caches_cpu: list[torch.Tensor] = [empty_tensor([cpu_block_num, self.block_size, 1, 512], dtype=torch.bfloat16, pin_memory=True) for _ in range(self.num_layers)]
             self.v_caches_cpu: list[torch.Tensor] = [empty_tensor([cpu_block_num, self.block_size, 1, 64], dtype=torch.bfloat16, pin_memory=True) for _ in range(self.num_layers)]
 
