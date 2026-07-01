@@ -1362,7 +1362,7 @@ class NPUModelRunner(GPUModelRunner):
                 # return int(req_id.split('-')[0]) + 1 # for test, '0-94754505' -> 1
                 return zlib.adler32(req_id.encode('utf-8'))
 
-            num_offloaded_blocks = np.maximum(self.input_batch.num_computed_tokens_cpu[:num_reqs] // self.block_size - 1, 0)
+            num_offloaded_blocks = self.input_batch.num_computed_tokens_cpu[:num_reqs] // self.block_size
             is_prefill = num_scheduled_tokens > 1 # decode_threshold in spec decode case
             num_offloaded_blocks[is_prefill] = 0
 

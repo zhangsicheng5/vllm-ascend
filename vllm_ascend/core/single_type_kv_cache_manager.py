@@ -402,7 +402,7 @@ class OffloadMLAAttentionManager(FullAttentionManager):
             num_to_free_blocks = 0
         else:
             # only offload & free after (chunk) prefill is done
-            num_offloaded_blocks = max(num_allocated_tokens // self.block_size - 1, 0) # delay free one last full block, reserve for decode case
+            num_offloaded_blocks = num_allocated_tokens // self.block_size
             num_freed_blocks = len(req_freed_blocks)
             num_to_free_blocks = num_offloaded_blocks - num_freed_blocks
 
