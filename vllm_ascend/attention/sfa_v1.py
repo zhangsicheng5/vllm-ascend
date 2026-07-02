@@ -240,7 +240,6 @@ class AscendSFAMetadata:
     num_offloaded_blocks: torch.Tensor | None = None
     req_ids_tensor: torch.Tensor | None = None
     token_to_req: torch.Tensor | None = None
-    tokens_per_req: torch.Tensor | None = None
 
 
 M = TypeVar("M", bound=AscendSFAMetadata)
@@ -509,7 +508,6 @@ class AscendSFAMetadataBuilder(MLACommonMetadataBuilder[AscendSFAMetadata]):
             num_offloaded_blocks=num_offloaded_blocks,
             req_ids_tensor=req_ids_tensor,
             token_to_req=common_attn_metadata.token_to_req,
-            tokens_per_req=common_attn_metadata.tokens_per_req,
         )
 
     def build_for_graph_capture(
@@ -1969,7 +1967,6 @@ class AscendSFAImpl(MLAAttentionImpl):
             self.lru_current_slots[:num_tokens],
             req_ids_arg,
             token_to_req if is_mtp_decode else None,
-            None,
             forward_context.capturing,
         )
 

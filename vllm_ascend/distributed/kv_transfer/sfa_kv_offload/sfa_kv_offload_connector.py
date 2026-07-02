@@ -104,7 +104,6 @@ class SFAKVOffloadConnector(KVConnectorBase_V1, SupportsHMA):
         current_slots: torch.Tensor,
         req_ids: torch.Tensor,
         token_to_req: torch.Tensor | None = None,
-        tokens_per_req: torch.Tensor | None = None,
         capturing: bool = False,
     ) -> bool:
         return self.connector_worker.prepare_lru_resident_and_load(
@@ -115,7 +114,6 @@ class SFAKVOffloadConnector(KVConnectorBase_V1, SupportsHMA):
             current_slots,
             req_ids,
             token_to_req,
-            tokens_per_req,
             capturing,
         )
 

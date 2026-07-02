@@ -465,7 +465,6 @@ def maybe_prepare_lru_resident_and_load_graph(
     current_slots: torch.Tensor,
     req_ids: torch.Tensor,
     token_to_req: torch.Tensor | None = None,
-    tokens_per_req: torch.Tensor | None = None,
     capturing: bool = False,
 ) -> bool:
     if not has_kv_transfer_group() or not is_v1_kv_transfer_group():
@@ -483,7 +482,6 @@ def maybe_prepare_lru_resident_and_load_graph(
         current_slots,
         req_ids,
         token_to_req,
-        tokens_per_req,
         capturing,
     )
 

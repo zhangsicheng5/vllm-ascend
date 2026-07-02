@@ -305,6 +305,7 @@ class OffloadMLAAttentionManager(FullAttentionManager):
         super().__init__(kv_cache_spec, **kwargs)
         self.req_to_offloaded_blocks: defaultdict[str, list[KVCacheBlock]] = defaultdict(list)
         self.req_to_num_allocated_tokens: defaultdict[str, int] = defaultdict(int)
+        self.decode_threshold: int | None = None
 
     def get_num_blocks_to_allocate(
         self,
@@ -390,23 +391,28 @@ class OffloadMLAAttentionManager(FullAttentionManager):
         Returns:
             The new allocated blocks.
         """
+        if self.decode_threshold is None:
+            # whether current request is prefill or decode,
+            # decode_threshold = 1 + spec_decode_size,
+            # can't touch vllm config here, have to get it during scheduling.
+            self.decode_threshold = num_tokens - num_tokens_main_model + 1
 
-        req_blocks = self.req_to_blocks[request_id] # TODO change to queue
+        req_blocks = self.req_to_blocks[request_id]
         req_freed_blocks = self.req_to_offloaded_blocks[request_id]
         num_required_blocks = cdiv(num_tokens, self.block_size)
 
         # free old full blocks (which should be already offloaded)
         num_allocated_tokens = self.req_to_num_allocated_tokens[request_id]
         num_new_tokens_main_model = num_tokens_main_model - num_allocated_tokens
-        if num_new_tokens_main_model > 1:
+        if num_new_tokens_main_model > self.decode_threshold:
+            # (chunk) prefill case, should not release any blocks
             num_to_free_blocks = 0
         else:
             # only offload & free after (chunk) prefill is done
-            num_offloaded_blocks = num_allocated_tokens // self.block_size # delay free one last full block, reserve for decode case
+            num_offloaded_blocks = num_allocated_tokens // self.block_size
             num_freed_blocks = len(req_freed_blocks)
             num_to_free_blocks = num_offloaded_blocks - num_freed_blocks
 
-        # logger.info(f'>>>>> allocate new blocks, num_tokens = {num_tokens}, allocated_tokens={num_allocated_tokens}, req_blocks={len(req_blocks)}, req_offloaded_blocks = {len(req_freed_blocks)}, num_to_free_blocks = {num_to_free_blocks}')
         to_free_blocks: list[KVCacheBlock] = []
         for _ in range(num_to_free_blocks):
             to_free_block = req_blocks.pop(0)
