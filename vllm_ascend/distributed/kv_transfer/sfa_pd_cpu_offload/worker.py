@@ -21,6 +21,7 @@ import os
 import re
 import threading
 from collections import defaultdict
+import copy
 from typing import TYPE_CHECKING, Any
 
 import torch
@@ -44,6 +45,8 @@ from vllm_ascend.distributed.kv_transfer.sfa_kv_offload.sfa_kv_offload_worker im
 from vllm_ascend.distributed.kv_transfer.sfa_pd_cpu_offload.protocol import (
     LayerMetadata,
     SendTask,
+    SfaPDProducerMetadata,
+    SfaPDProducerReqMeta,
     get_external_request_id,
 )
 from vllm_ascend.distributed.kv_transfer.sfa_pd_cpu_offload.read_thread import (
@@ -62,7 +65,12 @@ from vllm_ascend.distributed.kv_transfer.utils.transfer_engine_backend import (
 )
 from vllm_ascend.distributed.kv_transfer.utils.utils import (
     collect_storage_merged_register_regions,
+    context_parallel_parameters_check,
+    get_cp_group,
+    get_local_remote_block_port_mappings,
+    get_transfer_mappings,
     get_transfer_timeout_value,
+    parallel_info,
     validate_register_region_count,
 )
 
@@ -472,6 +480,11 @@ class SFAPDCpuOffloadProducerWorker:
         self.dp_rank = vllm_config.parallel_config.data_parallel_rank
         self.tp_rank = get_tensor_model_parallel_rank()
         self.tp_size = vllm_config.parallel_config.tensor_parallel_size
+        # we do not support cp now.
+        self.pcp_size = 1
+        self.pcp_rank = 0
+        self.dcp_size = 1
+        self.dcp_rank = 0
         self.side_channel_host = get_ip()
         self.side_channel_port = vllm_config.kv_transfer_config.kv_port + self.dp_rank * self.tp_size
         self.total_layers = vllm_config.model_config.get_num_layers(vllm_config.parallel_config)
@@ -483,6 +496,10 @@ class SFAPDCpuOffloadProducerWorker:
         self.block_size = [spec.block_size for spec in self.kv_cache_specs]
         self.num_kv_cache_groups = len(self.kv_cache_specs)
         self.use_mla = self.vllm_config.model_config.use_mla
+        # we only support mla(sfa) now.
+        assert self.use_mla
+        self.pd_head_ratio = 1
+        self.total_num_kv_heads = 1
         self.layer_metadata: dict[str, LayerMetadata] = {}
         self.index_to_name: defaultdict[int, list[str]] = defaultdict(list)
         self.current_layer = 0
@@ -510,7 +527,120 @@ class SFAPDCpuOffloadProducerWorker:
             return req_meta
         raise RuntimeError("SFAPDCpuOffloadConnector P side supports memfabric pull only.")
 
-    def start_load_kv(self, metadata: KVConnectorMetadata) -> None:
+    # copied from MooncakeLayerwiseConnectorWorker, use it to compute p -> d port mapping.
+    # {(ip, port)]: {local_block_ids: [], remote_block_ids: {}}}
+    def _get_kv_split_metadata(self, req_meta: SfaPDProducerReqMeta, req_idx: int, req_id: str, group_idx: int):
+        remote_pcp_size = req_meta.remote_pcp_size
+        remote_dcp_size = req_meta.remote_dcp_size
+        remote_tp_size = req_meta.remote_tp_size
+        remote_hosts = [req_meta.remote_host]
+        remote_port = req_meta.remote_port
+        local_transed_tokens = max(req_meta.remote_cache_tokens, req_meta.local_transed_tokens)
+        # local_transed_tokens tokens that have already been transmitted on the local side
+        local_computed_tokens = req_meta.local_computed_tokens
+        prompt_len = req_meta.prompt_len
+        p_parallel_info = parallel_info(
+            tp_size=self.tp_size,
+            pcp_size=self.pcp_size,
+            dcp_size=self.dcp_size,
+            pd_head_ratio=self.pd_head_ratio,
+            use_mla=self.use_mla,
+        )
+        d_parallel_info = parallel_info(
+            tp_size=remote_tp_size,
+            pcp_size=remote_pcp_size,
+            dcp_size=remote_dcp_size,
+            pd_head_ratio=self.pd_head_ratio,
+            use_mla=self.use_mla,
+        )
+        cp_size = self.pcp_size * self.dcp_size
+        # to_trans_idx all tokens that have been processed up to the current step
+        if req_meta.chunk_finish:
+            to_trans_idx = math.ceil(local_computed_tokens / self.block_size[group_idx])
+        else:
+            to_trans_idx = math.floor(local_computed_tokens / self.block_size[group_idx])
+        prompt_block_size = math.ceil(prompt_len / self.block_size[group_idx])
+        #
+        num_local_blocks = prompt_block_size // cp_size + int(
+            (prompt_block_size % cp_size) > (self.pcp_rank * self.dcp_size + self.dcp_rank)
+        )
+        already_send_blocks = to_trans_idx // cp_size + int(
+            (to_trans_idx % cp_size) > (self.pcp_rank * self.dcp_size + self.dcp_rank)
+        )
+        if num_local_blocks == already_send_blocks:
+            req_meta.chunk_finish = True
+        transed_idx = math.floor(local_transed_tokens / self.block_size[group_idx])
+
+        p_cp_group = get_cp_group(self.tp_size, self.total_num_kv_heads, self.dcp_size)
+        d_cp_group = get_cp_group(remote_tp_size, self.total_num_kv_heads, remote_dcp_size)
+        logger.debug("Compute cp group for P&D req_id=%r p_cp_group=%r d_cp_group=%r", req_id, p_cp_group, d_cp_group)
+
+        cp_ratio = len(p_cp_group) // len(d_cp_group)
+        if cp_ratio == 0:
+            selected_p_cp_groups = p_cp_group
+            selected_d_cp_groups = d_cp_group
+        else:
+            x = req_idx % cp_ratio
+            start = x * len(d_cp_group)
+            selected_p_cp_groups = p_cp_group[start : (start + len(d_cp_group))]
+            selected_d_cp_groups = d_cp_group
+        assert len(selected_p_cp_groups) == len(selected_d_cp_groups)
+
+        p_head_group_rank = (self.tp_rank - self.dcp_rank) // self.dcp_size
+        selected_p_cp_group = []
+        selected_d_cp_group = []
+        for idx, cp_group in enumerate(selected_p_cp_groups):
+            if p_head_group_rank in cp_group:  # Check whether the rank is in selected_p_cp_groups
+                selected_p_cp_group = cp_group
+                selected_d_cp_group = selected_d_cp_groups[idx]
+        if len(selected_p_cp_group) == 0:
+            return {}
+
+        logger.debug(
+            "MooncakeLayerwiseConnector _get_kv_split_metadata req_id=%r "
+            "P-side selected head_group cp group: %s, D-side selected head_group cp group: %s",
+            req_id,
+            selected_p_cp_group,
+            selected_d_cp_group,
+        )
+
+        context_parallel_parameters_check(
+            remote_pcp_size, remote_dcp_size, p_parallel_info, d_parallel_info, self.total_num_kv_heads
+        )
+        p_rank_block_mapping, d_block_rank_mapping, pd_head_mapping, d_trans_count_mapping = (
+            get_local_remote_block_port_mappings(
+                to_trans_idx,
+                p_parallel_info,
+                d_parallel_info,
+                remote_hosts,
+                remote_port,
+                selected_p_cp_group,
+                selected_d_cp_group,
+                prompt_len,
+                self.block_size[group_idx],
+                req_meta,
+                self.total_num_kv_heads,
+                req_id,
+            )
+        )
+        transfer_mappings = get_transfer_mappings(
+            p_rank_block_mapping,
+            d_block_rank_mapping,
+            pd_head_mapping,
+            d_trans_count_mapping,
+            req_meta,
+            group_idx,
+            p_parallel_info,
+            req_id,
+            transed_idx,
+            to_trans_idx,
+            self.tp_rank,
+            self.pcp_rank,
+            self.dcp_rank,
+        )
+        return transfer_mappings
+
+    def start_load_kv(self, metadata: SfaPDProducerMetadata) -> None:
         """Prepare P-side request metadata for memfabric pull mode.
 
         * reset ``self.current_layer`` — the per-step layer counter that
@@ -525,24 +655,58 @@ class SFAPDCpuOffloadProducerWorker:
         is at kernel granularity, scale 1)."""
         if self._backend == BACKEND_MEMFABRIC:
             self.current_layer = 0
-            for req_id, req_meta in getattr(metadata, "requests", {}).items():
-                if req_meta.remote_port is None:
-                    continue
-                remote_tp_size = req_meta.remote_tp_size or self.tp_size
-                tp_ratio = max(1, self.tp_size // remote_tp_size)
-                old_remote_port = req_meta.remote_port
-                req_meta.remote_port = req_meta.remote_port + self.tp_rank // tp_ratio
+            # update trans info, copied from MooncakeLayerwiseConnectorWorker
+            # Hybrid kv in P node is not considered now, but this should be compatible with hybrid.
+            # If we need hybrid kv in P node here, modify the fake remote_block_ids and update_req_meta construction.
+            update_metadata: dict[str, SfaPDProducerReqMeta] = {}
+            for req_idx, (req_id, req_meta) in enumerate(metadata.requests.items()):
+                transfer_mappings: dict[tuple[str, int], dict[str, Any]] = {}
+                assert len(self.kv_cache_specs) == 1, "hybrid kv in P node not considered now."
+                assert len(req_meta.remote_block_ids) == 0, (
+                    "kv is passed to a fixed buffer in D node so remote_block_ids is not needed here."
+                )
+                # construct a fake remote_block_ids for _get_kv_split_metadata usage.
+                req_meta.remote_block_ids.append(copy.deepcopy(req_meta.local_block_ids[0]))
+                for i, kv_cache_spec in enumerate(self.kv_cache_specs):
+                    single_group_transfer_mappings = self._get_kv_split_metadata(req_meta, req_idx, req_id, i)
+                    for (host, port), block_dict in single_group_transfer_mappings.items():
+                        if (host, port) not in transfer_mappings:
+                            transfer_mappings[(host, port)] = {
+                                "local_block_ids": [[] for _ in range(self.num_kv_cache_groups)],
+                                "remote_block_ids": [[] for _ in range(self.num_kv_cache_groups)],
+                                "trans_count": [0 for _ in range(self.num_kv_cache_groups)],
+                            }
+                        transfer_mappings[(host, port)]["local_block_ids"][i].extend(
+                            single_group_transfer_mappings[(host, port)]["local_block_ids"]
+                        )
+                        transfer_mappings[(host, port)]["remote_block_ids"][i].extend(
+                            single_group_transfer_mappings[(host, port)]["remote_block_ids"]
+                        )
+                        transfer_mappings[(host, port)]["trans_count"][i] = single_group_transfer_mappings[
+                            (host, port)
+                        ]["trans_count"]
+                assert len(transfer_mappings) <= 1, f"Not support add mutil transfer task for req_id:{req_id}"
+                update_req_meta = copy.deepcopy(req_meta)
+                for (host, port), block_dict in transfer_mappings.items():
+                    update_req_meta.remote_host = host
+                    update_req_meta.remote_port = port
+                    # if needed hybrid kv, use _get_kernel_block_ids like MooncakeLayerwiseConnectorWorker.
+                    update_req_meta.local_block_ids = block_dict["local_block_ids"]
+                    update_req_meta.remote_block_ids = []
+                    update_req_meta.trans_count = block_dict["trans_count"]
+                    update_metadata[req_id] = update_req_meta
+            metadata.requests = {}
+            for req_id, req_meta in update_metadata.items():
+                metadata.requests[req_id] = update_metadata[req_id]
                 if envs.VLLM_ASCEND_SFA_DEBUG:
                     logger.info(
                         "MembPull P start_load_kv req %s: remote_host=%s, "
-                        "remote_port=%s->%s, tp_rank=%s, tp_ratio=%s, local_block_ids=%s, "
+                        "remote_port=%s, tp_rank=%s, local_block_ids=%s, "
                         "chunk_finish=%s, local_computed_tokens=%s, local_transed_tokens=%s",
                         req_id,
                         req_meta.remote_host,
-                        old_remote_port,
                         req_meta.remote_port,
                         self.tp_rank,
-                        tp_ratio,
                         req_meta.local_block_ids,
                         req_meta.chunk_finish,
                         req_meta.local_computed_tokens,
@@ -652,7 +816,7 @@ class SFAPDCpuOffloadProducerWorker:
         layer_name: str,
         kv_layer: list[torch.Tensor],
         attn_metadata: AttentionMetadata,
-        connector_metadata: KVConnectorMetadata,
+        connector_metadata: SfaPDProducerMetadata,
         **kwargs,
     ) -> None:
         if self._backend != BACKEND_MEMFABRIC:

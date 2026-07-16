@@ -76,8 +76,7 @@ class MembPullReadThread(threading.Thread):
         self.engine = engine
         self._state = state
         self.ready_event = threading.Event()
-        self._p_session: str | None = None
-        self._p_layer_meta: dict[str, Any] = {}
+        self._p_layer_metas: dict[str, dict[str, Any]] = {} # {p_session: {layer: meta}}
         self._done_requests: set[str] = set()
         self._lock = threading.Lock()
         self._host = get_ip()
@@ -113,12 +112,14 @@ class MembPullReadThread(threading.Thread):
                     msg_type = msg[0]
 
                     if msg_type == MF_META:
-                        self._p_session = msg[1]
-                        self._p_layer_meta = msgspec.msgpack.decode(msg[2])
+                        p_session = msg[1]
+                        p_layer_meta = msgspec.msgpack.decode(msg[2])
+                        if p_session not in self._p_layer_metas:
+                            self._p_layer_metas[p_session] = p_layer_meta
                         logger.info(
-                            "Received MF_META: P session=%s, %d layers", self._p_session, len(self._p_layer_meta)
+                            "Received MF_META: P session=%s, %d layers", p_session, len(p_layer_meta)
                         )
-                        for layer_name, layer_meta in self._p_layer_meta.items():
+                        for layer_name, layer_meta in p_layer_meta.items():
                             if envs.VLLM_ASCEND_SFA_DEBUG:
                                 logger.info(
                                     "MembPull D recv MF_META layer=%s: base_addrs=%s, "
@@ -135,9 +136,11 @@ class MembPullReadThread(threading.Thread):
                         layer_name = msg[2]
                         read_reqs = [(entry[0], list(entry[1])) for entry in msg[3]]
                         done_ext_ids = list(msg[4]) if len(msg) > 4 else []
+                        p_session = msg[5]
                         if envs.VLLM_ASCEND_SFA_DEBUG:
                             logger.info(
-                                "MembPull D recv READ_READY_BATCH: layer=%d (%s), reqs=%d, done_reqs=%d",
+                                "MembPull D recv READ_READY_BATCH: p_session=%s, layer=%d (%s), reqs=%d, done_reqs=%d",
+                                p_session,
                                 layer_idx,
                                 layer_name,
                                 len(read_reqs),
@@ -145,7 +148,7 @@ class MembPullReadThread(threading.Thread):
                             )
                         try:
                             if read_reqs:
-                                self._do_read_batch(layer_name, read_reqs)
+                                self._do_read_batch(p_session, layer_name, read_reqs)
                             sock.send_multipart((identity, b"", encoder.encode((READ_DONE, layer_idx))))
                             if envs.VLLM_ASCEND_SFA_DEBUG:
                                 logger.info(
@@ -184,7 +187,7 @@ class MembPullReadThread(threading.Thread):
         finally:
             ctx.destroy(linger=0)
 
-    def _resolve_read_layer(self, layer_name: str) -> dict[str, Any] | None:
+    def _resolve_read_layer(self, p_session: str, layer_name: str) -> dict[str, Any] | None:
         state = self._state
         pool_idx = state.main_name_to_idx.get(layer_name)
         if pool_idx is None:
@@ -199,12 +202,13 @@ class MembPullReadThread(threading.Thread):
                 pool_idx,
                 offload_id,
             )
-        p_meta = self._p_layer_meta.get(layer_name)
+        p_layer_meta = self._p_layer_metas[p_session]
+        p_meta = p_layer_meta.get(layer_name)
         if p_meta is None:
             logger.warning(
                 "MembPull _do_read: layer %s not in P layer_meta (MF_META not received? have %d layers), skip",
                 layer_name,
-                len(self._p_layer_meta),
+                len(p_layer_meta),
             )
             return None
         p_base_addrs = p_meta["base_addrs"]
@@ -516,13 +520,14 @@ class MembPullReadThread(threading.Thread):
 
     def _do_read_batch(
         self,
+        p_session: str,
         layer_name: str,
         read_reqs: list[tuple[str, list[int]]],
     ) -> None:
-        if self._p_session is None:
-            raise RuntimeError("MF_META not received before READ_READY_BATCH")
+        if p_session not in self._p_layer_metas:
+            raise RuntimeError(f"MF_META of {p_session} not received before READ_READY_BATCH")
 
-        layer = self._resolve_read_layer(layer_name)
+        layer = self._resolve_read_layer(p_session, layer_name)
         if layer is None:
             return
 
@@ -567,11 +572,11 @@ class MembPullReadThread(threading.Thread):
                 "p_session=%s, transfers=%d (coalesced from %d)",
                 layer_name,
                 len(read_infos),
-                self._p_session,
+                p_session,
                 len(all_local_ptrs),
                 atomic_total,
             )
-        ret = self.engine.batch_transfer_sync_read(self._p_session, all_local_ptrs, all_peer_ptrs, all_lengths)
+        ret = self.engine.batch_transfer_sync_read(p_session, all_local_ptrs, all_peer_ptrs, all_lengths)
         if ret != 0:
             raise RuntimeError(f"memfabric batch read failed for layer {layer_name}, ret={ret}")
         for read_info in read_infos:

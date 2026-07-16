@@ -72,6 +72,7 @@ class SFAPDCpuOffloadConnector(KVConnectorBase_V1, SupportsHMA):
         # reading before this layer may overwrite the slot. ``prefetch_layer_map``
         # maps each reusing layer -> its mate; empty when layer reuse is disabled
         # (so the gate below becomes a no-op, matching the no-reuse behavior).
+        self.total_layers = vllm_config.model_config.get_num_layers(vllm_config.parallel_config)
         lw_config = get_layerwise_config(
             vllm_config.model_config.get_num_layers(vllm_config.parallel_config),
             vllm_config.kv_transfer_config.kv_connector_extra_config,
@@ -227,6 +228,8 @@ class SFAPDCpuOffloadConnector(KVConnectorBase_V1, SupportsHMA):
         # so keep its normal HBM->CPU save synchronization semantics.
         if self.is_consumer and self.connector_worker is not None:
             self.connector_worker.wait_for_save()
+        elif self.is_producer:
+            self.wait_for_layer_send(self.total_layers - 1)
 
     # ------------------------------------------------------------------
     # SFA duck-typed hooks (attention/utils.py) — D side only

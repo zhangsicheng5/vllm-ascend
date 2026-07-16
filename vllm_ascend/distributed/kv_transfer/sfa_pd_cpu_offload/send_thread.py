@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import queue
 import threading
 from dataclasses import dataclass
@@ -52,7 +53,7 @@ class MembPullSendingThread(threading.Thread):
     ) -> None:
         super().__init__(daemon=True, name="SfaPDMembPullSendingThread")
         self.timeout = 10.0
-        self._mf_meta_sent = False
+        self._mf_meta_sent: defaultdict[str, bool] = defaultdict(bool)
         self._state = state
         self.total_layers = state.total_layers
         self.ready_event = ready_event
@@ -67,12 +68,16 @@ class MembPullSendingThread(threading.Thread):
             self.layer_send_done_events.append(event)
         self._persist_ctx = zmq.Context()
         self._dealers: dict[str, Any] = {}
+        self._dealers_in_use: dict[str, tuple[zmq.Socket, set[int]]] = {}
         self._stopped = False
         # Per-layer fresh compute-stream events recorded by the producer in
         # save_kv_layer right after KV scatter.
         self._p_save_events: dict[int, Any] = {}
 
-    def _ensure_dealer(self, path: str):
+    def _ensure_dealer(self, path: str, layer_idx: int):
+        if layer_idx > 0:
+            assert path in self._dealers, f"dealer of path {path} not initialized"
+            return self._dealers[path]
         if path not in self._dealers:
             dealer = self._persist_ctx.socket(zmq.DEALER)
             dealer.setsockopt(zmq.LINGER, 0)
@@ -80,6 +85,8 @@ class MembPullSendingThread(threading.Thread):
             dealer.setsockopt(zmq.RCVHWM, 0)
             dealer.connect(path)
             self._dealers[path] = dealer
+        if path not in self._dealers_in_use:
+            self._dealers_in_use[path] = (self._dealers[path], set(range(self.total_layers)))
         return self._dealers[path]
 
     def run(self) -> None:
@@ -110,7 +117,7 @@ class MembPullSendingThread(threading.Thread):
                 except queue.Empty:
                     pass
                 try:
-                    if self._dealers:
+                    if self._dealers_in_use:
                         self._drain_read_replies(decoder)
                 except Exception as e:
                     logger.error("MembPull read-reply drain error: %s: %s", type(e).__name__, e)
@@ -122,6 +129,7 @@ class MembPullSendingThread(threading.Thread):
                 for dealer in self._dealers.values():
                     dealer.close(linger=0)
                 self._dealers.clear()
+                self._dealers_in_use.clear()
 
     def record_p_save_event(self, layer_idx: int) -> None:
         evt = torch.npu.Event()
@@ -137,48 +145,67 @@ class MembPullSendingThread(threading.Thread):
             send_task.wait_event.synchronize()
         layer_name = send_task.layer_name
 
-        read_reqs: list[tuple[str, list[int]]] = []
-        done_ext_ids: list[str] = []
+        # read_reqs: list[tuple[str, list[int]]] = []
+        # done_ext_ids: list[str] = []
+        # endpoints: set[tuple[str, int]] = set()
+        read_reqs_to: defaultdict[tuple[str, int], list[tuple[str, list[int]]]] = defaultdict(list)
+        done_ext_ids_to: defaultdict[tuple[str, int], list[str]] = defaultdict(list)
         endpoints: set[tuple[str, int]] = set()
         for req_id, rm in send_task.send_request.items():
             p_block_ids = rm.local_block_ids[0] if rm.local_block_ids else []
             ext_id = get_external_request_id(req_id)
             has_endpoint = bool(rm.remote_host) and bool(rm.remote_port)
+            endpoint = (rm.remote_host, rm.remote_port)
             chunk_done = layer_idx == self.total_layers - 1 and rm.chunk_finish and has_endpoint
             if p_block_ids and has_endpoint:
-                read_reqs.append((ext_id, p_block_ids))
+                read_reqs_to[endpoint].append((ext_id, p_block_ids))
             if chunk_done:
-                done_ext_ids.append(ext_id)
+                done_ext_ids_to[endpoint].append(ext_id)
             if (p_block_ids or chunk_done) and has_endpoint:
-                endpoints.add((rm.remote_host, rm.remote_port))
+                endpoints.add(endpoint)
             if envs.VLLM_ASCEND_SFA_DEBUG:
                 logger.info(
-                    "MembPull P add READ_READY_BATCH item: layer=%d (%s), req=%s, p_blocks=%d, done=%s",
+                    "MembPull P add READ_READY_BATCH item: layer=%d (%s), req=%s, p_blocks=%d, done=%s, endpoint=%s",
                     layer_idx,
                     layer_name,
                     ext_id,
                     len(p_block_ids),
                     chunk_done,
+                    endpoint,
                 )
 
-        if read_reqs or done_ext_ids:
-            if 0 <= layer_idx < len(self.layer_send_done_events):
-                self.layer_send_done_events[layer_idx].clear()
-            if self.layer_transfer_finished_events is not None and 0 <= layer_idx < len(
-                self.layer_transfer_finished_events
-            ):
-                self.layer_transfer_finished_events[layer_idx].clear()
-            if len(endpoints) != 1:
-                raise RuntimeError(
-                    f"MembPull layer {layer_idx} expects exactly one D endpoint, got {sorted(endpoints)}"
-                )
-            remote_host, remote_port = next(iter(endpoints))
+        if len(read_reqs_to) == 0 and len(done_ext_ids_to) == 0:
+            # no send tasks
+            self._signal_layer_done(layer_idx)
+            return
+
+        if 0 <= layer_idx < len(self.layer_send_done_events):
+            self.layer_send_done_events[layer_idx].clear()
+        if self.layer_transfer_finished_events is not None and 0 <= layer_idx < len(
+            self.layer_transfer_finished_events
+        ):
+            self.layer_transfer_finished_events[layer_idx].clear()
+        if layer_idx == 0:
+            self.wait_send_done_layer_id = 0
+
+        for endpoint in endpoints:
+            read_reqs = read_reqs_to[endpoint]
+            done_ext_ids = done_ext_ids_to[endpoint]
+            remote_host, remote_port = endpoint
             path = make_zmq_path("tcp", remote_host, remote_port)
-            dealer = self._ensure_dealer(path)
+            dealer = self._ensure_dealer(path, layer_idx)
 
-            if not self._mf_meta_sent:
+            remote_key = f'{remote_host}:{remote_port}'
+            if not self._mf_meta_sent[remote_key]:
                 self._send_mf_meta(dealer, encoder)
-            dealer.send(encoder.encode((READ_READY_BATCH, layer_idx, layer_name, read_reqs, done_ext_ids)))
+                self._mf_meta_sent[remote_key] = True
+                logger.info(
+                    "MembPull P sent MF_META: session=%s, target=%s, layers=%d",
+                    self._state.p_session,
+                    remote_key,
+                    len(self._state.layer_metadata),
+                )
+            dealer.send(encoder.encode((READ_READY_BATCH, layer_idx, layer_name, read_reqs, done_ext_ids, self._state.p_session)))
             if envs.VLLM_ASCEND_SFA_DEBUG:
                 logger.info(
                     "MembPull P send READ_READY_BATCH: layer=%d (%s), reqs=%d, done_reqs=%d",
@@ -187,8 +214,6 @@ class MembPullSendingThread(threading.Thread):
                     len(read_reqs),
                     len(done_ext_ids),
                 )
-        else:
-            self._signal_layer_done(layer_idx)
 
     def _send_mf_meta(self, dealer, encoder: msgspec.msgpack.Encoder) -> None:
         p_meta_dict = {}
@@ -204,17 +229,15 @@ class MembPullSendingThread(threading.Thread):
             payload = [f for f in frames if f != b""]
             if payload != [b"ACK"]:
                 raise RuntimeError(f"MembPull P MF_META got unexpected reply: {payload!r}")
-            self._mf_meta_sent = True
-            logger.info(
-                "MembPull P sent MF_META: session=%s, layers=%d",
-                self._state.p_session,
-                len(p_meta_dict),
-            )
         else:
             raise RuntimeError("MembPull P MF_META timed out (no reply from D)")
 
     def _drain_read_replies(self, decoder: msgspec.msgpack.Decoder) -> None:
-        for dealer in self._dealers.values():
+        def all_dealers_finish_sending_layer(dealers: dict[str, tuple[zmq.Socket, set[int]]], layer_id: int):
+            return all([layer_id not in wait_send_done_layers for (_, wait_send_done_layers) in dealers.values()])
+
+        for path in list(self._dealers_in_use):
+            dealer, wait_send_done_layers = self._dealers_in_use[path]
             while True:
                 try:
                     if not dealer.poll(timeout=0):
@@ -229,17 +252,28 @@ class MembPullSendingThread(threading.Thread):
                     msg = decoder.decode(payload[0])
                 except Exception:
                     continue
-                if len(msg) >= 2 and msg[0] == READ_DONE:
-                    self._signal_layer_done(msg[1])
-                elif len(msg) >= 2 and msg[0] == READ_FAILED:
-                    layer_idx = msg[1]
+                if len(msg) < 2 or msg[0] not in [READ_DONE, READ_FAILED]:
+                    continue
+                read_ret = msg[0]
+                send_done_layer_id = msg[1]
+                if read_ret == READ_FAILED:
                     error = msg[2] if len(msg) > 2 else ""
                     logger.error(
                         "MembPull P received READ_FAILED: layer=%s, error=%s",
-                        layer_idx,
+                        send_done_layer_id,
                         error,
                     )
-                    self._signal_layer_done(layer_idx)
+                wait_send_done_layers.remove(send_done_layer_id)
+                break
+        if all_dealers_finish_sending_layer(self._dealers_in_use, self.wait_send_done_layer_id):
+            self._signal_layer_done(self.wait_send_done_layer_id)
+            self.wait_send_done_layer_id += 1
+            if self.wait_send_done_layer_id == self.total_layers:
+                assert all([len(wait_send_done_layers) == 0 for (_, wait_send_done_layers) in self._dealers_in_use.values()]), (
+                    "all layers of all endpoints should already finished sending now"
+                )
+                self.wait_send_done_layer_id = 0
+                self._dealers_in_use.clear()
 
     def _signal_layer_done(self, layer_idx: int) -> None:
         if 0 <= layer_idx < len(self.layer_send_done_events):
