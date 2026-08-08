@@ -227,6 +227,25 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
             for _ in range(self.num_speculative_tokens)
         ]
 
+        self.sparse_kv_offload_enabled = getattr(self.runner, "sparse_kv_offload_enabled", False)
+        # Sparse KV offload metadata which might be different in different draft steps.
+        # Refer to comment in _attach_sparse_kv_offload_buffers for more detail.
+        self._offload_flattened_req_ids_tensor_group: list[torch.Tensor] | None = None
+        self._offload_stable_prefix_lens_group: list[torch.Tensor] | None = None
+        if self.sparse_kv_offload_enabled:
+            max_offload_rows = min(
+                self.runner.max_num_tokens,
+                self.runner.max_num_reqs * (self.num_speculative_tokens + 1),
+            )
+            self._offload_flattened_req_ids_tensor_group = [
+                torch.zeros(max_offload_rows, dtype=torch.int64, device=device)
+                for _ in range(self.num_speculative_tokens)
+            ]
+            self._offload_stable_prefix_lens_group = [
+                torch.zeros(max_offload_rows, dtype=torch.int32, device=device)
+                for _ in range(self.num_speculative_tokens)
+            ]
+
         # DCP needs independent block-table tensors for the first and later steps.
         # since final block table tensor is not ready in __init__, it is delayed until dummy_run
         self.block_table_tensor_clone: torch.Tensor | None = None
@@ -538,6 +557,18 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
         # when update. So we can use the shallow copy.
         return copy.copy(attn_metadata)
 
+    def _attach_sparse_kv_offload_buffers(self, common_attn_metadata, draft_step) -> None:
+        """Point the Sparse KV offload builder at this draft model's fixed buffers.
+        Needed for metadata which might be different in different draft steps,
+        since metadata for all steps is prebuilt before any draft forward runs,
+        so shared storage would let a later step's build clobber an earlier step's values.
+        Must be called before every metadata build that can reach the SFA offload builder.
+        """
+        if not self.sparse_kv_offload_enabled:
+            return
+        common_attn_metadata.flattened_req_ids_tensor = self._offload_flattened_req_ids_tensor_group[draft_step]
+        common_attn_metadata.stable_prefix_lens = self._offload_stable_prefix_lens_group[draft_step]
+
     @torch.inference_mode()
     def dummy_run(
         self,
@@ -653,6 +684,7 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
                     self.query_start_loc_group[draft_index][: num_reqs + 1].copy_(common_attn_metadata.query_start_loc)
                     self.query_start_loc_group[draft_index][num_reqs + 1 :].fill_(0)
                     common_attn_metadata.query_start_loc = self.query_start_loc_group[draft_index][: num_reqs + 1]
+                    self._attach_sparse_kv_offload_buffers(common_attn_metadata, draft_index)
                     if self.dcp_size > 1 and draft_index > 0:
                         assert self.block_table_tensor_clone is not None, "block_table_tensor_clone is not init"
                         common_attn_metadata.block_table_tensor = self.block_table_tensor_clone[:num_reqs]
@@ -1554,7 +1586,7 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
             common_attn_metadata.graph_pad_size = -1
             common_attn_metadata.num_input_tokens = input_batch_size
 
-            if getattr(self.runner, "sparse_kv_offload_enabled", False):
+            if self.sparse_kv_offload_enabled:
                 # Draft steps run exactly one token per request, while the
                 # inherited token_to_req still describes the verify-step
                 # layout (num_spec + 1 tokens per request). Rebuild it to the
@@ -1690,6 +1722,7 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
                 common_ratio_to_sas_metadata=dict(),
                 block_size=self.draft_attn_groups[0].kv_cache_spec.block_size,
             )
+        self._attach_sparse_kv_offload_buffers(common_attn_metadata, draft_index)
         if dcp_manager is not None:
             dcp_manager.prepare_spec_decode_drafting_cp_metadata(
                 common_attn_metadata=common_attn_metadata,
@@ -2127,6 +2160,7 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
     ):
         # FIXME(woosuk): The below two ops cause synchronization. Optimize.
         assert len(self.draft_attn_groups) > 0
+        self._attach_sparse_kv_offload_buffers(common_attn_metadata, 0)
         per_layer_attn_metadata: dict[str, Any] = {}
         for attn_group in self.draft_attn_groups:
             builder = attn_group.get_metadata_builder()

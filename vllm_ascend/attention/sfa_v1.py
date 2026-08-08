@@ -219,6 +219,8 @@ class AscendSFAMetadata:
     # by AscendSFAKVOffloadMetadataBuilder.
     req_ids_tensor: torch.Tensor | None = None
     token_to_req: torch.Tensor | None = None
+    flattened_req_ids_tensor: torch.Tensor | None = None
+    stable_prefix_lens: torch.Tensor | None = None
 
 
 M = TypeVar("M", bound=AscendSFAMetadata)

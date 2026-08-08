@@ -448,6 +448,11 @@ class NPUModelRunner(GPUModelRunner):
         _enpu = get_c_env("ENPU_ENABLE")
         self.enable_enpu = _enpu is not None and _enpu.lower() == "true"
 
+        self.sparse_kv_offload_config = self.ascend_config.sparse_kv_offload_config
+        # NOTE make sure we set sparse_kv_offload_enabled before _set_up_drafter,
+        # since it's needed during drafter initialization.
+        self.sparse_kv_offload_enabled = self.sparse_kv_offload_config.enabled
+
         self._set_up_drafter()
 
         # Backends that consume CPU seq_lens (AscendAttentionBackend,
@@ -566,17 +571,22 @@ class NPUModelRunner(GPUModelRunner):
         self._mamba_bufs: Any | None = None
         self._mamba_copy_bufs: Any | None = None
 
-        self.sparse_kv_offload_config = self.ascend_config.sparse_kv_offload_config
-        self.sparse_kv_offload_enabled = self.sparse_kv_offload_config.enabled
-        self.sparse_kv_offload_manager = None
         self.tp_rank = get_tensor_model_parallel_rank() if model_parallel_is_initialized() else 0
 
         # Per-request metadata consumed by the Sparse KV offload resident LRU.
         self._offload_req_ids_tensor = None
         self._offload_token_to_req = None
+        self._offload_flattened_req_ids_tensor = None
+        self._offload_stable_prefix_lens = None
         if self.sparse_kv_offload_enabled:
             self._offload_req_ids_tensor = self._make_buffer(self.max_num_reqs, dtype=torch.int64)
             self._offload_token_to_req = self._make_buffer(self.max_num_tokens, dtype=torch.int32)
+            decode_width = 1
+            if self.speculative_config is not None:
+                decode_width += self.speculative_config.num_speculative_tokens
+            max_offload_rows = min(self.max_num_tokens, self.max_num_reqs * decode_width)
+            self._offload_flattened_req_ids_tensor = self._make_buffer(max_offload_rows, dtype=torch.int64)
+            self._offload_stable_prefix_lens = self._make_buffer(max_offload_rows, dtype=torch.int32)
 
     @property
     def use_dcp(self) -> bool:
@@ -2955,6 +2965,16 @@ class NPUModelRunner(GPUModelRunner):
             token_to_req=(
                 self._offload_token_to_req.gpu[:num_tokens_padded]
                 if self._offload_token_to_req is not None
+                else None
+            ),
+            flattened_req_ids_tensor=(
+                self._offload_flattened_req_ids_tensor.gpu
+                if self._offload_flattened_req_ids_tensor is not None
+                else None
+            ),
+            stable_prefix_lens=(
+                self._offload_stable_prefix_lens.gpu
+                if self._offload_stable_prefix_lens is not None
                 else None
             ),
         )

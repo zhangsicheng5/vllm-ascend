@@ -37,7 +37,6 @@ from vllm_ascend.attention.sfa_v1 import (
 )
 from vllm_ascend.attention.utils import (
     AscendCommonAttentionMetadata,
-    build_valid_topk_mask,
     split_decodes_and_prefills,
 )
 from vllm_ascend.device.device_op import DeviceOperator
@@ -104,8 +103,30 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
         metadata.num_decodes = num_decodes
         metadata.num_prefills = num_prefills
         metadata.num_decode_tokens = num_decode_tokens
+        if num_decode_tokens == 0:
+            # Prefill-only fast path, compute same as base class, no additional metadata needed.
+            return metadata
+
         metadata.req_ids_tensor = common_attn_metadata.req_ids_tensor
         metadata.token_to_req = common_attn_metadata.token_to_req
+        flattened_req_ids_tensor_buffer = common_attn_metadata.flattened_req_ids_tensor
+        stable_prefix_lens_buffer = common_attn_metadata.stable_prefix_lens
+        if num_decode_tokens > flattened_req_ids_tensor_buffer.shape[0]:
+            raise RuntimeError(
+                f"Sparse KV offload decode token number {num_decode_tokens} "
+                f"exceed the metadata buffer size {flattened_req_ids_tensor_buffer.shape[0]}."
+            )
+        token_to_req = common_attn_metadata.token_to_req[:num_decode_tokens]
+        row_to_req = token_to_req.to(dtype=torch.int64)
+        query_start_loc = common_attn_metadata.query_start_loc
+        decode_query_lens = query_start_loc[1 : num_decodes + 1] - query_start_loc[:num_decodes]
+        stable_prefix_lens = (common_attn_metadata.seq_lens[:num_decodes] - decode_query_lens).clamp_min_(0)
+        flattened_req_ids_tensor_buffer[:num_decode_tokens].copy_(
+            torch.index_select(common_attn_metadata.req_ids_tensor[:num_decodes], 0, row_to_req)
+        )
+        stable_prefix_lens_buffer[:num_decode_tokens].copy_(torch.index_select(stable_prefix_lens, 0, row_to_req))
+        metadata.flattened_req_ids_tensor = flattened_req_ids_tensor_buffer[:num_decode_tokens]
+        metadata.stable_prefix_lens = stable_prefix_lens_buffer[:num_decode_tokens]
         return metadata
 
     def build(
@@ -348,7 +369,7 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
         q_pe,
         kv_cache,
         topk_indices,
-        attn_metadata,
+        attn_metadata: M,
         actual_seq_lengths_query,
         actual_seq_lengths_key,
         block_table=None,
@@ -373,37 +394,11 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
                 block_table=block_table,
             )
 
-        if attn_metadata.req_ids_tensor is None or attn_metadata.token_to_req is None:
-            raise RuntimeError("Sparse KV offload requires req_ids_tensor/token_to_req metadata")
-        token_to_req = attn_metadata.token_to_req[:num_decode_tokens]
-        row_to_req = token_to_req.to(dtype=torch.int64)
-        decode_seq_lens = torch.index_select(
-            actual_seq_lengths_key[:num_decodes],
-            0,
-            row_to_req,
-        )
-        decode_cum_query_lens = actual_seq_lengths_query[:num_decodes]
-        decode_query_lens = decode_cum_query_lens.clone()
-        if num_decodes > 1:
-            decode_query_lens[1:] -= decode_cum_query_lens[:-1]
-        # Only the query span can be rewritten by the next MTP step.
-        stable_prefix_lens = (actual_seq_lengths_key[:num_decodes] - decode_query_lens).clamp_min_(0)
-        decode_stable_prefix_lens = torch.index_select(
-            stable_prefix_lens,
-            0,
-            row_to_req,
-        )
+        if attn_metadata.flattened_req_ids_tensor is None \
+            or attn_metadata.stable_prefix_lens is None \
+            or attn_metadata.token_to_req is None:
+            raise RuntimeError("Sparse KV offload decode metadata was not built properly.")
         decode_topk = topk_indices[:num_decode_tokens]
-        seq_len_thresholds = decode_seq_lens.view(
-            decode_seq_lens.shape[0],
-            *([1] * (decode_topk.ndim - 1)),
-        )
-        valid_topk = build_valid_topk_mask(decode_topk, seq_len_thresholds)
-        decode_topk = torch.where(
-            valid_topk,
-            decode_topk,
-            torch.full_like(decode_topk, -1),
-        )
         if decode_topk.ndim == 3 and decode_topk.shape[1] == 1:
             decode_topk = decode_topk.squeeze(1)
         if decode_topk.ndim != 2:
@@ -417,11 +412,6 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
             resident_query_lens,
             resident_seq_lens,
         ) = self._resident_views(manager, layer_name, num_decode_tokens)
-        decode_req_ids = torch.index_select(
-            attn_metadata.req_ids_tensor[:num_decodes],
-            0,
-            row_to_req,
-        )
         manager.onload_topk_kv(
             layer_name,
             num_decode_tokens,
@@ -429,9 +419,9 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
             attn_metadata.block_table[:num_decodes],
             decode_topk,
             resident_slot_indices,
-            decode_req_ids,
-            decode_stable_prefix_lens,
-            token_to_req,
+            attn_metadata.flattened_req_ids_tensor,
+            attn_metadata.stable_prefix_lens,
+            attn_metadata.token_to_req,
             capturing=self._in_graph_runtime(),
             skip_topk=self.skip_topk,
         )

@@ -22,10 +22,14 @@ def _make_boundary_decode_metadata():
         max_query_len=1,
         num_reqs=1,
         num_actual_tokens=1,
+        query_start_loc=torch.tensor([0, 1]),
         query_start_loc_cpu=torch.tensor([0, 1]),
+        seq_lens=torch.tensor([5]),
         is_prefilling=torch.tensor([True]),
         req_ids_tensor=torch.tensor([7]),
         token_to_req=torch.tensor([0]),
+        flattened_req_ids_tensor=torch.zeros(8, dtype=torch.int64),
+        stable_prefix_lens=torch.zeros(8, dtype=torch.int32),
     )
 
 
@@ -77,9 +81,12 @@ def test_boundary_token_classification_depends_on_pd_decode_role(
     assert metadata.num_decodes == expected_decodes
     assert metadata.num_prefills == expected_prefills
     assert metadata.num_decode_tokens == expected_decodes
-    assert metadata.req_ids_tensor.tolist() == [7]
-    assert metadata.token_to_req.tolist() == [0]
     assert AscendSFAKVOffloadImpl._is_decode_only(metadata) is is_pd_decode_consumer
+    if expected_decodes > 0:
+        assert metadata.req_ids_tensor.tolist() == [7]
+        assert metadata.token_to_req.tolist() == [0]
+        assert metadata.flattened_req_ids_tensor.tolist() == [7]
+        assert metadata.stable_prefix_lens.tolist() == [4]
 
 
 def test_pd_decode_consumer_still_rejects_long_prefill_classification():
