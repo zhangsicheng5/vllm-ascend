@@ -178,3 +178,43 @@ def test_fused_li_manage_semantic(device, heads, seq_len):
                      expected_miss_count=0, reference_topk=reference_topk,
                      old_cache_pool=case["cache_slots"].cpu().clone())
     gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("seq_len,miss_count", [
+    (262144, 0),
+    (262272, 2048),
+])
+def test_fused_li_manage_boundary(device, seq_len, miss_count):
+    cache_tokens = 6144
+    case = build_case(device=device, heads=32, batch_size=1, seq_len=seq_len,
+                      cache_tokens_value=cache_tokens, miss_count=miss_count, seed=7)
+    lightning_output = call_lightning_indexer(case)
+    torch.npu.synchronize()
+    reference_topk = lightning_output.view(1, TOPK).cpu()
+    case["cache_slots"].copy_(case["initial_cache"])
+    call_fused_li_manage(case)
+    torch.npu.synchronize()
+    validate_outputs(case, seq_len=seq_len, cache_tokens_value=cache_tokens,
+                     expected_miss_count=miss_count, reference_topk=reference_topk,
+                     old_cache_pool=case["initial_cache_cpu"])
+    print(f"FUSED_LI_MANAGE_BOUNDARY seq_len={seq_len} miss={miss_count} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("heads,seq_len", [(32, 262272)])
+def test_fused_li_manage_batch2(device, heads, seq_len):
+    cache_tokens = 6144
+    miss_count = 300
+    case = build_case(device=device, heads=heads, batch_size=2, seq_len=seq_len,
+                      cache_tokens_value=cache_tokens, miss_count=miss_count, seed=7)
+    lightning_output = call_lightning_indexer(case)
+    torch.npu.synchronize()
+    reference_topk = lightning_output.view(2, TOPK).cpu()
+    case["cache_slots"].copy_(case["initial_cache"])
+    call_fused_li_manage(case)
+    torch.npu.synchronize()
+    validate_outputs(case, seq_len=seq_len, cache_tokens_value=cache_tokens,
+                     expected_miss_count=miss_count, reference_topk=reference_topk,
+                     old_cache_pool=case["initial_cache_cpu"])
+    print(f"FUSED_LI_MANAGE_BATCH2 batch=2 heads={heads} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()

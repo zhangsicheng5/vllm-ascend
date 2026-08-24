@@ -173,3 +173,57 @@ def test_fused_copy_sfa_chain(device, batch, heads, source_len, cache_tokens, ta
     torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
     print(f"FUSED_COPY_SFA_CHECK batch={batch} heads={heads} ok=1", flush=True)
     gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("batch,heads,source_len,cache_tokens,tail_tokens", [
+    (4, 2, 20992, 8192, 64),
+])
+def test_fused_copy_sfa_graph(device, batch, heads, source_len, cache_tokens, tail_tokens):
+    case = _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed=7)
+    warm_case = _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed=7)
+    _launch_fused(warm_case)
+    torch.npu.synchronize()
+    del warm_case
+
+    graph_kpe = case["fused_kpe"].clone()
+    graph_ckv = case["fused_ckv"].clone()
+    graph_out = torch.empty_like(case["fused_out"])
+    case["fused_kpe"] = graph_kpe
+    case["fused_ckv"] = graph_ckv
+    case["fused_out"] = graph_out
+
+    graph = torch.npu.NPUGraph()
+    pool = torch.npu.graph_pool_handle()
+    with torch.npu.graph(graph, pool=pool):
+        _launch_fused(case)
+    torch.npu.synchronize()
+
+    graph_kpe.copy_(case["initial_kpe"])
+    graph_ckv.copy_(case["initial_ckv"])
+    graph_out.zero_()
+    torch.npu.synchronize()
+    graph.replay()
+    torch.npu.synchronize()
+
+    golden = _cpu_golden(case)
+    actual = case["fused_out"].float().cpu()
+    torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
+    print(f"FUSED_COPY_SFA_GRAPH_CHECK batch={batch} heads={heads} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("batch,heads,source_len,cache_tokens,tail_tokens", [
+    (1, 2, 20992, 8192, 64),
+    (4, 4, 20992, 8192, 64),
+    (4, 2, 20992, 8192, 0),
+    (4, 2, 20992, 8192, 129),
+])
+def test_fused_copy_sfa_parametrize(device, batch, heads, source_len, cache_tokens, tail_tokens):
+    case = _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed=7)
+    _launch_fused(case)
+    torch.npu.synchronize()
+    golden = _cpu_golden(case)
+    actual = case["fused_out"].float().cpu()
+    torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
+    print(f"FUSED_COPY_SFA_PARAM batch={batch} heads={heads} tail={tail_tokens} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()

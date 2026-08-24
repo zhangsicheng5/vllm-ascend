@@ -378,3 +378,71 @@ def test_fused_copy_sfa_mtp_graph(device, batch_size, heads, source_len,
     del case, graph_cache, graph_kpe, graph_ckv, warm_cache, warm_kpe, warm_ckv
     gc.collect()
     torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("batch_size,heads,source_len,cache_tokens,tail_tokens", [
+    (1, 2, 20992, 8192, 64),
+])
+def test_fused_copy_sfa_mtp_batch1(device, batch_size, heads, source_len,
+                                   cache_tokens, tail_tokens):
+    final_kv_len = cache_tokens + tail_tokens + QUERY_COUNT
+    hbm_capacity = math.ceil(final_kv_len / BLOCK_SIZE) * BLOCK_SIZE
+    case = _lim_mod.make_case(
+        name="mtp_offload_chain_b1", device=device, dtype=torch.bfloat16,
+        candidate_lens=(source_len,) * batch_size,
+        cache_tokens=(cache_tokens,) * batch_size,
+        miss_fractions=(1.0,),
+        source_capacity=source_len, seed=7007)
+    generator = torch.Generator().manual_seed(7017)
+    dram_table_cpu, dram_blocks = _random_block_table(
+        batch_size, source_len // BLOCK_SIZE, generator)
+    hbm_table_cpu, hbm_blocks = _random_block_table(
+        batch_size, hbm_capacity // BLOCK_SIZE, generator)
+    dram_kpe_cpu = torch.randn(dram_blocks, BLOCK_SIZE, KPE_DIM,
+                               generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
+    dram_ckv_cpu = torch.randn(dram_blocks, BLOCK_SIZE, CKV_DIM,
+                               generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
+    initial_kpe_cpu, initial_ckv_cpu = initialize_hbm(
+        case=case, cache_tokens=cache_tokens, final_kv_len=final_kv_len,
+        dram_kpe=dram_kpe_cpu, dram_ckv=dram_ckv_cpu, dram_table=dram_table_cpu,
+        hbm_table=hbm_table_cpu, hbm_blocks=hbm_blocks, generator=generator)
+    query_cpu = torch.randn(batch_size * QUERY_COUNT, heads, CKV_DIM,
+                            generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
+    query_rope_cpu = torch.randn(batch_size * QUERY_COUNT, heads, KPE_DIM,
+                                 generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
+    query = query_cpu.to(device)
+    query_rope = query_rope_cpu.to(device)
+    dram_kpe = _swapped_from_cpu(dram_kpe_cpu, device)
+    dram_ckv = _swapped_from_cpu(dram_ckv_cpu, device)
+    dram_table = dram_table_cpu.to(device)
+    hbm_table = hbm_table_cpu.to(device)
+    actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,
+                            QUERY_COUNT, dtype=torch.int32, device=device)
+    actual_kv = torch.full((batch_size,), final_kv_len, dtype=torch.int32, device=device)
+    scale = 1.0 / math.sqrt(CKV_DIM + KPE_DIM)
+    fused_cache = case.initial_cache_cpu.to(device)
+    fused_kpe = initial_kpe_cpu.to(device)
+    fused_ckv = initial_ckv_cpu.to(device)
+    fused_out = torch.empty(
+        batch_size * QUERY_COUNT, heads, CKV_DIM, dtype=torch.bfloat16, device=device)
+    fused_outputs, fused_attention = launch_fused(
+        case=case, device=device, query=query, query_rope=query_rope,
+        actual_q=actual_q, actual_kv=actual_kv, scale=scale,
+        hbm_table=hbm_table, dram_table=dram_table, dram_kpe=dram_kpe,
+        dram_ckv=dram_ckv, cache_slots=fused_cache, hbm_kpe=fused_kpe,
+        hbm_ckv=fused_ckv, lim_buffers=_lim_mod.make_outputs(case),
+        attention_output=fused_out)
+    torch.npu.synchronize()
+    fused_counts, fused_max_abs = validate_chain(
+        case=case, device=device, label="mtp_offload_chain/batch1",
+        before_cache=case.initial_cache_cpu, cache_slots=fused_cache,
+        hbm_kpe=fused_kpe, hbm_ckv=fused_ckv, lim_outputs=fused_outputs,
+        attention=fused_attention, initial_kpe_cpu=initial_kpe_cpu,
+        initial_ckv_cpu=initial_ckv_cpu, dram_kpe_cpu=dram_kpe_cpu,
+        dram_ckv_cpu=dram_ckv_cpu, hbm_table_cpu=hbm_table_cpu,
+        dram_table_cpu=dram_table_cpu, cache_tokens=cache_tokens,
+        tail_tokens=tail_tokens, query_cpu=query_cpu, query_rope_cpu=query_rope_cpu,
+        scale=scale)
+    print(f"FUSED_COPY_SFA_MTP_BATCH1_CHECK batch={batch_size} misses={fused_counts} ok=1", flush=True)
+    del case
+    gc.collect(); torch.npu.empty_cache()
