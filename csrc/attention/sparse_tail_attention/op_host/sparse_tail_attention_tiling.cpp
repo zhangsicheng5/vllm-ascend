@@ -133,7 +133,7 @@ static std::string STADataTypeToSerialString(ge::DataType type)
     if (it != DATATYPE_TO_STRING_MAP.end()) {
         return it->second;
     } else {
-        OPS_LOG_E("SparseTailAttention", "datatype %d not support", type);
+        OPS_LOG_E("SparseTailAttention", "datatype %d is not supported", type);
         return "UNDEFINED";
     }
 }
@@ -552,7 +552,7 @@ ge::graphStatus STATilingCheck::CheckDtypeSupport(const gert::CompileTimeTensorD
     if (desc != nullptr) {
         const auto& it = DTYPE_SUPPORT_MAP.find(name);
         OPS_ERR_IF(it == DTYPE_SUPPORT_MAP.end(),
-            OPS_LOG_E(opName_, "%s datatype support list should be specify in DTYPE_SUPPORT_MAP", name.c_str()),
+            OPS_LOG_E(opName_, "%s datatype support list should be specified in DTYPE_SUPPORT_MAP", name.c_str()),
             return ge::GRAPH_FAILED);
         auto &expectDtypeList = it->second;
         OPS_ERR_IF(std::find(
@@ -565,7 +565,7 @@ ge::graphStatus STATilingCheck::CheckDtypeSupport(const gert::CompileTimeTensorD
 
 template <typename T>
 void STATilingCheck::LogErrorNumberSupport(const std::vector<T> &expectNumberList,
-    const T &actualValue, const std::string &name, const std::string subName) const
+    const T &actualValue, const std::string &name, const std::string &subName) const
 {
     std::ostringstream oss;
     for (size_t i = 0; i < expectNumberList.size(); ++i) {
@@ -633,7 +633,7 @@ ge::graphStatus STATilingCheck::CheckLayoutSupport(const STALayout &actualLayout
 {
     const auto& it = LAYOUT_SUPPORT_MAP.find(name);
     OPS_ERR_IF(it == LAYOUT_SUPPORT_MAP.end(),
-        OPS_LOG_E(opName_, "%s layout support list should be specify in LAYOUT_SUPPORT_MAP", name.c_str()),
+        OPS_LOG_E(opName_, "%s layout support list should be specified in LAYOUT_SUPPORT_MAP", name.c_str()),
         return ge::GRAPH_FAILED);
     auto &expectLayoutList = it->second;
     OPS_ERR_IF(std::find(
@@ -1230,15 +1230,15 @@ ge::graphStatus STATilingCheck::CheckFeatureMlaNoquantPa() const
     }
 
     OPS_ERR_IF(blockSize_ <= 0 || blockSize_ > static_cast<int32_t>(MAX_BLOCK_SIZE),
-        OPS_LOG_E(opName_, "when page attention is enabled, block_size(%d) should be in range (0, %u].",
+        OPS_LOG_E(opName_, "when page attention is enabled, block_size(%ld) should be in range (0, %u].",
         blockSize_, MAX_BLOCK_SIZE), return ge::GRAPH_FAILED);
     
     OPS_ERR_IF(blockSize_ % 16 > 0,
-        OPS_LOG_E(opName_, "when page attention is enabled, block_size(%d) should be 16-aligned.",
+        OPS_LOG_E(opName_, "when page attention is enabled, block_size(%ld) should be 16-aligned.",
         blockSize_), return ge::GRAPH_FAILED);
     
     OPS_ERR_IF(blockSize_ % sparseBlockSize_ > 0,
-        OPS_LOG_E(opName_, "when page attention is enabled, block_size(%d) must be divided by sparse_block_size(%d), but now the remainder is %d.",
+        OPS_LOG_E(opName_, "when page attention is enabled, block_size(%ld) must be divided by sparse_block_size(%ld), but now the remainder is %ld.",
         blockSize_, sparseBlockSize_, blockSize_ % sparseBlockSize_), return ge::GRAPH_FAILED);
 
     return ge::GRAPH_SUCCESS;
@@ -1496,7 +1496,7 @@ ge::graphStatus STAInfoParser::GetNpuInfo()
     socVersion_ = ascendcPlatform.GetSocVersion();
     if (socVersion_ != platform_ascendc::SocVersion::ASCEND910B &&
         socVersion_ != platform_ascendc::SocVersion::ASCEND910_93) {
-        OPS_REPORT_VECTOR_INNER_ERR(opName_, "SOC Version[%d] is not support.", (int32_t)socVersion_);
+        OPS_REPORT_VECTOR_INNER_ERR(opName_, "SOC Version[%d] is not supported.", static_cast<int32_t>(socVersion_));
         return GRAPH_FAILED;
     }
 

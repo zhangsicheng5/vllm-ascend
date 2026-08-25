@@ -121,7 +121,11 @@ ge::graphStatus CheckFusedInputs(
                          "source IDs must have top-k capacity 2048 and block tables must be non-empty."),
                return ge::GRAPH_FAILED);
 
-    const ge::DataType floatingType = context->GetInputDesc(QUERY)->GetDataType();
+    auto queryDesc = context->GetInputDesc(QUERY);
+    OPS_ERR_IF(queryDesc == nullptr,
+               OPS_LOG_E(context->GetNodeName(), "GetInputDesc(QUERY) returned nullptr."),
+               return ge::GRAPH_FAILED);
+    const ge::DataType floatingType = queryDesc->GetDataType();
     OPS_ERR_IF(floatingType != ge::DT_BF16 && floatingType != ge::DT_FLOAT16,
                OPS_LOG_E(context->GetNodeName(), "Floating inputs must be bf16/fp16."),
                return ge::GRAPH_FAILED);

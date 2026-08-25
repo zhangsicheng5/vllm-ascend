@@ -20,7 +20,6 @@
 #include <exe_graph/runtime/tiling_context.h>
 #include <tiling/platform/platform_ascendc.h>
 #include "register/tilingdata_base.h"
-#include "exe_graph/runtime/tiling_context.h"
 
 namespace optiling {
 // Inputs Index
