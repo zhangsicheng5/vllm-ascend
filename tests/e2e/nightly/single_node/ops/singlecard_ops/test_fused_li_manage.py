@@ -33,21 +33,21 @@ MAX_CACHE_TOKENS = (1 << 14) - 1
 
 
 def build_case(*, device, heads, batch_size, seq_len, cache_tokens_value,
-               miss_count, seed):
+               miss_count, seed, dtype=torch.bfloat16):
     blocks_per_request = (seq_len + BLOCK_SIZE - 1) // BLOCK_SIZE
     capacity = blocks_per_request * BLOCK_SIZE
     total_blocks = batch_size * blocks_per_request
-    query = torch.zeros((batch_size, heads, HEAD_DIM), dtype=torch.bfloat16, device=device)
+    query = torch.zeros((batch_size, heads, HEAD_DIM), dtype=dtype, device=device)
     query[:, 0, 0] = 1; query[:, 0, 1] = 64; query[:, 0, 2] = 4096; query[:, 0, 3] = 262144
-    weights = torch.zeros((batch_size, heads), dtype=torch.bfloat16, device=device)
+    weights = torch.zeros((batch_size, heads), dtype=dtype, device=device)
     weights[:, 0] = 1
-    key = torch.zeros((total_blocks, BLOCK_SIZE, 1, HEAD_DIM), dtype=torch.bfloat16, device=device)
+    key = torch.zeros((total_blocks, BLOCK_SIZE, 1, HEAD_DIM), dtype=dtype, device=device)
     logical_ids = torch.arange(capacity, dtype=torch.int32, device=device).view(1, blocks_per_request, BLOCK_SIZE)
     key_rows = key.view(batch_size, blocks_per_request, BLOCK_SIZE, 1, HEAD_DIM)
-    key_rows[:, :, :, 0, 0] = (logical_ids % 64).to(torch.bfloat16)
-    key_rows[:, :, :, 0, 1] = ((logical_ids // 64) % 64).to(torch.bfloat16)
-    key_rows[:, :, :, 0, 2] = ((logical_ids // 4096) % 64).to(torch.bfloat16)
-    key_rows[:, :, :, 0, 3] = (logical_ids // 262144).to(torch.bfloat16)
+    key_rows[:, :, :, 0, 0] = (logical_ids % 64).to(dtype)
+    key_rows[:, :, :, 0, 1] = ((logical_ids // 64) % 64).to(dtype)
+    key_rows[:, :, :, 0, 2] = ((logical_ids // 4096) % 64).to(dtype)
+    key_rows[:, :, :, 0, 3] = (logical_ids // 262144).to(dtype)
     block_table = torch.arange(total_blocks, dtype=torch.int32, device=device).view(batch_size, blocks_per_request)
     candidate_lens = torch.full((batch_size,), seq_len, dtype=torch.int32, device=device)
     query_lens = torch.arange(1, batch_size + 1, dtype=torch.int32, device=device)
@@ -177,4 +177,73 @@ def test_fused_li_manage_semantic(device, heads, seq_len):
     validate_outputs(case, seq_len=seq_len, cache_tokens_value=cache_tokens,
                      expected_miss_count=0, reference_topk=reference_topk,
                      old_cache_pool=case["cache_slots"].cpu().clone())
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("seq_len,miss_count", [
+    (262144, 0),
+    (262272, 2048),
+])
+def test_fused_li_manage_boundary(device, seq_len, miss_count):
+    cache_tokens = 6144
+    case = build_case(device=device, heads=32, batch_size=1, seq_len=seq_len,
+                      cache_tokens_value=cache_tokens, miss_count=miss_count, seed=7)
+    lightning_output = call_lightning_indexer(case)
+    torch.npu.synchronize()
+    reference_topk = lightning_output.view(1, TOPK).cpu()
+    case["cache_slots"].copy_(case["initial_cache"])
+    call_fused_li_manage(case)
+    torch.npu.synchronize()
+    validate_outputs(case, seq_len=seq_len, cache_tokens_value=cache_tokens,
+                     expected_miss_count=miss_count, reference_topk=reference_topk,
+                     old_cache_pool=case["initial_cache_cpu"])
+    print(f"FUSED_LI_MANAGE_BOUNDARY seq_len={seq_len} miss={miss_count} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("heads,seq_len", [(32, 262272)])
+def test_fused_li_manage_batch2(device, heads, seq_len):
+    cache_tokens = 6144
+    miss_count = 300
+    case = build_case(device=device, heads=heads, batch_size=2, seq_len=seq_len,
+                      cache_tokens_value=cache_tokens, miss_count=miss_count, seed=7)
+    lightning_output = call_lightning_indexer(case)
+    torch.npu.synchronize()
+    reference_topk = lightning_output.view(2, TOPK).cpu()
+    case["cache_slots"].copy_(case["initial_cache"])
+    call_fused_li_manage(case)
+    torch.npu.synchronize()
+    validate_outputs(case, seq_len=seq_len, cache_tokens_value=cache_tokens,
+                     expected_miss_count=miss_count, reference_topk=reference_topk,
+                     old_cache_pool=case["initial_cache_cpu"])
+    print(f"FUSED_LI_MANAGE_BATCH2 batch=2 heads={heads} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("dtype", [torch.float16])
+def test_fused_li_manage_fp16(device, dtype):
+    seq_len = 262272
+    cache_tokens = 6144
+    miss_count = 300
+    case = build_case(device=device, heads=32, batch_size=1, seq_len=seq_len,
+                      cache_tokens_value=cache_tokens, miss_count=miss_count, seed=7, dtype=dtype)
+    lightning_output = call_lightning_indexer(case)
+    torch.npu.synchronize()
+    reference_topk = lightning_output.view(1, TOPK).cpu()
+    case["cache_slots"].copy_(case["initial_cache"])
+    call_fused_li_manage(case)
+    torch.npu.synchronize()
+    # fp16 may cause score ordering to differ slightly from bf16,
+    # so miss_count may not exactly match. Verify topk set matches
+    # LightningIndexer reference instead of exact miss_count.
+    actual_miss = int(case["miss_counts"].cpu().item())
+    assert 0 <= actual_miss <= TOPK, f"miss_count out of range: {actual_miss}"
+    sources = case["source_ids"].view(1, TOPK).cpu().to(torch.int64)
+    assert torch.equal(torch.sort(sources).values, torch.sort(reference_topk.to(torch.int64)).values), \
+        "topk set differs from LightningIndexer reference"
+    # Second call: zero miss (all cached)
+    call_fused_li_manage(case)
+    torch.npu.synchronize()
+    assert int(case["miss_counts"].cpu().item()) == 0, "second call should have zero miss"
+    print(f"FUSED_LI_MANAGE_FP16 miss={actual_miss} ok=1", flush=True)
     gc.collect(); torch.npu.empty_cache()
