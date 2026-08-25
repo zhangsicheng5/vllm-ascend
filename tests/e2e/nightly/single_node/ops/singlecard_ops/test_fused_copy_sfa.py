@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gc
 import math
+import os
 
 import pytest
 import torch
@@ -27,10 +28,21 @@ CKV_DIM = 512
 KPE_DIM = 64
 SPARSE_COUNT = 2048
 
+from memfabric_hybrid import offload as _offload
+_offload_cfg = _offload.OffloadConfig()
+_offload_cfg.scene = _offload.Scene.LOCAL
+_offload_cfg.alloc_size = 4 * 1024 * 1024 * 1024
+_offload_cfg.reserve_size = 4 * 1024 * 1024 * 1024
+_offload_cfg.world_size = 1
+_offload_cfg.rank_id = 0
+_offload_cfg.device_id = int(os.environ.get("ASCEND_DEVICE_ID", "0"))
+_offload.initialize(_offload_cfg)
 
-def _host_from_cpu(cpu):
-    """Offloaded DRAM KV stays on host for fused_copy_sfa."""
-    return cpu.contiguous()
+
+def _alloc_dram_tensor(cpu_tensor, device):
+    t = _offload.empty(list(cpu_tensor.shape), dtype=cpu_tensor.dtype, pin_memory=True)
+    t.copy_(cpu_tensor)
+    return t
 
 
 def _logical_rows(cache, block_table, request, logical_slots):
@@ -66,8 +78,8 @@ def _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed
     dram_table = dram_table_cpu.to(device)
     dram_kpe_cpu = torch.randn(batch * source_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.float32).mul_(0.25).to(dtype)
     dram_ckv_cpu = torch.randn(batch * source_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.float32).mul_(0.25).to(dtype)
-    dram_kpe = _host_from_cpu(dram_kpe_cpu)
-    dram_ckv = _host_from_cpu(dram_ckv_cpu)
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     total_hbm_blocks = batch * cache_blocks
     initial_kpe = torch.zeros(total_hbm_blocks, BLOCK_SIZE, 1, KPE_DIM, dtype=dtype, device=device)
     initial_ckv = torch.zeros(total_hbm_blocks, BLOCK_SIZE, 1, CKV_DIM, dtype=dtype, device=device)
@@ -189,10 +201,6 @@ def test_fused_copy_sfa_graph(device, batch, heads, source_len, cache_tokens, ta
     case["fused_kpe"] = graph_kpe
     case["fused_ckv"] = graph_ckv
     case["fused_out"] = graph_out
-    # Graph capture cannot perform host-to-device copy inside capture,
-    # so stage DRAM KV to NPU before capture.
-    case["dram_kpe"] = case["dram_kpe"].to(device)
-    case["dram_ckv"] = case["dram_ckv"].to(device)
 
     graph = torch.npu.NPUGraph()
     pool = torch.npu.graph_pool_handle()

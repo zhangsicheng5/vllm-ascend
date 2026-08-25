@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gc
 import math
+import os
 from dataclasses import replace
 
 import pytest
@@ -60,9 +61,21 @@ def _apply_scatter_reference(
         expected_ckv[dst_blocks, dst_offsets] = dram_ckv[src_blocks, src_offsets]
 
 
-def _host_from_cpu(cpu):
-    """Offloaded DRAM KV stays on host for fused_copy_sfa_mtp."""
-    return cpu.contiguous()
+from memfabric_hybrid import offload as _offload
+_offload_cfg = _offload.OffloadConfig()
+_offload_cfg.scene = _offload.Scene.LOCAL
+_offload_cfg.alloc_size = 4 * 1024 * 1024 * 1024
+_offload_cfg.reserve_size = 4 * 1024 * 1024 * 1024
+_offload_cfg.world_size = 1
+_offload_cfg.rank_id = 0
+_offload_cfg.device_id = int(os.environ.get("ASCEND_DEVICE_ID", "0"))
+_offload.initialize(_offload_cfg)
+
+
+def _alloc_dram_tensor(cpu_tensor, device):
+    t = _offload.empty(list(cpu_tensor.shape), dtype=cpu_tensor.dtype, pin_memory=True)
+    t.copy_(cpu_tensor)
+    return t
 
 
 def _random_block_table(batch_size, blocks_per_request, generator):
@@ -230,8 +243,8 @@ def test_fused_copy_sfa_mtp_chain(device, batch_size, heads, source_len,
                                  generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
     query = query_cpu.to(device)
     query_rope = query_rope_cpu.to(device)
-    dram_kpe = _host_from_cpu(dram_kpe_cpu)
-    dram_ckv = _host_from_cpu(dram_ckv_cpu)
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     dram_table = dram_table_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,
@@ -304,8 +317,8 @@ def test_fused_copy_sfa_mtp_graph(device, batch_size, heads, source_len,
                                  generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
     query = query_cpu.to(device)
     query_rope = query_rope_cpu.to(device)
-    dram_kpe = dram_kpe_cpu.to(device)  # graph: stage to NPU before capture
-    dram_ckv = dram_ckv_cpu.to(device)  # graph: stage to NPU before capture
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     dram_table = dram_table_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,
@@ -410,8 +423,8 @@ def test_fused_copy_sfa_mtp_batch1(device, batch_size, heads, source_len,
                                  generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
     query = query_cpu.to(device)
     query_rope = query_rope_cpu.to(device)
-    dram_kpe = _swapped_from_cpu(dram_kpe_cpu, device)
-    dram_ckv = _swapped_from_cpu(dram_ckv_cpu, device)
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     dram_table = dram_table_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,
@@ -476,8 +489,8 @@ def test_fused_copy_sfa_mtp_fp16(device, dtype):
                                  generator=generator, dtype=torch.float32).mul_(0.25).to(dtype)
     query = query_cpu.to(device)
     query_rope = query_rope_cpu.to(device)
-    dram_kpe = _swapped_from_cpu(dram_kpe_cpu, device)
-    dram_ckv = _swapped_from_cpu(dram_ckv_cpu, device)
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     dram_table = dram_table_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,
@@ -549,8 +562,8 @@ def test_fused_copy_sfa_mtp_zero_miss(device, batch_size, heads, source_len,
                                  generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
     query = query_cpu.to(device)
     query_rope = query_rope_cpu.to(device)
-    dram_kpe = _swapped_from_cpu(dram_kpe_cpu, device)
-    dram_ckv = _swapped_from_cpu(dram_ckv_cpu, device)
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     dram_table = dram_table_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,
