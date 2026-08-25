@@ -137,6 +137,12 @@ npu_fused_copy_sfa(
   TORCH_CHECK(dram_k_rope.is_contiguous() && dram_kv_cache.is_contiguous(),
               "DRAM fused inputs must be contiguous.");
 
+  // If DRAM KV resides on host, stage to NPU for kernel execution.
+  at::Tensor dram_k_rope_npu = dram_k_rope.is_cpu()
+      ? dram_k_rope.to(device) : dram_k_rope;
+  at::Tensor dram_kv_cache_npu = dram_kv_cache.is_cpu()
+      ? dram_kv_cache.to(device) : dram_kv_cache;
+
   std::string query_layout = "TND";
   std::string kv_layout = "PA_BSND";
   char* query_layout_ptr = const_cast<char*>(query_layout.c_str());
@@ -147,7 +153,7 @@ npu_fused_copy_sfa(
       query_rope, query, actual_seq_lengths_query, actual_seq_lengths_kv,
       num_cache_tokens, topk_dst_slots, topk_src_ids, miss_counts,
       hbm_block_table, dram_block_table,
-      hbm_k_rope, dram_k_rope, dram_kv_cache,
+      hbm_k_rope, dram_k_rope_npu, dram_kv_cache_npu,
       hbm_kv_cache, attention_out);
   EXEC_NPU_CMD_ORDERED(
       aclnnFusedCopySfa,
@@ -162,8 +168,8 @@ npu_fused_copy_sfa(
       actual_seq_lengths_kv,
       query_rope,
       hbm_k_rope,
-      dram_k_rope,
-      dram_kv_cache,
+      dram_k_rope_npu,
+      dram_kv_cache_npu,
       dram_block_table,
       topk_src_ids,
       miss_counts,

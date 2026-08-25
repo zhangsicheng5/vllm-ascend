@@ -304,8 +304,8 @@ def test_fused_copy_sfa_mtp_graph(device, batch_size, heads, source_len,
                                  generator=generator, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
     query = query_cpu.to(device)
     query_rope = query_rope_cpu.to(device)
-    dram_kpe = _host_from_cpu(dram_kpe_cpu)
-    dram_ckv = _host_from_cpu(dram_ckv_cpu)
+    dram_kpe = dram_kpe_cpu.to(device)  # graph: stage to NPU before capture
+    dram_ckv = dram_ckv_cpu.to(device)  # graph: stage to NPU before capture
     dram_table = dram_table_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     actual_q = torch.arange(QUERY_COUNT, batch_size * QUERY_COUNT + 1,

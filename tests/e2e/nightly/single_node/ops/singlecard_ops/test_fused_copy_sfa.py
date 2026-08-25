@@ -189,6 +189,10 @@ def test_fused_copy_sfa_graph(device, batch, heads, source_len, cache_tokens, ta
     case["fused_kpe"] = graph_kpe
     case["fused_ckv"] = graph_ckv
     case["fused_out"] = graph_out
+    # Graph capture cannot perform host-to-device copy inside capture,
+    # so stage DRAM KV to NPU before capture.
+    case["dram_kpe"] = case["dram_kpe"].to(device)
+    case["dram_ckv"] = case["dram_ckv"].to(device)
 
     graph = torch.npu.NPUGraph()
     pool = torch.npu.graph_pool_handle()
