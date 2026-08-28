@@ -314,16 +314,19 @@ class DeepseekV4MoE(nn.Module):
 
         self.hash = layer_idx < config.num_hash_layers and not is_draft_layer
         if self.hash:
-            # Use zeros instead of empty to avoid garbage values causing
-            # invalid memory access in dummy mode (--load-format="dummy")
-            self.gate.tid2eid = nn.Parameter(
-                torch.zeros(
-                    config.vocab_size,
-                    config.num_experts_per_tok,
-                    dtype=torch.int32,
-                ),
-                requires_grad=False,
-            )
+            # Dummy loading never initializes integer params, so this value is
+            # what hash layers route with under --load-format="dummy". It must
+            # look like a real hash table: valid expert ids that are distinct
+            # within each row. The MC2 dispatch/combine kernels assume per-token
+            # expert ids are distinct; duplicates corrupt the combine metadata
+            # (ep_send_counts/assist_info) and hang the combine kernel, while
+            # all-zeros collapses every token onto expert 0 and hangs too.
+            # A fixed seed keeps the table identical across all EP ranks.
+            generator = torch.Generator(device='npu').manual_seed(1234)
+            tid2eid = torch.argsort(
+                torch.rand(config.vocab_size, config.n_routed_experts, generator=generator), dim=1
+            )[:, : config.num_experts_per_tok].to(torch.int32)
+            self.gate.tid2eid = nn.Parameter(tid2eid, requires_grad=False)
             self.gate.e_score_correction_bias = None
         else:
             self.gate.tid2eid = None
