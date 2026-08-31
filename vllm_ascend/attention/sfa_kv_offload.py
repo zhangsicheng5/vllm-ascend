@@ -588,6 +588,16 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
                 topk_dst_slots,
                 miss_counts,
             )
+            logger.info(
+                "LIM c8 debug: layer=%s num_candidate=%s num_cache=%s "
+                "miss=%s src_top8=%s dst_top8=%s",
+                layer_name,
+                num_candidate_tokens.detach().to(device="cpu").tolist(),
+                num_cache_tokens.detach().to(device="cpu").tolist(),
+                miss_counts.detach().to(device="cpu").tolist(),
+                topk_src_ids[0, 0, :8].detach().to(device="cpu").tolist(),
+                topk_dst_slots[0, 0, :8].detach().to(device="cpu").tolist(),
+            )
         else:
             torch.ops._C_ascend.npu_fused_li_manage(
                 q_li.contiguous(),
