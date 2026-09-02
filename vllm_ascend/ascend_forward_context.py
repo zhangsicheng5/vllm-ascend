@@ -54,6 +54,30 @@ def override_mrv2_in_profile_run(enabled: bool):
 def get_mrv2_in_profile_run() -> bool:
     return _MRV2_IN_PROFILE_RUN.get()
 
+def _is_decode_only_node(vllm_config: VllmConfig) -> bool:
+    kv_transfer_config = getattr(vllm_config, "kv_transfer_config", None)
+    if kv_transfer_config is None:
+        return False
+
+    is_decode_bench = getattr(kv_transfer_config, "kv_connector", None) == "DecodeBenchConnector"
+    kv_role = getattr(kv_transfer_config, "kv_role", None)
+    is_kv_consumer = (
+        kv_role == "kv_consumer"
+        if kv_role is not None
+        else bool(
+            getattr(kv_transfer_config, "is_kv_consumer", False)
+            and not getattr(kv_transfer_config, "is_kv_producer", False)
+        )
+    )
+    if not (is_decode_bench or is_kv_consumer):
+        return False
+
+    scheduler_config = getattr(get_ascend_config(), "scheduler_config", None)
+    # Actual semantics of `recompute_scheduler_enable`:
+    # - Enabled: when preemption occurs on the decode node, the request is sent back
+    #     to the P node to redo prefill, so the decode node only ever decodes;
+    # - Disabled: prefill is executed locally on the decode node.
+    return bool(getattr(scheduler_config, "recompute_scheduler_enable", False))
 
 @contextmanager
 def set_ascend_forward_context(
@@ -96,11 +120,13 @@ def set_ascend_forward_context(
         moe_comm_type = select_moe_comm_method(
             max_num_tokens,
             vllm_config,
+            is_draft_model,
         )
 
         forward_context.moe_comm_type = moe_comm_type
         forward_context.moe_comm_method = get_moe_comm_method(moe_comm_type)
 
+        forward_context.is_decode_only_node = _is_decode_only_node(vllm_config)
         tp_world_size = get_tensor_model_parallel_world_size()
 
         forward_context.in_profile_run = in_profile_run
@@ -177,7 +203,12 @@ def set_mc2_tokens_capacity(vllm_config, max_num_reqs, uniform_decode_query_len)
     global _mc2_tokens_capacity
     if _mc2_tokens_capacity is not None:
         return
-    if get_ascend_config().enable_prefill_mc2:
+
+    ascend_config = get_ascend_config()
+
+    is_decode_only_node = _is_decode_only_node(vllm_config)
+
+    if ascend_config.enable_prefill_mc2 or (is_mega_moe_enabled() and not is_decode_only_node):
         max_num_tokens = vllm_config.scheduler_config.max_num_batched_tokens
     elif vllm_config.compilation_config.cudagraph_capture_sizes:
         max_num_tokens = vllm_config.compilation_config.max_cudagraph_capture_size
@@ -188,7 +219,7 @@ def set_mc2_tokens_capacity(vllm_config, max_num_reqs, uniform_decode_query_len)
     # Use integer arithmetic for ceiling division.
     num_tokens_per_tp_rank = (max_num_tokens + tp_size - 1) // tp_size
     # keep the num_tokens_per_tp_rank less than fused_mc2 (mega_moe) tokens per rank limit
-    if get_ascend_config().enable_fused_mc2:
+    if ascend_config.enable_fused_mc2:
         if _MEGA_MOE_SUPPORTED:
             num_tokens_per_tp_rank = min(num_tokens_per_tp_rank, _MEGA_MOE_TOKENS_PER_RANK_LIMIT)
         else:
@@ -263,7 +294,12 @@ def _select_a5_moe_comm_method(
     num_tokens: int,
     vllm_config: VllmConfig,
     mc2_tokens_capacity: int,
+    is_draft_model: bool = False,
 ) -> MoECommType:
+    return MoECommType.FUSED_MC2 # draft model still use mc2, force it to use fused_mc2 for 10t test
+    if is_mega_moe_enabled() and not is_draft_model:
+        return MoECommType.FUSED_MC2
+
     num_experts_per_tok = getattr(
         vllm_config.model_config.hf_text_config,
         "num_experts_per_tok",
@@ -277,7 +313,11 @@ def _select_a5_moe_comm_method(
     return MoECommType.ALLTOALL
 
 
-def select_moe_comm_method(num_tokens: int, vllm_config: VllmConfig) -> MoECommType | None:
+def select_moe_comm_method(
+    num_tokens: int,
+    vllm_config: VllmConfig,
+    is_draft_model: bool = False,
+) -> MoECommType | None:
     """Select the MoE communication method according to parallel settings,
     device generation, and token count.
 
@@ -327,7 +367,7 @@ def select_moe_comm_method(num_tokens: int, vllm_config: VllmConfig) -> MoECommT
             vllm_config,
         )
     elif soc_version == AscendDeviceType.A5:
-        moe_comm_type = _select_a5_moe_comm_method(num_tokens, vllm_config, mc2_tokens_capacity)
+        moe_comm_type = _select_a5_moe_comm_method(num_tokens, vllm_config, mc2_tokens_capacity, is_draft_model)
     elif soc_version == AscendDeviceType._310P:
         moe_comm_type = MoECommType.ALLGATHER
 
@@ -350,6 +390,7 @@ class _ExtraForwardContextProxy:
         "capturing",
         "moe_comm_type",
         "moe_comm_method",
+        "is_decode_only_node",
         "mmrs_fusion",
         "num_tokens",
         "padded_length",
@@ -401,3 +442,13 @@ class _ExtraForwardContextProxy:
 
 # usage: from vllm_ascend.ascend_forward_context import _EXTRA_CTX
 _EXTRA_CTX = _ExtraForwardContextProxy()
+
+
+def is_mega_moe_enabled() -> bool:
+    """Whether MegaMoe can run in this process (static, load-time upper bound)."""
+    return get_ascend_config().enable_fused_mc2 == 1 and _MEGA_MOE_SUPPORTED
+
+
+def can_use_mega_moe_in_current_forward() -> bool:
+    """Whether the current forward actually runs the MegaMoe fused-MC2 op."""
+    return _EXTRA_CTX.moe_comm_type == MoECommType.FUSED_MC2 and _MEGA_MOE_SUPPORTED

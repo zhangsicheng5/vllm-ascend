@@ -44,6 +44,7 @@ from vllm_ascend.ops.fused_moe.token_dispatcher import (
     TokenDispatcherWithMC2,
 )
 from vllm_ascend.quantization.quant_type import QuantType
+from vllm_ascend.utils import is_950
 
 _MoECommMethods: dict[MoECommType | None, MoECommMethod] = {}
 
@@ -284,6 +285,8 @@ class FusedMC2CommImpl(MoECommMethod):
         self,
         dispatch_quant_mode: int = 0,
         dispatch_quant_out_dtype: torch.dtype | None = None,
+        *,
+        is_decode_only_node: bool,
     ):
         # FusedMC2CommImpl always builds a TokenDispatcherWithMC2 (see
         # setup_moe_comm_method), which is where global_bs / ep_world_size live.
@@ -316,11 +319,67 @@ class FusedMC2CommImpl(MoECommMethod):
             num_max_tokens_per_rank * int(self.token_dispatcher.ep_world_size) * min(num_topk, expert_per_rank),
         )
 
+        """
+        absolute_safe_max_recv_token_num = max(
+            1,
+            num_max_tokens_per_rank * int(self.token_dispatcher.ep_world_size) * min(num_topk, expert_per_rank),
+        )
+
+        if is_decode_only_node:
+            max_recv_token_num = absolute_safe_max_recv_token_num
+        else:
+            # P nodes and PD-mixed nodes use the configured value. This keeps
+            # the existing memory/performance tradeoff for prefill workloads.
+            max_recv_token_num = get_ascend_config().mega_moe_max_tokens
+            logger.warning_once(
+                "MegaMoe symm buffer: max_recv_token_num is set from "
+                "mega_moe_max_tokens=%d (reference value) on a P or PD-mixed "
+                "node. If the actual per-rank received token count after "
+                "dispatch exceeds this value, precision degradation will "
+                "occur. The absolute safe upper bound is %d "
+                "(num_max_tokens_per_rank=%d, ep_world_size=%d, num_topk=%d, "
+                "expert_per_rank=%d). Please tune mega_moe_max_tokens in "
+                "additional_config based on actual expert load distribution.",
+                max_recv_token_num,
+                absolute_safe_max_recv_token_num,
+                num_max_tokens_per_rank,
+                int(self.token_dispatcher.ep_world_size),
+                num_topk,
+                expert_per_rank,
+            )
+
         logger.info(
             "CANN MegaMoe sym-buffer alloc (must match across all EP ranks): ep_rank=%s ep_world=%s global_bs=%s",
             getattr(self.token_dispatcher, "ep_rank_id", "?"),
             getattr(self.token_dispatcher, "ep_world_size", "?"),
             self.token_dispatcher.global_bs,
+        )
+        """
+        if self.token_dispatcher.a5_need_extra_args:
+            # A5 accepts this attribute only in [0, 4096]. Zero selects the
+            # operator's documented automatic mode.
+            max_recv_token_num = 0
+        else:
+            # Preserve the original A2/A3 receive-token capacity calculation.
+            expert_per_rank = max(1, num_experts // int(self.token_dispatcher.ep_world_size))
+            max_recv_token_num = max(
+                1,
+                num_max_tokens_per_rank
+                * int(self.token_dispatcher.ep_world_size)
+                * min(num_topk, expert_per_rank),
+            )
+
+        logger.info(
+            "CANN MegaMoe sym-buffer alloc (must match across all EP ranks): "
+            "ep_rank=%s ep_world=%s global_bs=%s tokens_per_rank=%s "
+            "num_experts=%s num_topk=%s hidden=%s",
+            getattr(self.token_dispatcher, "ep_rank_id", "?"),
+            getattr(self.token_dispatcher, "ep_world_size", "?"),
+            self.token_dispatcher.global_bs,
+            num_max_tokens_per_rank,
+            num_experts,
+            num_topk,
+            self.moe_config.hidden_dim,
         )
 
         return self.get_symm_buffer_for_mega_moe(
@@ -338,24 +397,48 @@ class FusedMC2CommImpl(MoECommMethod):
     def _apply_cann_mega_moe(
         self,
         fused_experts_input: MoEFusedExpertsInput,
+        is_decode_only_node: bool,
     ):
         # TokenDispatcherWithMC2 carries global_bs (used below for the mc2_mask
         # branch); assert the subtype so mypy resolves it off the base class.
         assert isinstance(self.token_dispatcher, TokenDispatcherWithMC2)
 
+        # convert element to list, in order to adapt mega moe operator api
         def to_list(x):
+            if x is None:
+                return None
             return x if isinstance(x, list) else [x]
 
-        weight1 = to_list(fused_experts_input.weights.w1)
-        weight2 = to_list(fused_experts_input.weights.w2)
+        # weight1 = to_list(fused_experts_input.weights.w1)
+        # weight2 = to_list(fused_experts_input.weights.w2)
+        if fused_experts_input.quant.quant_type == QuantType.W4A8MXFP:
+            # W4A8 MXFP weights are stored as transposed views for grouped
+            # matmul. Transpose those views back without duplicating the
+            # weights; MegaMoe accepts either a stacked tensor or one tensor
+            # per expert inside each projection list.
+            # Use relative dimensions so the same operation also handles a
+            # list containing one tensor per expert.
+            weight1 = [tensor.transpose(-2, -1) for tensor in to_list(fused_experts_input.weights.w1)]
+            weight2 = [tensor.transpose(-2, -1) for tensor in to_list(fused_experts_input.weights.w2)]
+            weight_scales1 = [
+                tensor.transpose(-3, -2) for tensor in to_list(fused_experts_input.weights.w1_scale)
+            ]
+            weight_scales2 = [
+                tensor.transpose(-3, -2) for tensor in to_list(fused_experts_input.weights.w2_scale)
+            ]
+        else:
+            weight1 = to_list(fused_experts_input.weights.w1)
+            weight2 = to_list(fused_experts_input.weights.w2)
+            weight_scales1 = to_list(fused_experts_input.weights.w1_scale)
+            weight_scales2 = to_list(fused_experts_input.weights.w2_scale)
         # A8W4-INT MegaMoe reads N from weight1.storageShape.lastDim treated as int8 (N = lastDim*2)
         # and checks weight2.dim0 == N/2, so the weights MUST be int8-shaped (two int4 per byte), NOT
         # the eight-int4-per-int32 packing (that makes the op read N four times too small and fail
         # CheckWeight2Input). The op prototype also REQUIRES FRACTAL_NZ per expert. The W4A8 quant
         # method therefore builds per-expert int8 + FRACTAL_NZ lists (cann_mega_moe_*_weight_list) and
         # they are passed through as-is here. W8A8 weights are already int8 + FRACTAL_NZ, also as-is.
-        weight_scales1 = fused_experts_input.weights.w1_scale
-        weight_scales2 = fused_experts_input.weights.w2_scale
+        # weight_scales1 = fused_experts_input.weights.w1_scale
+        # weight_scales2 = fused_experts_input.weights.w2_scale
         dispatch_quant_mode, dispatch_quant_out_dtype, weight_type = moe_utils._get_cann_mega_moe_quant_settings(
             fused_experts_input.quant.quant_type
         )
@@ -364,6 +447,7 @@ class FusedMC2CommImpl(MoECommMethod):
             self.mega_moe_symm_buffer = self._init_mega_moe_symm_buffer(
                 dispatch_quant_mode,
                 dispatch_quant_out_dtype,
+                is_decode_only_node=is_decode_only_node,
             )
         else:
             self.mega_moe_symm_buffer.dispatch_quant_mode = dispatch_quant_mode
@@ -371,17 +455,22 @@ class FusedMC2CommImpl(MoECommMethod):
 
         activation_clamp = self.swiglu_limit if self.swiglu_limit > 0 else None
         x_active_mask = None
-        if self.token_dispatcher.global_bs == 0 and fused_experts_input.routing.mc2_mask is not None:
-            # mc2_mask comes from the reserved bool buffer in
-            # ascend_forward_context.set_mc2_mask. MegaMoe wants int8 as
-            # the per-token active mask, so cast only when the dtype does
-            # not already match — saves the kernel launch when an upstream
-            # change ever flips the reserved buffer to int8.
-            raw_mask = fused_experts_input.routing.mc2_mask
-            if raw_mask.dtype == torch.int8:
-                x_active_mask = raw_mask.contiguous()
-            else:
-                x_active_mask = raw_mask.to(torch.int8).contiguous()
+        # Ascend 950 (A5) MegaMoe only support a null x_active_mask, and it
+        # must be passed as None. But on A2/A3 it must be valid.
+        if is_950():
+            x_active_mask = None
+        else:
+            if self.token_dispatcher.global_bs == 0 and fused_experts_input.routing.mc2_mask is not None:
+                # mc2_mask comes from the reserved bool buffer in
+                # ascend_forward_context.set_mc2_mask. MegaMoe wants int8 as
+                # the per-token active mask, so cast only when the dtype does
+                # not already match — saves the kernel launch when an upstream
+                # change ever flips the reserved buffer to int8.
+                raw_mask = fused_experts_input.routing.mc2_mask
+                if raw_mask.dtype == torch.int8:
+                    x_active_mask = raw_mask.contiguous()
+                else:
+                    x_active_mask = raw_mask.to(torch.int8).contiguous()
         # A8W4-INT precision-compensation biases B1/B2 (l1_bias/l2_bias).
         l1_bias = fused_experts_input.weights.w1_scale_bias
         l2_bias = fused_experts_input.weights.w2_scale_bias
@@ -420,7 +509,9 @@ class FusedMC2CommImpl(MoECommMethod):
         expert_tokens = None
         if get_ascend_config().enable_fused_mc2 == 1:
             if _MEGA_MOE_SUPPORTED:
-                out, expert_tokens = self._apply_cann_mega_moe(fused_experts_input)
+                out, expert_tokens = self._apply_cann_mega_moe(fused_experts_input,
+                    is_decode_only_node=_EXTRA_CTX.is_decode_only_node,
+                )
             else:
                 assert not (
                     fused_experts_input.weights.w1_scale_bias is None

@@ -160,6 +160,10 @@ def _apply_clipped_swiglu(
         bias=swiglu_beta,
     )
 
+def _as_grouped_matmul_weights(
+    tensor_or_list: list[torch.Tensor] | torch.Tensor,
+) -> list[torch.Tensor]:
+    return tensor_or_list if isinstance(tensor_or_list, list) else [tensor_or_list]
 
 def _swiglu_oai_dynamic_mx_quant(
     hidden_states: torch.Tensor,
@@ -648,8 +652,8 @@ def quant_apply_mlp(
 
 def unquant_apply_mlp(
     hidden_states: torch.Tensor,
-    w1: torch.Tensor,
-    w2: torch.Tensor,
+    w1: list[torch.Tensor] | torch.Tensor,
+    w2: list[torch.Tensor] | torch.Tensor,
     group_list: torch.Tensor,
     w1_bias: torch.Tensor = None,
     w2_bias: torch.Tensor = None,
@@ -672,7 +676,7 @@ def unquant_apply_mlp(
 
     gate_up_out = torch_npu.npu_grouped_matmul(
         x=[hidden_states],
-        weight=[w1],
+        weight=_as_grouped_matmul_weights(w1),
         bias=[w1_bias.to(dtype=torch.float32)] if w1_bias is not None else None,
         split_item=2,
         group_list_type=group_list_type,
@@ -751,7 +755,7 @@ def unquant_apply_mlp(
 
     hidden_states = torch_npu.npu_grouped_matmul(
         x=[gate_up_out],
-        weight=[w2],
+        weight=_as_grouped_matmul_weights(w2),
         bias=[w2_bias.to(dtype=torch.float32)] if w2_bias is not None else None,
         split_item=2,
         group_list_type=group_list_type,

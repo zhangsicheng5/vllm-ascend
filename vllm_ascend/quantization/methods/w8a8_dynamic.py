@@ -23,7 +23,11 @@ from vllm.config import CompilationMode, get_current_vllm_config
 from vllm.logger import logger
 
 from vllm_ascend.ascend_config import _MEGA_MOE_SUPPORTED, get_ascend_config
-from vllm_ascend.ascend_forward_context import _EXTRA_CTX, MoECommType
+from vllm_ascend.ascend_forward_context import (
+    _EXTRA_CTX,
+    MoECommType,
+    is_mega_moe_enabled,
+)
 from vllm_ascend.distributed.parallel_state import get_mc2_group
 from vllm_ascend.ops.fused_moe.dataclass.fused_experts import build_fused_experts_input
 from vllm_ascend.ops.fused_moe.routed_experts import AscendRoutedExperts  # noqa: F401
@@ -388,7 +392,7 @@ class AscendW8A8DynamicFusedMoEMethod(AscendMoEScheme):
                 del layer.fused_w2_scale
             torch.npu.empty_cache()
 
-        elif get_ascend_config().enable_fused_mc2 == 1 and _MEGA_MOE_SUPPORTED:
+        elif is_mega_moe_enabled():
             layer.cann_mega_moe_w13_weight_list = list(layer.w13_weight.data.unbind(dim=0))
             layer.cann_mega_moe_w2_weight_list = list(layer.w2_weight.data.unbind(dim=0))
             layer.cann_mega_moe_fused_w1_scale_list = list(
