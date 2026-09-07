@@ -19,6 +19,9 @@ from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp_graph
     MtpGraphMetadataSet,
     eligible_graph_steps,
 )
+from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.sparse_kv_offload_manager import (
+    allocate_kv_offload_topk_buffer_pair,
+)
 
 
 def fixture():
@@ -57,12 +60,73 @@ def test_graph_padding_owns_private_rows_and_fixed_tail_storage():
     scratch_destinations = buffers.batch.tail_destinations[-256:]
     assert int(scratch_destinations.min().cpu()) >= manager.max_num_reqs * (8192 + 256)
     buffers.prepare_layer("owner")
-    assert buffers.layers["owner"][1].cpu().tolist() == [-2, -2, -2]
+    assert buffers.layers["owner"][1].cpu().tolist() == [-2, -2, -3]
     buffers.prepare_layer("owner")
-    assert buffers.layers["owner"][1].cpu().tolist() == [-1, -1, -2]
+    assert buffers.layers["owner"][1].cpu().tolist() == [-1, -1, -3]
     manager.nano_mtp_slot_generations[2] += 1
     buffers.prepare_layer("owner")
-    assert buffers.layers["owner"][1].cpu().tolist() == [-2, -1, -2]
+    assert buffers.layers["owner"][1].cpu().tolist() == [-2, -1, -3]
+    assert set(buffers.runtime.residents["owner"]) == {0, 2}
+
+
+def test_graph_padding_becomes_a_new_live_request_after_slot_reuse():
+    manager, metadata, buffers = fixture()
+    buffers.update(make_mtp_batch(metadata, manager))
+    buffers.prepare_layer("owner")
+    metadata.num_decodes = 1
+    buffers.update(make_mtp_batch(metadata, manager))
+    buffers.prepare_layer("owner")
+    assert buffers.layers["owner"][1].cpu().tolist() == [-1, -3, -3]
+    assert buffers.batch.pool_rows == [2, 4, 5]
+    manager.topk_buffer_slot_manager.req2slot = {"a": 2, "new-b": 0}
+    manager.nano_mtp_slot_generations[0] += 1
+    metadata.num_decodes = 2
+    buffers.update(make_mtp_batch(metadata, manager))
+    buffers.prepare_layer("owner")
+    assert buffers.layers["owner"][1].cpu().tolist() == [-1, -2, -3]
+    # An existing request also resets if its aligned prefix shrinks.
+    metadata.seq_lens[0] -= manager.block_size
+    buffers.update(make_mtp_batch(metadata, manager))
+    buffers.prepare_layer("owner")
+    assert buffers.layers["owner"][1].cpu().tolist() == [-2, -1, -3]
+
+
+def test_graph_capture_uses_only_private_nonoffload_rows():
+    manager, metadata, buffers = fixture()
+    batch = make_mtp_batch(metadata, manager)
+    buffers.update(batch, is_capture=True)
+    buffers.prepare_layer("owner")
+    assert buffers.batch.pool_rows == [3, 4, 5]
+    assert buffers.layers["owner"][1].cpu().tolist() == [-3, -3, -3]
+    assert not buffers.active_mask.any().item()
+    assert not buffers.tail_valid.any().item()
+    assert buffers.runtime.residents["owner"] == {}
+    # Capture must not mark live rows warm before the first actual decode.
+    buffers.update(batch)
+    buffers.prepare_layer("owner")
+    assert buffers.layers["owner"][1].cpu().tolist() == [-2, -2, -3]
+
+
+def test_padding_cache_and_tail_are_initialized_without_touching_live_rows(monkeypatch):
+    config = SimpleNamespace(
+        speculative_config=SimpleNamespace(num_speculative_tokens=3),
+        scheduler_config=SimpleNamespace(max_num_batched_tokens=12, max_num_seqs=3),
+        model_config=SimpleNamespace(hf_text_config=SimpleNamespace(kv_lora_rank=512, qk_rope_head_dim=64)),
+        cache_config=SimpleNamespace(block_size=128),
+    )
+    offload_config = SimpleNamespace(topk_buffer_size=8192, fused_op_type="nano", generalized_mtp=True)
+    original_empty = torch.empty
+
+    def poisoned_empty(*args, **kwargs):
+        result = original_empty(*args, **kwargs)
+        # Raw int8 -1 creates BF16 NaNs, exposing uninitialized padding.
+        return result.fill_(-1)
+
+    monkeypatch.setattr(torch, "empty", poisoned_empty)
+    for tensor in allocate_kv_offload_topk_buffer_pair(config, offload_config):
+        assert tensor.shape[:2] == (12, 8192 + 256)
+        assert tensor[:3].isnan().all().item()
+        assert tensor[3:].count_nonzero().item() == 0
 
 
 def test_graph_inputs_change_without_replacing_captured_storage():
@@ -138,6 +202,14 @@ def test_graph_step_uses_owned_batch_after_builder_scratch_is_reused():
     assert captured.seq_lens.cpu().tolist() == [8452, 8196, 8196]
     torch.testing.assert_close(captured.block_table[:2], batch.source_block_table)
     assert captured.req_topk_buffer_slots.cpu().tolist() == [2, 0, 5]
+    assert captured.slot_mapping.cpu().tolist() == list(range(8)) + [-1] * 8
+    # A later shrinking batch must not retain previously live D2H slots.
+    source.num_decodes = 1
+    source.seq_lens[0] = 8452
+    source.cum_query_lens[0] = 4
+    metadata.mtp_batch = make_mtp_batch(source, manager)
+    graphs.update([{"owner": metadata}])
+    assert captured.slot_mapping.cpu().tolist() == list(range(4)) + [-1] * 12
 
 
 def test_graph_step_keeps_ordinary_attention_metadata():

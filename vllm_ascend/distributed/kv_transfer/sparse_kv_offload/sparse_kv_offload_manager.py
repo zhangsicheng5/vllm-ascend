@@ -106,6 +106,13 @@ def allocate_kv_offload_topk_buffer_pair(
         .view(torch.bfloat16)
         .view(topk_buffer_v_shape)
     )
+    if getattr(sparse_kv_offload_config, "generalized_mtp", False):
+        # Graph padding owns rows beyond the live request pool. Its LIM state
+        # is non-offload, so no first-fill or tail H2D will initialize these
+        # buffers. Initialize both hot KV and tails once, outside replay.
+        first_padding_row = vllm_config.scheduler_config.max_num_seqs
+        topk_buffer_k[first_padding_row:].zero_()
+        topk_buffer_v[first_padding_row:].zero_()
     return (topk_buffer_k, topk_buffer_v)
 
 

@@ -96,10 +96,11 @@ end-to-end speedup from an unimplemented fix.
 
 ## 2. Prevent padded rows from triggering cold-fill H2D
 
-### Current cause
+### Cause in the profiled revision
 
 `MtpGraphBuffers` assigns private hot-cache rows to graph padding. In
-`prepare_layer`, every inactive row receives `request_state=-2` on every replay.
+`prepare_layer` at the profiled revision, every inactive row receives
+`request_state=-2` on every replay.
 LIM interprets `-2` as first offload, reinitializes the mapping, and emits
 `miss_count=cache_tokens`. Both the conditional copy helper and copy-SFA use a
 batch-wide first-fill decision: any row with `miss_count >= cache_tokens` selects
@@ -148,13 +149,29 @@ Real new or reset requests still initialize their cache. Existing valid requests
 retain the warm state. Padding performs no cache work. Updating mask values does
 not change captured tensor shapes or require a new graph for each occupancy.
 
-### Smaller workaround and limits
+### Implemented first step and remaining work
 
-A candidate workaround is LIM's existing `-3` non-offload state for private dummy
-rows, with a positive cache budget, valid tables, sufficient indexer coverage,
-and finite initialized dummy HBM. It produces zero misses and can avoid the
-dummy-triggered H2D without changing copy-SFA. It still executes dummy LI,
-identity-map writes, and attention, and needs dedicated validation.
+The Python integration now assigns LIM's existing `-3` non-offload state only to
+private dummy rows. Live new/reset requests retain `-2`, and live requests with
+valid resident state retain `-1`. This makes both `miss_counts[B]` and
+`topk_miss_counts[T]` zero for padding, while keeping its cache budget positive.
+Thus padding triggers neither first-fill copying nor source-aware host gathers.
+
+The allocator initializes private hot-cache rows and their tails once. Startup
+capture also uses private rows, without marking live requests resident. Graph
+metadata explicitly masks padded D2H slots with `-1`; the existing active mask
+keeps their tail H2D descriptor lengths zero. Shapes and storage addresses stay
+fixed across replays. Native operator interfaces and kernels are unchanged.
+
+The focused regressions cover Q1/Q4, capture, changing occupancy, new/reset versus
+warm requests, registered-host transfers, and live attention against a direct
+logical-host reference. They poison padding's host source block to expose
+accidental copies and check that its private HBM remains zero. Validation results
+for a particular run must be recorded separately; the measurements above precede
+this change and do not establish its throughput benefit.
+
+This first step still executes dummy LI, identity-map writes, and attention.
+The explicit inactive-row kernel handling proposed above remains future work.
 
 Changing `-2` to `-1` alone can use an uninitialized resident map. Setting the dummy
 cache size to zero also fails the current `0 >= 0` first-fill test. Masking only

@@ -18,6 +18,9 @@ from .generalized_mtp import (
     COPY_MISS_CAPACITY,
     INVALID_SLOT,
     LIM_MISS_CAPACITY,
+    REQUEST_STATE_FIRST_OFFLOAD,
+    REQUEST_STATE_NON_OFFLOAD,
+    REQUEST_STATE_STEADY,
     TOPK,
     MtpBatch,
     make_mtp_batch,
@@ -30,7 +33,10 @@ class MtpGraphBuffers:
 
     Inactive rows have private hot-cache pool entries beyond the scheduler's
     request pool. They run valid dummy queries, never mutating a live request.
-    The model's token padding is independent of this operator capacity.
+    Non-offload LIM produces zero request/query misses for these rows. Their
+    HBM hot cache and tails are initialized at allocation, so copy-SFA can
+    execute dummy attention without fetching host KV. The model's token
+    padding is independent of this operator capacity.
     """
 
     def __init__(self, runtime, *, query_width, source_capacity, device, request_capacity=None):
@@ -96,22 +102,24 @@ class MtpGraphBuffers:
         expected = [self.query_width * (row + 1) for row in range(count)]
         return batch.query_ends.cpu().tolist() == expected
 
-    def update(self, batch):
+    def update(self, batch, *, is_capture=False):
         """Refresh graph inputs outside capture, on the replay's input stream."""
         if torch.npu.is_current_stream_capturing():
             raise RuntimeError("MTP graph input preparation must run before capture/replay")
         if not self.accepts(batch):
             raise ValueError("MTP batch does not match the graph's uniform-query capacity")
         manager, graph = self.manager, self.batch
-        count = len(batch.pool_rows)
+        # Startup capture has no live requests. Select private rows before
+        # constructing tables, just as for padding during normal replay.
+        count = 0 if is_capture else len(batch.pool_rows)
         self.active_requests = count
         self.active_mask.zero_()
         self.active_mask[:count].fill_(True)
         scratch = list(range(manager.max_num_reqs + count, manager.max_num_reqs + self.requests))
-        pools = batch.pool_rows + scratch
-        prefixes = batch.prefix_lengths + [manager.topk_buffer_size] * (self.requests - count)
-        caches = batch.cache_sizes + [manager.topk_buffer_size] * (self.requests - count)
-        lengths = batch.seq_lens.cpu().tolist() + [manager.topk_buffer_size + self.query_width] * (
+        pools = batch.pool_rows[:count] + scratch
+        prefixes = batch.prefix_lengths[:count] + [manager.topk_buffer_size] * (self.requests - count)
+        caches = batch.cache_sizes[:count] + [manager.topk_buffer_size] * (self.requests - count)
+        lengths = batch.seq_lens[:count].cpu().tolist() + [manager.topk_buffer_size + self.query_width] * (
             self.requests - count
         )
         graph.pool_rows, graph.prefix_lengths, graph.cache_sizes = pools, prefixes, caches
@@ -123,7 +131,7 @@ class MtpGraphBuffers:
         ):
             dst.copy_(torch.tensor(values, dtype=dst.dtype, device=self.device))
         graph.source_block_table.zero_()
-        graph.source_block_table[:count].copy_(batch.source_block_table)
+        graph.source_block_table[:count].copy_(batch.source_block_table[:count])
         block_size = manager.block_size
         stride_blocks = manager.topk_buffer_size // block_size + 2
         table = torch.zeros_like(graph.hbm_block_table, device="cpu")
@@ -181,12 +189,15 @@ class MtpGraphBuffers:
             )
         ):
             if row >= self.active_requests:
-                states.append(-2)
+                # Padding is not a new request: -2 would emit C misses on
+                # every replay and force batch-wide first-fill H2D. -3 emits
+                # zero request and per-query misses, using private HBM only.
+                states.append(REQUEST_STATE_NON_OFFLOAD)
                 continue
             owner = (owners[pool], manager.nano_mtp_slot_generations.get(pool, 0))
             previous = resident.get(pool)
             ready = previous is not None and previous[:2] == (owner, cache) and previous[2] <= prefix
-            states.append(-1 if ready else -2)
+            states.append(REQUEST_STATE_STEADY if ready else REQUEST_STATE_FIRST_OFFLOAD)
             resident[pool] = (owner, cache, prefix)
         self.layers[layer_name][1].copy_(torch.tensor(states, dtype=torch.int32, device=self.device))
 
@@ -336,11 +347,13 @@ class MtpGraphMetadataSet:
                     incoming,
                     skip_fields=("cum_query_lens", "seq_lens", "block_table", "req_topk_buffer_slots"),
                 )
-                buffers.update(incoming.mtp_batch)
-                if incoming.mtp_graph_capture:
-                    buffers.active_requests = 0
-                    buffers.active_mask.zero_()
-                    buffers.tail_valid.zero_()
+                buffers.update(incoming.mtp_batch, is_capture=incoming.mtp_graph_capture)
+                # Slot -1 suppresses D2H for padded query rows; active_mask
+                # independently suppresses their tail H2D descriptors.
+                active_tokens = buffers.active_requests * buffers.query_width
+                owned.slot_mapping[active_tokens:].fill_(-1)
+                if owned.main_slot_mapping is not None:
+                    owned.main_slot_mapping[active_tokens:].fill_(-1)
                 for layer_name in names:
                     buffers.prepare_layer(layer_name)
 

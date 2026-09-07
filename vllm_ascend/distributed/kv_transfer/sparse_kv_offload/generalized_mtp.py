@@ -14,6 +14,9 @@ TOPK = 2048
 LIM_MISS_CAPACITY = 16384
 COPY_MISS_CAPACITY = 32768
 INVALID_SLOT = -(1 << 31)
+REQUEST_STATE_NON_OFFLOAD = -3
+REQUEST_STATE_FIRST_OFFLOAD = -2
+REQUEST_STATE_STEADY = -1
 
 
 def prepare_copy_sfa_queries(query, query_rope):
@@ -173,7 +176,7 @@ class GeneralizedMtpRuntime:
             owner = (owners[pool], manager.nano_mtp_slot_generations.get(pool, 0))
             previous = resident.get(pool)
             ready = previous is not None and previous[:2] == (owner, cache) and previous[2] <= prefix
-            states.append(-1 if ready else -2)
+            states.append(REQUEST_STATE_STEADY if ready else REQUEST_STATE_FIRST_OFFLOAD)
             resident[pool] = (owner, cache, prefix)
         count, tokens = len(batch.pool_rows), batch.num_tokens
 
