@@ -163,6 +163,33 @@ def test_graph_inputs_change_without_replacing_captured_storage():
         torch.testing.assert_close(snapshot, current)
 
 
+def test_graph_consumers_share_lim_miss_storage_across_replays():
+    manager, metadata, buffers = fixture()
+    buffers.update(make_mtp_batch(metadata, manager))
+    outputs = buffers.outputs
+    assert buffers.copy_metadata() is outputs
+    assert buffers.runtime.copy_metadata(buffers.batch) is outputs
+    for tensor in outputs[3:5]:
+        assert tensor.shape == (3, 32768) and tensor.is_contiguous()
+    snapshots = [torch.empty_like(value) for value in outputs[3:5]]
+    pointers = [value.data_ptr() for value in outputs[3:5]]
+    graph = torch.npu.NPUGraph()
+    torch.npu.synchronize()
+    with torch.npu.graph(graph):
+        for snapshot, value in zip(snapshots, buffers.copy_metadata()[3:5]):
+            snapshot.copy_(value)
+    for count in (2, 1, 2):
+        metadata.num_decodes = count
+        buffers.update(make_mtp_batch(metadata, manager))
+        outputs[3].fill_(count)
+        outputs[4].fill_(count + 7)
+        graph.replay()
+        torch.npu.synchronize()
+        assert [value.data_ptr() for value in buffers.copy_metadata()[3:5]] == pointers
+        for snapshot, value in zip(snapshots, outputs[3:5]):
+            torch.testing.assert_close(snapshot, value, rtol=0, atol=0)
+
+
 def test_nonuniform_batch_does_not_reuse_uniform_graph():
     manager, metadata, buffers = fixture()
     metadata.cum_query_lens.copy_(torch.tensor([1, 5], dtype=torch.int32, device="npu:0"))

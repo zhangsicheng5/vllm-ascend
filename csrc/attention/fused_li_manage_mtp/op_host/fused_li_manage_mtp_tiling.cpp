@@ -220,7 +220,7 @@ ge::graphStatus FusedLiManageMtpTiling::CheckShape(FusedLiManageMtpTilingInfo &t
     OPS_ERR_IF(blockShape.GetDimNum() != DIM_NUM_TWO,
                OPS_LOG_E(tilingInfo.opName, "block_table must be rank 2."), return ge::GRAPH_FAILED);
     OPS_ERR_IF(indexOutShape.GetDimNum() != DIM_NUM_THREE || slotsOutShape.GetDimNum() != DIM_NUM_THREE,
-               OPS_LOG_E(tilingInfo.opName, "topk_index/topk_slots must be [B, 1, 2048]."),
+               OPS_LOG_E(tilingInfo.opName, "topk_index/topk_slots must be [T, 1, 2048]."),
                return ge::GRAPH_FAILED);
     OPS_ERR_IF(missCountOutShape.GetDimNum() != DIM_NUM_ONE,
                OPS_LOG_E(tilingInfo.opName, "miss_count must be [B]."), return ge::GRAPH_FAILED);
@@ -228,11 +228,11 @@ ge::graphStatus FusedLiManageMtpTiling::CheckShape(FusedLiManageMtpTilingInfo &t
                OPS_LOG_E(tilingInfo.opName, "cache_slots output must be rank 2."),
                return ge::GRAPH_FAILED);
     OPS_ERR_IF(mtp_ && topkMissCountOutShape->GetDimNum() != DIM_NUM_ONE,
-               OPS_LOG_E(tilingInfo.opName, "topk_miss_counts must be [4B]."),
+               OPS_LOG_E(tilingInfo.opName, "topk_miss_counts must be [T]."),
                return ge::GRAPH_FAILED);
     OPS_ERR_IF(mtp_ && (missSrcShape->GetDimNum() != DIM_NUM_TWO ||
                         missSlotsShape->GetDimNum() != DIM_NUM_TWO),
-               OPS_LOG_E(tilingInfo.opName, "MTP miss outputs must be [B, 16384]."),
+               OPS_LOG_E(tilingInfo.opName, "MTP miss outputs must be [B, 32768]."),
                return ge::GRAPH_FAILED);
 
     tilingInfo.tSize = static_cast<uint32_t>(qShape.GetDim(0));
@@ -246,8 +246,8 @@ ge::graphStatus FusedLiManageMtpTiling::CheckShape(FusedLiManageMtpTilingInfo &t
     tilingInfo.cacheSlotsSize = static_cast<uint32_t>(cacheShape.GetDim(1));
 
     OPS_ERR_IF(tilingInfo.bSize == 0 || tilingInfo.tSize < tilingInfo.bSize ||
-                   tilingInfo.tSize > tilingInfo.bSize * 7U,
-               OPS_LOG_E(tilingInfo.opName, "requires B <= T <= 7B."),
+                   tilingInfo.tSize > tilingInfo.bSize * 14U,
+               OPS_LOG_E(tilingInfo.opName, "requires B <= T <= 14B."),
                return ge::GRAPH_FAILED);
     uint32_t metadataBatch = tilingInfo.bSize;
     for (uint32_t input = ACTUAL_SEQ_Q_INDEX; input <= REQ_POOL_ENTRIES_INDEX; ++input) {
@@ -302,18 +302,18 @@ ge::graphStatus FusedLiManageMtpTiling::CheckShape(FusedLiManageMtpTilingInfo &t
                     indexOutShape.GetDim(2) != DECODE_OUTPUT_CAPACITY ||
                     slotsOutShape.GetDim(0) != tilingInfo.tSize || slotsOutShape.GetDim(1) != DECODE_N2 ||
                     slotsOutShape.GetDim(2) != DECODE_OUTPUT_CAPACITY,
-               OPS_LOG_E(tilingInfo.opName, "topk_index/topk_slots must have shape [B, 1, 2048]."),
+               OPS_LOG_E(tilingInfo.opName, "topk_index/topk_slots must have shape [T, 1, 2048]."),
                return ge::GRAPH_FAILED);
     OPS_ERR_IF(missCountOutShape.GetDim(0) != metadataBatch,
                OPS_LOG_E(tilingInfo.opName, "miss_count must have shape [B]."),
                 return ge::GRAPH_FAILED);
     OPS_ERR_IF(mtp_ && topkMissCountOutShape->GetDim(0) != tilingInfo.tSize,
                OPS_LOG_E(tilingInfo.opName,
-                         "topk_miss_counts must have shape [4B]."),
+                         "topk_miss_counts must have shape [T]."),
                return ge::GRAPH_FAILED);
-    OPS_ERR_IF(mtp_ && (missSrcShape->GetDim(0) != metadataBatch || missSrcShape->GetDim(1) != 16384 ||
-                        missSlotsShape->GetDim(0) != metadataBatch || missSlotsShape->GetDim(1) != 16384),
-               OPS_LOG_E(tilingInfo.opName, "MTP miss outputs must have shape [B, 16384]."),
+    OPS_ERR_IF(mtp_ && (missSrcShape->GetDim(0) != metadataBatch || missSrcShape->GetDim(1) != 32768 ||
+                        missSlotsShape->GetDim(0) != metadataBatch || missSlotsShape->GetDim(1) != 32768),
+               OPS_LOG_E(tilingInfo.opName, "MTP miss outputs must have shape [B, 32768]."),
                return ge::GRAPH_FAILED);
     OPS_ERR_IF(cacheSlotsOutShape.GetDim(0) != cacheShape.GetDim(0) ||
                    cacheSlotsOutShape.GetDim(1) != cacheShape.GetDim(1),
@@ -374,7 +374,6 @@ ge::graphStatus FusedLiManageMtpTiling::DoTiling(FusedLiManageMtpTilingInfo *til
                          VALUE_AND_INDEX * DECODE_SPARSE_COUNT * sizeof(float);
         workspaceSize += static_cast<uint64_t>(blockDim) * LD_HEAD_TAIL * S1_BASE_SIZE *
                          LD_PARAM_NUM * sizeof(int64_t);
-        constexpr uint32_t MTP_ROUTES = 7U;
         constexpr uint32_t MTP_PAIR_CAPACITY = 4U * DECODE_SPARSE_COUNT;
         constexpr uint32_t MTP_THRESHOLD_STRIDE = 8U;
         constexpr uint32_t MTP_ROUTE_COUNT_STRIDE = 8U;
@@ -382,9 +381,9 @@ ge::graphStatus FusedLiManageMtpTiling::DoTiling(FusedLiManageMtpTilingInfo *til
         // Keep this order synchronized with MtpWorkspace::{Pair0Offset,
         // Pair1Offset, ScoreOffset, ThresholdOffset, RouteCountOffset} in the kernel.
         workspaceSize += metadataBatch * MTP_PAIR_CAPACITY * sizeof(float) * 2U;
-        workspaceSize += metadataBatch * MTP_ROUTES * scoreStride * sizeof(float);
-        workspaceSize += metadataBatch * MTP_ROUTES * MTP_THRESHOLD_STRIDE * sizeof(float);
-        workspaceSize += metadataBatch * MTP_ROUTES * MTP_ROUTE_COUNT_STRIDE * sizeof(int32_t);
+        workspaceSize += static_cast<uint64_t>(tilingInfo->tSize) * scoreStride * sizeof(float);
+        workspaceSize += static_cast<uint64_t>(tilingInfo->tSize) * MTP_THRESHOLD_STRIDE * sizeof(float);
+        workspaceSize += static_cast<uint64_t>(tilingInfo->tSize) * MTP_ROUTE_COUNT_STRIDE * sizeof(int32_t);
     }
     constexpr uint32_t PARTIAL_SLOTS_PER_CORE = 2;
     constexpr uint32_t PARTIAL_META_INTS_PER_CORE = 8;

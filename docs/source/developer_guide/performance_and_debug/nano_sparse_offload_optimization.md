@@ -6,9 +6,10 @@ highest-priority defect is repeated cold initialization of padded graph rows.
 Full batches also incur tensor adaptation, metadata preparation, and host-gather
 costs that can consume the benefit of fusion.
 
-**Status:** profiling and source analysis are complete. The optimizations below
-are proposals; this document does not implement them or claim a measured speedup
-from them. The source inspected was vLLM-Ascend commit
+**Status:** the padded-row transfer fix and shared miss-buffer integration are
+implemented. Native four-head support and the remaining optimizations are still
+proposals. No speedup from the latest kernel update is claimed here. The
+original profiling inspected vLLM-Ascend commit
 `3aed3bf54fc4591a4a65b983635df9b5ecf1587e` with vLLM 0.27.1.
 
 The nano operators were imported from
@@ -23,6 +24,18 @@ at these pinned reference commits:
 The head-count and miss-list contracts discussed below refer to these pinned
 revisions and their vLLM-Ascend integration. Access to the private upstream
 repository is required to open its links.
+
+The current integration updates LIM to
+[`012962af05f06bf1bdd089ca7e7e4357d021682f`](https://github.com/xwLearnsLLM/nanovllm-DSA-offload/commit/012962af05f06bf1bdd089ca7e7e4357d021682f)
+and copy-SFA to
+[`1518a90dd17592dc3aa96c16869cfde597a250b4`](https://github.com/xwLearnsLLM/nanovllm-DSA-offload/commit/1518a90dd17592dc3aa96c16869cfde597a250b4).
+LIM now writes contiguous `int32[B,32768]` miss lists, shared directly with
+copy-SFA in eager and graph execution. Copy-SFA accepts 8, 16, 32, 64 or 128
+heads; four-head TP16 inputs still need padding and output compaction.
+The `request_state=-3` padding fix is retained. The historical measurements and
+cause analysis below describe the original pins, before these changes.
+A controlled nano-disabled offload comparison with 128K input is planned;
+new measurements must be recorded separately from the historical results.
 
 See the [offloading guide](../../user_guide/feature_guide/layerwise_and_sparse_kv_cache_offloading.md)
 for current serving support and the
@@ -183,7 +196,7 @@ capture sizes alone do not remove the operator-padding problem in that setup.
 
 ## 3. Remove query-head padding and output compaction
 
-The currently imported copy-SFA interface accepts **8 or 128 query heads per
+The originally profiled copy-SFA interface accepts **8 or 128 query heads per
 rank**, rather than arbitrary multiples of eight. Its Python adapter accepts
 1–7 heads by padding to eight; other unsupported counts are rejected. These are
 attention heads, distinct from LIM's indexer-head contract.
@@ -235,7 +248,7 @@ hard-coded 16384-element offsets for miss-output rows. Conversely, a packed
 16384-stride view of the same storage would put later rows at addresses that
 copy-SFA does not expect.
 
-### Preferred shared-buffer change
+### Implemented shared-buffer change
 
 1. Preallocate source and destination buffers as `[B, 32768]`.
 2. Extend LIM's output contract and indexing to write directly with that physical

@@ -11,8 +11,8 @@ from dataclasses import dataclass
 import torch
 
 TOPK = 2048
-LIM_MISS_CAPACITY = 16384
 COPY_MISS_CAPACITY = 32768
+LIM_MISS_CAPACITY = COPY_MISS_CAPACITY
 INVALID_SLOT = -(1 << 31)
 REQUEST_STATE_NON_OFFLOAD = -3
 REQUEST_STATE_FIRST_OFFLOAD = -2
@@ -20,7 +20,7 @@ REQUEST_STATE_STEADY = -1
 
 
 def prepare_copy_sfa_queries(query, query_rope):
-    """Pad small TP shards to the pinned kernel's eight-head tile.
+    """Prepare contiguous queries for native 8/16/32/64/128-head tiles.
 
     MLA shares KV across query heads, and softmax is independent per head.
     Zero-filled extra query heads cannot affect the original heads; callers
@@ -33,8 +33,10 @@ def prepare_copy_sfa_queries(query, query_rope):
         padded_query[:, :heads].copy_(query)
         padded_rope[:, :heads].copy_(query_rope)
         return padded_query, padded_rope
-    if heads not in (8, 128):
-        raise ValueError(f"Generalized copy-SFA serving requires 1–8 or 128 query heads per rank, got {heads}")
+    if heads not in (8, 16, 32, 64, 128):
+        raise ValueError(
+            f"Generalized copy-SFA serving requires 1–8, 16, 32, 64 or 128 query heads per rank, got {heads}"
+        )
     return query.contiguous(), query_rope.contiguous()
 
 
@@ -202,18 +204,6 @@ class GeneralizedMtpRuntime:
         return self.outputs
 
     def copy_metadata(self, batch):
-        if batch.graph_buffers is not None:
-            return batch.graph_buffers.copy_metadata()
-        src, dst, topk_misses, miss_src, miss_dst, misses = self.require_outputs(batch)
-        # A [B, 16384] slice of [B, 32768] is noncontiguous for B > 1.
-        # Both public ABIs require contiguous tensors, so bridge explicitly.
-        copy_src = torch.full(
-            (len(batch.pool_rows), COPY_MISS_CAPACITY),
-            -1,
-            dtype=torch.int32,
-            device=src.device,
-        )
-        copy_dst = torch.full_like(copy_src, -1)
-        copy_src[:, :LIM_MISS_CAPACITY].copy_(miss_src)
-        copy_dst[:, :LIM_MISS_CAPACITY].copy_(miss_dst)
-        return src, dst, topk_misses, copy_src, copy_dst, misses
+        # Both kernels use contiguous int32[B, 32768]. Shared-indexer
+        # consumers read the same valid miss-count prefixes without a bridge.
+        return self.require_outputs(batch)

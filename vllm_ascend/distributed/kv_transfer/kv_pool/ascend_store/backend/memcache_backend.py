@@ -7,7 +7,6 @@ from typing import Any
 
 import torch
 from vllm.config import ParallelConfig
-from vllm.distributed.parallel_state import get_world_group
 from vllm.logger import logger
 
 from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.base import Backend
@@ -46,7 +45,10 @@ class MemcacheBackend(Backend):
         init_bm: bool = True,
         lazy_init: bool = False,
     ):
-        self.local_rank = local_rank if local_rank is not None else get_world_group().local_rank
+        # The distributed local rank can restart at zero for each DP replica.
+        # Use the device already selected by the worker, including its DP offset,
+        # so Memcache and the RD2H MemFabric engine initialize the same NPU.
+        self.local_rank = local_rank if local_rank is not None else torch.npu.current_device()
         self._init_bm = init_bm
         self._lazy_init = lazy_init and _is_device_sdma()
 

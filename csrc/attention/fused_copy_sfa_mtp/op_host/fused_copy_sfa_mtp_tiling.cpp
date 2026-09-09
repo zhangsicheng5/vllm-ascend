@@ -119,12 +119,15 @@ ge::graphStatus CheckFusedInputs(
                          "MTP query must have rank 3."),
                return ge::GRAPH_FAILED);
     const int64_t totalQueryTokens = q.GetDim(0);
+    const int64_t numQueryHeads = q.GetDim(1);
     OPS_ERR_IF(!IsShape(q, {-1, -1, CKV_DIM}) ||
                    totalQueryTokens < batchSize ||
                    totalQueryTokens > batchSize * MAX_QUERY_COUNT ||
-                   (q.GetDim(1) != 8 && q.GetDim(1) != 128),
+                   numQueryHeads < 8 || numQueryHeads > 128 ||
+                   (numQueryHeads & (numQueryHeads - 1)) != 0,
                OPS_LOG_E(context->GetNodeName(),
-                         "MTP query must be [T,N,512], B <= T <= 16B, N in {8,128}."),
+                         "MTP query must be [T,N,512], B <= T <= 16B, "
+                         "N in {8,16,32,64,128}."),
                return ge::GRAPH_FAILED);
     OPS_ERR_IF(!IsShape(qRope, {totalQueryTokens, q.GetDim(1), KPE_DIM}),
                OPS_LOG_E(context->GetNodeName(),

@@ -15,7 +15,6 @@ import torch
 from vllm_ascend.attention.indexer import AscendSFAIndexerMetadata
 
 from .generalized_mtp import (
-    COPY_MISS_CAPACITY,
     INVALID_SLOT,
     LIM_MISS_CAPACITY,
     REQUEST_STATE_FIRST_OFFLOAD,
@@ -84,13 +83,6 @@ class MtpGraphBuffers:
             zeros((self.requests, LIM_MISS_CAPACITY)),
             zeros(self.requests),
         )
-        self.copy_sources = torch.full(
-            (self.requests, COPY_MISS_CAPACITY),
-            -1,
-            dtype=torch.int32,
-            device=device,
-        )
-        self.copy_destinations = torch.full_like(self.copy_sources, -1)
         self.active_requests = 0
 
     def accepts(self, batch):
@@ -207,11 +199,8 @@ class MtpGraphBuffers:
         return (*self.layers[layer_name], self.outputs)
 
     def copy_metadata(self):
-        src, dst, route_misses, miss_src, miss_dst, misses = self.outputs
-        # These copies execute inside the graph after LIM, on every replay.
-        self.copy_sources[:, :LIM_MISS_CAPACITY].copy_(miss_src)
-        self.copy_destinations[:, :LIM_MISS_CAPACITY].copy_(miss_dst)
-        return src, dst, route_misses, self.copy_sources, self.copy_destinations, misses
+        # LIM publishes directly to copy-SFA's fixed-address input buffers.
+        return self.outputs
 
 
 def clone_graph_metadata(metadata):

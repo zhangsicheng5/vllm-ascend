@@ -262,13 +262,16 @@ For multi-node deployment, advertise reachable addresses instead of
 The `nano` backend uses generalized LIM and copy-SFA when speculative decoding
 is enabled, or when Sparse Decode Offload uses `keep_device_kv_cache=false`.
 It supports up to six speculative tokens (seven query rows per request) and
-BF16/FP16 indexer inputs. The native copy-SFA kernel accepts 8 or
+BF16/FP16 indexer inputs. The native copy-SFA kernel accepts 8, 16, 32, 64 or
 128 attention heads per rank. The adapter pads 1 through 7 heads to 8
 and discards the padded outputs; GLM-5.2 TP16 uses this path with 4 heads.
 
 Install the Decode dependencies above. With the
 `quay.nju.edu.cn/ascend/vllm-ascend:nightly-main-a3` image, preserve its
 vLLM 0.27.1 installation and build/reinstall the updated vLLM-Ascend sources.
+For these native ABI updates, start with a clean generated `csrc/build`
+directory; an incremental build can retain old device kernels with new host
+tiling code. Preserve any needed build artifacts before clearing that cache.
 Install matching MemFabric native libraries and Python bindings: the wheel
 alone does not supply `libmf_hybm_accoffload.so`. The recorded validation used
 MemFabric 1.2.1 from commit `0259c97a2fa01022708dbeffe4b5c5672bc424dc`
@@ -360,6 +363,10 @@ For a Decode node receiving KV through `SfaRemoteD2HConnector`, set
 the main KV history into the shared host pool and the indexer cache into device
 memory. It does not populate nano's two device tail blocks.
 
+Disable prefix caching on Decode with `--no-enable-prefix-caching` for both
+the `default` and `nano` offload backends. Decode prefix reuse is not supported
+by the current PD offload integration.
+
 The Decode attention path now writes its new KV into the host pool, then
 restores only the tail needed by copy-SFA. For block size `B=128`, sequence
 length `S`, and query width `Q`, the tail starts at
@@ -421,6 +428,14 @@ profiling measurements, not speedups from an implemented fix. See the
 for the evidence, inactive-row kernel changes, shared miss-buffer layout,
 head-count/DP2-TP8 discussion, and validation plan.
 
+With the updated LIM and copy-SFA pins, a clean A3 build passed four focused
+native operator checks and colocated GLM-5.2 DP2/TP8/MTP3 target-graph checks,
+including 131,072-token serial and concurrency-2 requests. The latest
+nano-disabled PD run passed a 10,555-token prompt and two 131,072-token serial
+requests. Its concurrent requests reused unsupported Decode prefixes, so that
+case is excluded from supported-configuration validation. Nano-enabled PD and
+the controlled 128K throughput comparison remain pending for these new pins.
+
 When testing PD with MTP, enable matching MTP configuration on Prefill so its
 draft-layer KV is registered and transferred as well as the target-model KV.
 Prefill layerwise offload remains eager. Keep GLM speculative drafting eager
@@ -437,6 +452,7 @@ DP-by-TP port range described above.
 - Shared-buffer Layerwise Prefill Offload requires Memcache and eager mode.
 - Context parallelism has not been validated with Layerwise Prefill Offload.
 - Sparse Decode Offload supports DP and TP; CP and PP are not supported.
+- PD offload requires prefix caching to be disabled on Decode.
 - Generalized MTP offload has focused eager and target-model
   `FULL_DECODE_ONLY` colocated validation. GLM speculative drafting remains
   eager. True PD has focused Q1 eager and matched MTP3 eager/target-graph

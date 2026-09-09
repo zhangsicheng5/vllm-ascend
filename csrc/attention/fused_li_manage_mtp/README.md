@@ -1,10 +1,10 @@
-> Imported from private `xwLearnsLLM/nanovllm-DSA-offload`, commit `86facf38362c0956d1b32c88faccf7dc26e87178`. In this repository the entry point is `torch.ops._C_ascend.npu_fused_li_manage_mtp`. CANN names and build integration are adapted to vLLM-Ascend.
+> Imported from private `xwLearnsLLM/nanovllm-DSA-offload`, commit `012962af05f06bf1bdd089ca7e7e4357d021682f`. In this repository the entry point is `torch.ops._C_ascend.npu_fused_li_manage_mtp`. CANN names and build integration are adapted to vLLM-Ascend.
 
 # `fused_li_manage_mtp` 标准接口与行为
 
 `fused_li_manage_mtp` 将官方 Lightning Indexer（LI）的 TopK 检索、HBM
 sparse-cache 的首次填充/稳态淘汰，以及 MTP 多路 query 的 union 管理融合为一次
-NPU 调用。一个 batch 可混合 MTP0–MTP6（每请求 1–7 路 query），也可混合
+NPU 调用。一个 batch 可混合 MTP0–MTP13（每请求 1–14 路 query），也可混合
 非卸载、首次卸载和卸载稳态请求。
 
 ## 接口
@@ -27,8 +27,8 @@ fused_li_manage_mtp(
     topk_src_ids,                  # int32 [T, 1, 2048]，只写；每路 query 的 TopK source token ID。
     topk_dst_slots,                # int32 [T, 1, 2048]，只写；与 topk_src_ids 同位置对应的 HBM logical slot，或 -1 padding。
     topk_miss_counts,              # int32 [T]，只写；每路 query 的 TopK miss 数。
-    miss_src_ids,                  # int32 [B, 16384]，只写；每请求本轮需要搬入 HBM 的 source token ID 列表。
-    miss_dst_slots,                # int32 [B, 16384]，只写；与 miss_src_ids 同位置对应的目标 HBM logical slot。
+    miss_src_ids,                  # int32 [B, 32768]，只写；每请求本轮需要搬入 HBM 的 source token ID 列表。
+    miss_dst_slots,                # int32 [B, 32768]，只写；与 miss_src_ids 同位置对应的目标 HBM logical slot。
     miss_counts,                   # int32 [B]，只写；每请求有效搬运列表长度。
 ) -> None
 ```
@@ -49,7 +49,7 @@ tensor。
 ```text
 query_start = i == 0 ? 0 : actual_seq_lengths_query[i - 1]
 query_end   = actual_seq_lengths_query[i]
-Q           = query_end - query_start                    # 1 <= Q <= 7
+Q           = query_end - query_start                    # 1 <= Q <= 14
 ```
 
 请求 `i` 的 query 行为 `[query_start, query_end)`。例如请求依次为 MTP2、MTP3、
@@ -129,7 +129,7 @@ visible_length = actual_seq_lengths_key[i] - later_queries
 
 令 `L = offload_seq_lengths_key[i]`、`C = num_cache_tokens[i]`：
 
-- `1 <= Q <= 7`；`actual_seq_lengths_query` 严格递增，最后一项等于 `T`。
+- `1 <= Q <= 14`；`actual_seq_lengths_query` 严格递增，最后一项等于 `T`。
 - `Q <= actual_seq_lengths_key[i] <= SOURCE_CAPACITY`。
 - 对 `-3`：`index_key_cache` 与 `index_block_table` 必须覆盖
   `[0, actual_seq_lengths_key[i])`。
@@ -142,7 +142,7 @@ visible_length = actual_seq_lengths_key[i] - later_queries
   ```
 
 - 当 `2048 <= L <= Q * 2048` 时，必须 `C = L`；当 `L > Q * 2048` 时，必须
-  `Q * 2048 <= C <= 16256`。
+  `Q * 2048 <= C <= 32640`。
 - `req_pool_entries[i]` 必须落在 `[0, POOL_SIZE)`；同一次调用的 active request
   不得并发写同一 pool row。
 
@@ -175,9 +175,9 @@ sparse row 连续执行 `-1` 时，第二次应无 miss；query、可见 source 
 
 ## 长序列编码
 
-source capacity 最大为 21 bit。长度不超过 `2^18` 时，TopK/淘汰 payload 可直接
-保存 source ID。超过 `2^18` 时，payload 保存 source ID 的低 18 bit，排序 key
-附带高 3 bit tag；排序和候选选择后再恢复完整 21-bit source ID。
+source capacity 最大为 21 bit。长度不超过 `2^17` 时，TopK/淘汰 payload 可直接
+保存 source ID。超过 `2^17` 时，payload 保存 source ID 的低 17 bit，排序 key
+附带高 4 bit tag；排序和候选选择后再恢复完整 21-bit source ID。
 
 该编码只服务内部排序/候选传递：`topk_src_ids`、`miss_src_ids` 和
 `cache_slots_pool` 对外始终使用完整 int32 source ID；`INT32_MIN` 无效 slot 不会

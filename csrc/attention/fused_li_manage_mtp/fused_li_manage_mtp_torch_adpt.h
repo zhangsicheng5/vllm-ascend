@@ -16,7 +16,7 @@ inline void npu_fused_li_manage_mtp(
     at::Tensor topk_miss_counts, at::Tensor miss_src_ids,
     at::Tensor miss_dst_slots, at::Tensor miss_counts) {
   constexpr int64_t kTopK = 2048;
-  constexpr int64_t kMissCapacity = 16384;
+  constexpr int64_t kMissCapacity = 32768;
   constexpr int64_t kBlockSize = 128;
   TORCH_CHECK(query.dim() == 3 &&
                   (query.size(1) == 32 || query.size(1) == 64) &&
@@ -63,7 +63,7 @@ inline void npu_fused_li_manage_mtp(
   TORCH_CHECK(miss_src_ids.dim() == 2 && miss_src_ids.size(0) == batch_size &&
                   miss_src_ids.size(1) == kMissCapacity &&
                   miss_dst_slots.sizes() == miss_src_ids.sizes(),
-              "miss outputs must be [B, 16384].");
+              "miss outputs must be [B, 32768].");
   check_batch_vector(miss_counts, "miss_counts");
 
   TORCH_CHECK(query.scalar_type() == index_key_cache.scalar_type() &&

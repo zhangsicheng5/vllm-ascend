@@ -12,7 +12,6 @@ constexpr uint64_t VALUE_AND_INDEX = 2U;
 constexpr uint64_t TOPK = 2048U;
 constexpr uint64_t LD_PARAM_NUM = 16U;
 constexpr uint64_t PAIR_CAPACITY = 8192U;
-constexpr uint64_t ROUTES = 7U;
 constexpr uint64_t THRESHOLD_STRIDE = 8U;
 constexpr uint64_t ROUTE_COUNT_STRIDE = 8U;
 
@@ -46,17 +45,20 @@ __aicore__ inline uint64_t ScoreOffset(uint64_t blockNum, uint64_t headNum, uint
 }
 
 __aicore__ inline uint64_t ThresholdOffset(uint64_t blockNum, uint64_t headNum,
-                                            uint64_t batch, uint64_t sourceCapacity)
+                                            uint64_t batch, uint64_t totalQueries,
+                                            uint64_t sourceCapacity)
 {
     return ScoreOffset(blockNum, headNum, batch) +
-           batch * ROUTES * ScoreStride(sourceCapacity) * sizeof(float);
+           totalQueries * ScoreStride(sourceCapacity) * sizeof(float);
 }
 
 __aicore__ inline uint64_t RouteCountOffset(uint64_t blockNum, uint64_t headNum,
-                                             uint64_t batch, uint64_t sourceCapacity)
+                                             uint64_t batch, uint64_t totalQueries,
+                                             uint64_t sourceCapacity)
 {
-    return ThresholdOffset(blockNum, headNum, batch, sourceCapacity) +
-           batch * ROUTES * THRESHOLD_STRIDE * sizeof(float);
+    return ThresholdOffset(blockNum, headNum, batch, totalQueries,
+                           sourceCapacity) +
+           totalQueries * THRESHOLD_STRIDE * sizeof(float);
 }
 
 } // namespace MtpWorkspace

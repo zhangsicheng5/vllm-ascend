@@ -1,4 +1,4 @@
-"""Generalized LIM contracts from upstream 86facf, executed on Ascend."""
+"""Generalized LIM contracts from upstream 012962af, executed on Ascend."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ enable_custom_op()
 TOPK = 2048
 BLOCK = 128
 HEAD_DIM = 128
-MISS_CAPACITY = 16384
+MISS_CAPACITY = 32768
 INVALID_SLOT = -(1 << 31)
 MAX_SOURCE_CAPACITY = 1 << 21
 
@@ -43,11 +43,7 @@ def validate_dynamic_inputs(
 ) -> None:
     """Reference for checks performed by the scheduler before tensor creation."""
 
-    if (
-        source_capacity <= 0
-        or source_capacity % BLOCK
-        or source_capacity > MAX_SOURCE_CAPACITY
-    ):
+    if source_capacity <= 0 or source_capacity % BLOCK or source_capacity > MAX_SOURCE_CAPACITY:
         raise ValueError("source capacity must be 128-aligned and <=2^21")
     if pool_size <= 0:
         raise ValueError("pool_size must be positive")
@@ -59,8 +55,8 @@ def validate_dynamic_inputs(
     for request in range(batch):
         end = query_ends[request]
         q = end - previous
-        if not 1 <= q <= 7:
-            raise ValueError("Q must be in [1,7]")
+        if not 1 <= q <= 14:
+            raise ValueError("Q must be in [1,14]")
         if not q <= actual_key[request] <= source_capacity:
             raise ValueError("actual_seq_lengths_key is out of range")
         if not 0 <= req_pool_entries[request] < pool_size:
@@ -81,7 +77,7 @@ def validate_dynamic_inputs(
             if length <= q * TOPK:
                 if capacity != length:
                     raise ValueError("C must equal L for a small offload prefix")
-            elif not q * TOPK <= capacity <= 16256:
+            elif not q * TOPK <= capacity <= 32640:
                 raise ValueError("C is outside the multi-route cache budget")
         previous = end
     if previous != total_queries:
@@ -103,12 +99,8 @@ def native_topk(
             query=query[row : row + 1],
             key=key,
             weights=weights[row : row + 1],
-            actual_seq_lengths_query=torch.tensor(
-                [1], dtype=torch.int32, device=query.device
-            ),
-            actual_seq_lengths_key=torch.tensor(
-                [visible], dtype=torch.int32, device=query.device
-            ),
+            actual_seq_lengths_query=torch.tensor([1], dtype=torch.int32, device=query.device),
+            actual_seq_lengths_key=torch.tensor([visible], dtype=torch.int32, device=query.device),
             block_table=block_table[row : row + 1],
             layout_query="TND",
             layout_key="PA_BSND",
@@ -134,13 +126,10 @@ def build_case(
     total_queries = sum(q_values)
     query_ends = cumulative(q_values)
     # The final route sees this length; adding one block makes the aligned
-    # offload prefix causally visible even for Q=7.
+    # offload prefix causally visible even for Q=14.
     actual_key = [args.offload_len + BLOCK for _ in q_values]
     offload_key = [args.offload_len for _ in q_values]
-    cache_tokens = [
-        args.offload_len if args.offload_len <= q * TOPK else args.cache_tokens
-        for q in q_values
-    ]
+    cache_tokens = [args.offload_len if args.offload_len <= q * TOPK else args.cache_tokens for q in q_values]
     # Active requests must own distinct pool rows.  Keep them deliberately
     # non-contiguous without wrapping: modulo (B + 3) aliases rows once B=7
     # (for example requests 0/5 and 1/6), creating invalid concurrent writes.
@@ -161,20 +150,14 @@ def build_case(
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float16
     device = torch.device(args.device)
     blocks = args.source_capacity // BLOCK
-    query = torch.randn(
-        total_queries, args.heads, HEAD_DIM, dtype=dtype, device=device
-    )
+    query = torch.randn(total_queries, args.heads, HEAD_DIM, dtype=dtype, device=device)
     weights = torch.randn(total_queries, args.heads, dtype=dtype, device=device)
     key = torch.randn(blocks, BLOCK, 1, HEAD_DIM, dtype=dtype, device=device)
     block_table = torch.arange(blocks, dtype=torch.int32, device=device).repeat(batch, 1)
     # native_topk takes one block-table row per query.
     query_to_request = [request for request, q in enumerate(q_values) for _ in range(q)]
-    route_table = block_table[
-        torch.tensor(query_to_request, dtype=torch.int64, device=device)
-    ].contiguous()
-    cache_cpu = torch.full(
-        (pool_size, args.source_capacity), INVALID_SLOT, dtype=torch.int32
-    )
+    route_table = block_table[torch.tensor(query_to_request, dtype=torch.int64, device=device)].contiguous()
+    cache_cpu = torch.full((pool_size, args.source_capacity), INVALID_SLOT, dtype=torch.int32)
     for request, state in enumerate(states):
         if state != -1:
             continue
@@ -232,9 +215,7 @@ def call_custom(
     cache: torch.Tensor,
     outputs: tuple[torch.Tensor, ...],
 ) -> None:
-    query_ends, actual_key, offload_key, cache_tokens, states, req_entries = case[
-        "metadata"
-    ]
+    query_ends, actual_key, offload_key, cache_tokens, states, req_entries = case["metadata"]
     torch.ops._C_ascend.npu_fused_li_manage_mtp.default(
         case["weights"],
         case["query_scale"],
@@ -259,9 +240,7 @@ def visible_lengths(case: dict[str, object]) -> list[int]:
         state = case["states"][request]
         for route in range(q):
             result.append(
-                case["actual_key"][request] - (q - 1 - route)
-                if state == -3
-                else case["offload_key"][request]
+                case["actual_key"][request] - (q - 1 - route) if state == -3 else case["offload_key"][request]
             )
     return result
 
@@ -271,8 +250,7 @@ def assert_correctness(case: dict[str, object]) -> None:
     old_cache = cache.clone()
     outputs = make_outputs(case)
     reference = native_topk(
-        case["query"], case["key"], case["weights"],
-        case["route_table"], visible_lengths(case)
+        case["query"], case["key"], case["weights"], case["route_table"], visible_lengths(case)
     ).cpu()
     call_custom(case, cache, outputs)
     torch.npu.synchronize()
@@ -290,9 +268,7 @@ def assert_correctness(case: dict[str, object]) -> None:
             expected_topk = reference[route, :valid]
             if state == -3:
                 if not torch.equal(actual_topk, expected_topk):
-                    mismatch_positions = torch.nonzero(
-                        actual_topk != expected_topk, as_tuple=False
-                    ).flatten()
+                    mismatch_positions = torch.nonzero(actual_topk != expected_topk, as_tuple=False).flatten()
                     first_mismatch = int(mismatch_positions[0])
                     window_start = max(0, first_mismatch - 8)
                     window_end = min(valid, first_mismatch + 9)
@@ -336,9 +312,7 @@ def assert_correctness(case: dict[str, object]) -> None:
                 f"value={miss_count[request].item()}, all={miss_count.tolist()}, "
                 f"q={case['q_values']}, states={case['states']}"
             )
-            assert torch.equal(
-                cache_cpu[row], torch.arange(cache_cpu.size(1), dtype=torch.int32)
-            )
+            assert torch.equal(cache_cpu[row], torch.arange(cache_cpu.size(1), dtype=torch.int32))
         elif state == -2:
             count = case["cache_tokens"][request]
             assert miss_count[request].item() == count
@@ -362,12 +336,8 @@ def assert_correctness(case: dict[str, object]) -> None:
             resident_slots = resident_slots[resident_slots >= 0]
             capacity = case["cache_tokens"][request]
             if resident_slots.numel() != capacity:
-                valid_slots = resident_slots[
-                    (resident_slots >= 0) & (resident_slots < capacity)
-                ]
-                slot_counts = torch.bincount(
-                    valid_slots.to(torch.int64), minlength=capacity
-                )
+                valid_slots = resident_slots[(resident_slots >= 0) & (resident_slots < capacity)]
+                slot_counts = torch.bincount(valid_slots.to(torch.int64), minlength=capacity)
                 missing = torch.nonzero(slot_counts == 0, as_tuple=False).flatten()
                 duplicate = torch.nonzero(slot_counts > 1, as_tuple=False).flatten()
                 raise AssertionError(
@@ -384,21 +354,21 @@ def assert_correctness(case: dict[str, object]) -> None:
             ), f"cache slot mapping is not a bijection for request={request}"
         query_start = query_end
 
+
 @pytest.mark.parametrize("heads,dtype", [(32, "bf16"), (64, "fp16")])
 def test_generalized_lim_mixed_states_and_query_counts(heads, dtype):
-    args = argparse.Namespace(source_capacity=16384, offload_len=8192,
-                              cache_tokens=8192, seed=7, dtype=dtype,
-                              heads=heads, device="npu:0")
+    args = argparse.Namespace(
+        source_capacity=16384, offload_len=8192, cache_tokens=8192, seed=7, dtype=dtype, heads=heads, device="npu:0"
+    )
     # One launch mixes ordinary LI, first fill, steady offload and Q=1..7.
-    case = build_case(args, q_values=[1, 2, 3, 4, 5, 6, 7],
-                      states=[-3, -2, -1, -3, -2, -1, -2])
+    case = build_case(args, q_values=[1, 2, 3, 4, 5, 6, 7], states=[-3, -2, -1, -3, -2, -1, -2])
     assert_correctness(case)
 
 
 def test_generalized_lim_first_fill_then_repeat_is_all_hits():
-    args = argparse.Namespace(source_capacity=16384, offload_len=8192,
-                              cache_tokens=6144, seed=17, dtype="bf16",
-                              heads=32, device="npu:0")
+    args = argparse.Namespace(
+        source_capacity=16384, offload_len=8192, cache_tokens=6144, seed=17, dtype="bf16", heads=32, device="npu:0"
+    )
     case = build_case(args, q_values=[1, 3], states=[-2, -2])
     cache = case["cache_seed"].clone()
     output = make_outputs(case)
@@ -413,15 +383,42 @@ def test_generalized_lim_first_fill_then_repeat_is_all_hits():
     assert torch.count_nonzero(output[2]).item() == 0
     assert torch.count_nonzero(output[-1]).item() == 0
     # Compare sets because first-fill and steady output ordering may differ.
-    torch.testing.assert_close(first_slots.sort(-1).values,
-                               output[1].sort(-1).values, rtol=0, atol=0)
+    torch.testing.assert_close(first_slots.sort(-1).values, output[1].sort(-1).values, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("state", [-3, -2, -1])
+def test_generalized_lim_source_ids_cross_128k(state):
+    # The updated slot/source codec uses 17 source bits plus high-bit tags.
+    # Force TopK sources above 2^17 in addition to checking the native LI set.
+    args = argparse.Namespace(
+        source_capacity=262144, offload_len=147456, cache_tokens=8192, seed=43, dtype="bf16", heads=32, device="npu:0"
+    )
+    case = build_case(args, q_values=[1, 4], states=[state, state])
+    case["query"].abs_()
+    case["weights"].abs_()
+    case["key"][131072 // BLOCK :].abs_().add_(1)
+    assert_correctness(case)
+    outputs = make_outputs(case)
+    call_custom(case, case["cache_seed"].clone(), outputs)
+    torch.npu.synchronize()
+    assert (outputs[0] >= 131072).any().item()
+
+
+def test_generalized_lim_extended_routes_and_cache_budget():
+    # Exercise the upstream workspace/slot-codec extension independently
+    # from serving, whose currently supported MTP range stays unchanged.
+    args = argparse.Namespace(
+        source_capacity=65536, offload_len=49152, cache_tokens=32640, seed=47, dtype="bf16", heads=32, device="npu:0"
+    )
+    case = build_case(args, q_values=[8, 14], states=[-2, -1])
+    assert_correctness(case)
 
 
 def test_generalized_lim_copy_sfa_first_fill_and_replacement_chain():
-    """Bridge the pinned ABIs and verify attention plus persistent KV contents."""
-    args = argparse.Namespace(source_capacity=16384, offload_len=8192,
-                              cache_tokens=6144, seed=27, dtype="bf16",
-                              heads=32, device="npu:0")
+    """Share the pinned miss buffers and verify attention plus persistent KV contents."""
+    args = argparse.Namespace(
+        source_capacity=16384, offload_len=8192, cache_tokens=6144, seed=27, dtype="bf16", heads=32, device="npu:0"
+    )
     query_counts = [1, 3]
     case = build_case(args, q_values=query_counts, states=[-2, -2])
     batch, tokens, attention_heads = 2, sum(query_counts), 8
@@ -434,26 +431,24 @@ def test_generalized_lim_copy_sfa_first_fill_and_replacement_chain():
     dram_kpe = torch.randn(batch, args.source_capacity, 64, dtype=dtype)
     initial_ckv = torch.zeros(batch, capacity + tail, 512, dtype=dtype)
     initial_kpe = torch.zeros(batch, capacity + tail, 64, dtype=dtype)
-    initial_ckv[:, capacity:] = dram_ckv[:, prefix:prefix + tail]
-    initial_kpe[:, capacity:] = dram_kpe[:, prefix:prefix + tail]
+    initial_ckv[:, capacity:] = dram_ckv[:, prefix : prefix + tail]
+    initial_kpe[:, capacity:] = dram_kpe[:, prefix : prefix + tail]
     hbm_ckv = initial_ckv.reshape(-1, BLOCK, 1, 512).to(device)
     hbm_kpe = initial_kpe.reshape(-1, BLOCK, 1, 64).to(device)
     dram_ckv_device = dram_ckv.reshape(-1, BLOCK, 512).to(device)
     dram_kpe_device = dram_kpe.reshape(-1, BLOCK, 64).to(device)
-    dram_table = torch.arange(batch * source_blocks, dtype=torch.int32,
-                              device=device).reshape(batch, source_blocks)
-    hbm_table = torch.arange(batch * hbm_blocks_per_request, dtype=torch.int32,
-                             device=device).reshape(batch, hbm_blocks_per_request)
+    dram_table = torch.arange(batch * source_blocks, dtype=torch.int32, device=device).reshape(batch, source_blocks)
+    hbm_table = torch.arange(batch * hbm_blocks_per_request, dtype=torch.int32, device=device).reshape(
+        batch, hbm_blocks_per_request
+    )
     q = torch.randn(tokens, attention_heads, 512, dtype=dtype, device=device)
     q_rope = torch.randn(tokens, attention_heads, 64, dtype=dtype, device=device)
     actual_kv = torch.full((batch,), capacity + tail, dtype=torch.int32, device=device)
     attention_out = torch.empty_like(q)
     cache = case["cache_seed"].clone()
     outputs = make_outputs(case)
-    # LIM writes [B,16384]; copy-SFA reads [B,32768]. Each must be contiguous.
-    copy_sources = torch.empty(batch, 32768, dtype=torch.int32, device=device)
-    copy_destinations = torch.empty_like(copy_sources)
-    scale = 576 ** -0.5
+    # LIM writes directly to copy-SFA's contiguous [B,32768] miss buffers.
+    scale = 576**-0.5
 
     for state in (-2, -1):
         case["metadata"][4].fill_(state)
@@ -462,13 +457,26 @@ def test_generalized_lim_copy_sfa_first_fill_and_replacement_chain():
             case["query"].neg_()
         call_custom(case, cache, outputs)
         src, dst, route_misses, miss_src, miss_dst, misses = outputs
-        copy_sources[:, :MISS_CAPACITY].copy_(miss_src)
-        copy_destinations[:, :MISS_CAPACITY].copy_(miss_dst)
         torch.ops._C_ascend.npu_fused_copy_sfa_mtp(
-            q_rope, q, case["metadata"][0], actual_kv, case["metadata"][3],
-            dst, src, route_misses, copy_sources, copy_destinations, misses,
-            hbm_table, dram_table, hbm_kpe, hbm_ckv,
-            dram_kpe_device, dram_ckv_device, scale, attention_out,
+            q_rope,
+            q,
+            case["metadata"][0],
+            actual_kv,
+            case["metadata"][3],
+            dst,
+            src,
+            route_misses,
+            miss_src,
+            miss_dst,
+            misses,
+            hbm_table,
+            dram_table,
+            hbm_kpe,
+            hbm_ckv,
+            dram_kpe_device,
+            dram_ckv_device,
+            scale,
+            attention_out,
         )
         torch.npu.synchronize()
         sources = src.cpu().reshape(tokens, TOPK).long()
@@ -478,15 +486,13 @@ def test_generalized_lim_copy_sfa_first_fill_and_replacement_chain():
         for request, count in enumerate(query_counts):
             for route in range(count):
                 visible_tail = tail - (count - 1 - route)
-                selected = torch.cat((sources[row],
-                                      torch.arange(prefix, prefix + visible_tail)))
+                selected = torch.cat((sources[row], torch.arange(prefix, prefix + visible_tail)))
                 ckv = dram_ckv[request, selected].float()
                 kpe = dram_kpe[request, selected].float()
                 scores = (query_cpu[row] @ ckv.T + rope_cpu[row] @ kpe.T) * scale
                 expected.append(scores.softmax(-1) @ ckv)
                 row += 1
-        torch.testing.assert_close(attention_out.cpu().float(), torch.stack(expected),
-                                   rtol=0.08, atol=0.08)
+        torch.testing.assert_close(attention_out.cpu().float(), torch.stack(expected), rtol=0.08, atol=0.08)
         resident_ckv = hbm_ckv.cpu().reshape(batch, capacity + tail, 512)
         resident_kpe = hbm_kpe.cpu().reshape(batch, capacity + tail, 64)
         mapping = cache.cpu()
@@ -494,11 +500,11 @@ def test_generalized_lim_copy_sfa_first_fill_and_replacement_chain():
             resident_sources = torch.nonzero(mapping[pool, :prefix] >= 0).flatten()
             resident_slots = mapping[pool, resident_sources].long()
             assert resident_sources.numel() == capacity
-            torch.testing.assert_close(resident_ckv[request, resident_slots],
-                                       dram_ckv[request, resident_sources], rtol=0, atol=0)
-            torch.testing.assert_close(resident_kpe[request, resident_slots],
-                                       dram_kpe[request, resident_sources], rtol=0, atol=0)
-        torch.testing.assert_close(resident_ckv[:, capacity:], initial_ckv[:, capacity:],
-                                   rtol=0, atol=0)
-        torch.testing.assert_close(resident_kpe[:, capacity:], initial_kpe[:, capacity:],
-                                   rtol=0, atol=0)
+            torch.testing.assert_close(
+                resident_ckv[request, resident_slots], dram_ckv[request, resident_sources], rtol=0, atol=0
+            )
+            torch.testing.assert_close(
+                resident_kpe[request, resident_slots], dram_kpe[request, resident_sources], rtol=0, atol=0
+            )
+        torch.testing.assert_close(resident_ckv[:, capacity:], initial_ckv[:, capacity:], rtol=0, atol=0)
+        torch.testing.assert_close(resident_kpe[:, capacity:], initial_kpe[:, capacity:], rtol=0, atol=0)

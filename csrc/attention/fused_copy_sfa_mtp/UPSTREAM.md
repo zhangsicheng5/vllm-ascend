@@ -1,17 +1,17 @@
 # Generalized MTP operator import
 
-This import updates the two existing MTP operator entry points and connects
-them to eager colocated sparse-offload serving when speculative decoding and
-`fused_op_type="nano"` are enabled. The separate non-speculative MTP0 entry
-points remain unchanged. Package build, focused operator tests, and eager
-colocated execution with registered host memory have been exercised on A3.
+The generalized LIM and copy-SFA entry points support eager and
+`FULL_DECODE_ONLY` sparse offload, including PD decode with registered host KV
+and explicit tail restoration. The separate MTP0 entry points remain unchanged.
+See the offloading user guide for supported serving configurations. Validation
+recorded below predates the latest kernel update unless explicitly dated otherwise.
 
 ## Pinned sources
 
 | Operator | Repository branch | Exact commit |
 | --- | --- | --- |
-| LIM | `xwLearnsLLM/nanovllm-DSA-offload:ops_lim_standardization` | `86facf38362c0956d1b32c88faccf7dc26e87178` |
-| Copy-SFA | `xwLearnsLLM/nanovllm-DSA-offload:ops_copysfa_mtp_standardization` | `98398fe4b5095b52cb2aa850c4d51defcfd8eed3` |
+| LIM | `xwLearnsLLM/nanovllm-DSA-offload:ops_lim_standardization` | `012962af05f06bf1bdd089ca7e7e4357d021682f` |
+| Copy-SFA | `xwLearnsLLM/nanovllm-DSA-offload:ops_copysfa_mtp_standardization` | `1518a90dd17592dc3aa96c16869cfde597a250b4` |
 
 The repository is private. The import uses the pinned commits, independently
 of subsequent branch updates. Original copyright notices are retained; the
@@ -22,12 +22,12 @@ upstream CANN license is included in the parent attention directory.
 | Property | LIM | Copy-SFA |
 | --- | --- | --- |
 | PyTorch entry point | `_C_ascend.npu_fused_li_manage_mtp` | `_C_ascend.npu_fused_copy_sfa_mtp` |
-| Query rows per request | 1 through 7 | 1 through 16 |
+| Query rows per request | 1 through 14 | 1 through 16 |
 | Query segmentation | cumulative ends, `int32[B]` | cumulative ends, `int32[B]` |
-| Heads | 32 or 64 index heads | 8 or 128 attention heads |
+| Heads | 32 or 64 index heads | 8, 16, 32, 64 or 128 attention heads |
 | TopK | 2048 per query | 2048 per query |
 | Query miss counts | produces `int32[T]` | consumes `int32[T]` |
-| Request miss lists | produces `int32[B,16384]` | consumes `int32[B,32768]` |
+| Request miss lists | produces `int32[B,32768]` | consumes `int32[B,32768]` |
 | Floating-point data | BF16 or FP16 | BF16 or FP16 |
 | Memory device | all tensors on one NPU | one NPU; DRAM sources may be registered host GVA views |
 
@@ -35,16 +35,23 @@ Both entry points mutate caller-owned buffers and return `None`. Their schemas
 replace the previous fixed-four-query MTP schemas. Existing MTP0 schemas remain
 unchanged. Read the adjacent operator READMEs for complete argument definitions.
 
-The chained capability is limited to 1 through 7 queries per request by LIM.
+The native chained contract allows up to 14 queries per request. Serving
+retains its existing limit of seven query rows and a 16256-token hot budget;
+this update does not expand the advertised serving MTP range.
 LIM's FP32 dequant scale arguments reserve the C8 ABI; this pinned kernel does
 not use their values and does not implement quantized indexer computation.
 
-The two request miss widths are intentionally preserved from their respective
-sources. Allocate separate contiguous buffers and copy the LIM payload into
-the first 16384 columns of the copy-SFA inputs. Only the per-request
-`miss_counts` prefix is consumed. Passing a narrowed view of a `[B,32768]`
-buffer to LIM is not valid for multi-request batches because the view is not
-contiguous.
+LIM and copy-SFA share contiguous `int32[B,32768]` request miss buffers.
+Only each request's `miss_counts` prefix is consumed. Eager and graph consumers
+pass the LIM output buffers directly, including layers that share an indexer;
+there are no miss-list bridge allocations or copies.
+
+The original imports used LIM `86facf38362c0956d1b32c88faccf7dc26e87178` and
+copy-SFA `98398fe4b5095b52cb2aa850c4d51defcfd8eed3`. The update applies the
+source delta to the pins above while retaining local build and launcher
+adaptations. LIM also changes workspace sizing, route handling, and its internal
+slot/source codec. Copy-SFA changes the public adapter and tiler head checks;
+it does not add native four-head support.
 
 ## Build adaptations
 
@@ -66,6 +73,14 @@ contiguous.
 - Incremental builds regenerate the operator and binary registries so an
   existing build cache cannot omit newly added operator entries.
 
+Use a clean `csrc/build` directory when upgrading these native contracts.
+The CANN incremental build can reuse old device objects while recompiling the
+host tiler. With the new LIM workspace sizing and miss-row stride, that mixture
+produces untouched miss rows and invalid device-memory accesses. Preserve any
+needed build evidence before clearing the generated cache, rebuild vLLM-Ascend,
+and verify that generated, packaged, and installed kernel objects match.
+Reinstalling vLLM is unnecessary.
+
 ## Eager colocated serving integration
 
 `generalized_mtp.py` derives actual query prefix sums and a stable prefix
@@ -82,9 +97,9 @@ preserves the remaining requests' offload pool-slot IDs.
 
 For one through seven attention heads per rank, the serving adapter pads query
 and query-rope heads to eight, then retains only the original output heads.
-The native kernel still accepts only eight or 128 heads. GLM-5.2 TP16 uses
+The native kernel accepts 8, 16, 32, 64 or 128 heads. GLM-5.2 TP16 uses
 four logical heads per rank; the padding path has focused first-fill and
-steady-state numerical coverage. Its performance has not been measured.
+steady-state numerical coverage.
 
 Each indexer owner maintains its own source-to-slot map, initialized with
 `INT32_MIN`. Shared attention layers consume their owner's selection and miss
@@ -93,19 +108,18 @@ request allocation generation, budget, or a decreasing stable prefix force
 first fill again. Draft iterations recompute indexer metadata; they do not
 reuse earlier iteration miss lists.
 
-The runtime bridges the two request miss widths explicitly. It rebuilds only
-the dense tail from the retained device cache and passes the logical length
+The runtime shares request miss buffers and restores the bounded dense tail
+from registered host KV. It passes the logical length
 `C + S - L` to copy-SFA. Sparse misses use the manager's registered CPU/GVA
 views directly, following the MTP0 adapter convention. An ordinary unregistered
 CPU tensor is not a valid device-readable DRAM allocation.
 
-This initial integration requires `keep_device_kv_cache=true` and eager mode.
-Short prompts and mixed prefill/decode batches use ordinary device-cache SFA
-and invalidate resident metadata for the next fused batch. The retained cache
-makes this a correctness/debug configuration, with no KV memory savings.
-Generalized MTP PD-only serving and graph replay remain unsupported; standalone
-operator graph tests do not establish model graph support. LI C8 and SFA C8
-are not supported by this fused path.
+The initial eager colocated integration required `keep_device_kv_cache=true`.
+Later changes added PD-only decode and target graph replay with an eager drafter.
+Private padded graph rows use state `-3` and positive dummy cache budgets, with
+zero miss counts and masked tail H2D/D2H. Real new/reset requests retain `-2`.
+The kernel update preserves those lifecycle rules. LI C8 and SFA C8 remain
+unsupported by this fused path.
 
 ## Validation
 
@@ -113,7 +127,7 @@ The changed tests use the actual registered operators, without substituting
 local schemas when the extension is absent. NPU coverage includes heterogeneous
 query counts and states, first-fill to steady transitions, causal copy-SFA
 attention, exact persistent-cache writes, graph metadata changes, and the
-LIM-to-copy-SFA ABI bridge.
+LIM-to-copy-SFA shared storage.
 
 Run on an Ascend environment built from this worktree:
 

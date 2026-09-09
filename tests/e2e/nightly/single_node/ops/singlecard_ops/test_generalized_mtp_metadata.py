@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-"""NPU checks for serving metadata, cache ownership, and pinned-ABI bridging."""
+"""NPU checks for serving metadata, cache ownership, and shared miss buffers."""
 
 from types import SimpleNamespace
 
@@ -12,18 +12,22 @@ from vllm_ascend.attention.utils import AscendCommonAttentionMetadata
 from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp import (
     GeneralizedMtpRuntime,
     make_mtp_batch,
+    prepare_copy_sfa_queries,
 )
 
 
 def fixture():
     device = "npu:0"
     manager = SimpleNamespace(
-        block_size=128, topk_buffer_size=8192, max_num_reqs=3,
+        block_size=128,
+        topk_buffer_size=8192,
+        max_num_reqs=3,
         topk_buffer_slot_manager=SimpleNamespace(req2slot={"request-a": 2, "request-b": 0}),
         nano_mtp_slot_generations={2: 1, 0: 1},
     )
     metadata = SimpleNamespace(
-        num_prefills=0, num_decodes=2,
+        num_prefills=0,
+        num_decodes=2,
         cum_query_lens=torch.tensor([1, 5], dtype=torch.int32, device=device),
         seq_lens=torch.tensor([8450, 8195], dtype=torch.int32, device=device),
         req_topk_buffer_slots=torch.tensor([2, 0], dtype=torch.int32, device=device),
@@ -52,7 +56,7 @@ def test_causal_prefix_variable_budget_and_tail_rollover():
     assert make_mtp_batch(metadata, manager) is None
 
 
-def test_layer_ownership_request_reuse_and_abi_bridge():
+def test_layer_ownership_request_reuse_and_shared_miss_buffers():
     manager, metadata = fixture()
     batch = make_mtp_batch(metadata, manager)
     runtime = GeneralizedMtpRuntime(manager)
@@ -66,12 +70,12 @@ def test_layer_ownership_request_reuse_and_abi_bridge():
     assert steady.cpu().tolist() == [-1, -1]
     outputs[3].fill_(17)
     outputs[4].fill_(23)
-    bridged = runtime.copy_metadata(batch)
-    assert bridged[3].shape == (2, 32768) and bridged[3].is_contiguous()
-    assert bridged[4].is_contiguous()
-    torch.testing.assert_close(bridged[3][:, :16384], outputs[3], rtol=0, atol=0)
-    torch.testing.assert_close(bridged[4][:, :16384], outputs[4], rtol=0, atol=0)
-    assert torch.all(bridged[3][:, 16384:] == -1).item()
+    shared = runtime.copy_metadata(batch)
+    assert shared is outputs
+    for i in (3, 4):
+        assert shared[i].shape == (2, 32768) and shared[i].is_contiguous()
+        assert shared[i].data_ptr() == outputs[i].data_ptr()
+        torch.testing.assert_close(shared[i], outputs[i], rtol=0, atol=0)
     # Even an identical external request ID must first-fill after row reuse.
     manager.nano_mtp_slot_generations[2] += 1
     _, reused, _ = runtime.prepare_lim("owner-a", batch, 16384, metadata.seq_lens.device)
@@ -99,6 +103,23 @@ def test_batch_metadata_survives_builder_buffer_reuse():
     torch.testing.assert_close(batch.source_block_table, expected_blocks, rtol=0, atol=0)
 
 
+@pytest.mark.parametrize("heads", [8, 16, 32, 64, 128])
+def test_native_head_queries_preserve_contiguous_storage(heads):
+    query = torch.randn(5, heads, 512, dtype=torch.bfloat16, device="npu:0")
+    rope = torch.randn(5, heads, 64, dtype=torch.bfloat16, device="npu:0")
+    prepared, prepared_rope = prepare_copy_sfa_queries(query, rope)
+    assert prepared.data_ptr() == query.data_ptr()
+    assert prepared_rope.data_ptr() == rope.data_ptr()
+
+
+@pytest.mark.parametrize("heads", [0, 9, 12, 24, 256])
+def test_unsupported_native_head_counts_are_rejected(heads):
+    query = torch.empty(5, heads, 512, dtype=torch.bfloat16, device="npu:0")
+    rope = torch.empty(5, heads, 64, dtype=torch.bfloat16, device="npu:0")
+    with pytest.raises(ValueError, match="query heads per rank"):
+        prepare_copy_sfa_queries(query, rope)
+
+
 @pytest.mark.parametrize("with_offload", [False, True])
 def test_unpadded_metadata_preserves_offload_pool_ownership(with_offload):
     manager, metadata = fixture()
@@ -112,15 +133,14 @@ def test_unpadded_metadata_preserves_offload_pool_ownership(with_offload):
         num_input_tokens=16,
         max_query_len=11,
         max_seq_len=8450,
-        block_table_tensor=torch.cat((
-            metadata.block_table,
-            metadata.block_table.new_zeros((1, metadata.block_table.shape[1])),
-        )),
-        slot_mapping=torch.arange(16, dtype=torch.int64, device="npu:0"),
-        req_topk_buffer_slots=(
-            torch.tensor([2, 0, -1], dtype=torch.int32, device="npu:0")
-            if with_offload else None
+        block_table_tensor=torch.cat(
+            (
+                metadata.block_table,
+                metadata.block_table.new_zeros((1, metadata.block_table.shape[1])),
+            )
         ),
+        slot_mapping=torch.arange(16, dtype=torch.int64, device="npu:0"),
+        req_topk_buffer_slots=(torch.tensor([2, 0, -1], dtype=torch.int32, device="npu:0") if with_offload else None),
     )
     unpadded = common.unpadded(num_actual_tokens=5, num_actual_reqs=2)
     if not with_offload:

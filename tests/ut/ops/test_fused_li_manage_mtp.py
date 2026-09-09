@@ -22,12 +22,22 @@ def test_generalized_lim_meta_accepts_packed_queries_and_state_outputs():
         tensor(batch, blocks),
         *[tensor(batch) for _ in range(6)],
         tensor(7, blocks * 128),
-        tensor(tokens, 1, 2048), tensor(tokens, 1, 2048), tensor(tokens),
-        tensor(batch, 16384), tensor(batch, 16384), tensor(batch),
+        tensor(tokens, 1, 2048),
+        tensor(tokens, 1, 2048),
+        tensor(tokens),
+        tensor(batch, 32768),
+        tensor(batch, 32768),
+        tensor(batch),
     ]
     op = torch.ops._C_ascend.npu_fused_li_manage_mtp.default
     assert op(*inputs) is None
-    writes = {arg.name for arg in op._schema.arguments
-              if arg.alias_info is not None and arg.alias_info.is_write}
-    assert writes == {"cache_slots_pool", "topk_src_ids", "topk_dst_slots",
-                      "topk_miss_counts", "miss_src_ids", "miss_dst_slots", "miss_counts"}
+    writes = {arg.name for arg in op._schema.arguments if arg.alias_info is not None and arg.alias_info.is_write}
+    assert writes == {
+        "cache_slots_pool",
+        "topk_src_ids",
+        "topk_dst_slots",
+        "topk_miss_counts",
+        "miss_src_ids",
+        "miss_dst_slots",
+        "miss_counts",
+    }

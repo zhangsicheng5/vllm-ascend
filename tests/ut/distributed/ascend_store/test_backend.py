@@ -558,6 +558,42 @@ class TestYuanrongBackendMethods(unittest.TestCase):
 # MemcacheBackend (mocked store)
 # =========================================================================
 class TestMemcacheBackendMethods(unittest.TestCase):
+    def test_store_and_transfer_thread_use_worker_device(self):
+        from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend import memcache_backend
+
+        for device_id in (0, 7, 8, 12, 15):
+            with self.subTest(device_id=device_id):
+                store = MagicMock()
+                store.init.return_value = 0
+                bindings = MagicMock()
+                bindings.DistributedObjectStore.return_value = store
+                with (
+                    patch.dict("sys.modules", {"memcache_hybrid": bindings}),
+                    patch.object(memcache_backend.torch.npu, "current_device", return_value=device_id),
+                    patch.object(memcache_backend.torch.npu, "set_device") as set_device,
+                    patch.object(memcache_backend.time, "sleep"),
+                ):
+                    backend = memcache_backend.MemcacheBackend(MagicMock())
+                    store.init.assert_called_once_with(device_id, init_bm=True)
+                    backend.set_device()
+                    set_device.assert_called_once_with(memcache_backend.torch.device(f"npu:{device_id}"))
+
+    def test_scheduler_client_does_not_initialize_an_npu(self):
+        from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend import memcache_backend
+
+        store = MagicMock()
+        store.init.return_value = 0
+        bindings = MagicMock()
+        bindings.DistributedObjectStore.return_value = store
+        with (
+            patch.dict("sys.modules", {"memcache_hybrid": bindings}),
+            patch.object(memcache_backend.torch.npu, "current_device") as current_device,
+            patch.object(memcache_backend.time, "sleep"),
+        ):
+            memcache_backend.MemcacheBackend.create_scheduler_client(MagicMock())
+            current_device.assert_not_called()
+            store.init.assert_called_once_with(0, init_bm=False)
+
     def _make_backend(self):
         from vllm_ascend.distributed.kv_transfer.kv_pool.ascend_store.backend.memcache_backend import MemcacheBackend
 

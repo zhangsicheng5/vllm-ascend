@@ -1,4 +1,4 @@
-"""Dynamic-TND correctness and graph cases imported from upstream 98398f."""
+"""Dynamic-TND correctness and graph cases updated to upstream 1518a90dd."""
 
 from __future__ import annotations
 
@@ -7,18 +7,16 @@ import math
 import unittest
 
 import torch
+import torch_npu  # noqa: F401
 
+from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp import prepare_copy_sfa_queries
+from vllm_ascend.utils import enable_custom_op
 
 BLOCK_SIZE = 128
 TOPK = 2048
 CKV_DIM = 512
 KPE_DIM = 64
 MISS_CAPACITY = 32768
-
-import torch_npu  # noqa: F401
-
-from vllm_ascend.utils import enable_custom_op
-from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp import prepare_copy_sfa_queries
 
 enable_custom_op()
 
@@ -38,9 +36,7 @@ def logical_rows(
     request: int,
     logical_slots: torch.Tensor,
 ) -> torch.Tensor:
-    physical_blocks = block_table[
-        request, logical_slots // BLOCK_SIZE
-    ].to(torch.int64)
+    physical_blocks = block_table[request, logical_slots // BLOCK_SIZE].to(torch.int64)
     offsets = logical_slots % BLOCK_SIZE
     return cache[physical_blocks, offsets]
 
@@ -64,102 +60,59 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
             cache_budgets = [TOPK] * batch_size
         if len(cache_budgets) != batch_size:
             raise ValueError("cache budgets must match batch size")
-        if any(
-            budget < TOPK or budget % BLOCK_SIZE
-            for budget in cache_budgets
-        ):
+        if any(budget < TOPK or budget % BLOCK_SIZE for budget in cache_budgets):
             raise ValueError("cache budgets must be block aligned and >= TopK")
         tail_tokens = 2
-        max_logical_tokens = max(
-            budget + tail_tokens + count
-            for budget, count in zip(cache_budgets, query_counts)
-        )
+        max_logical_tokens = max(budget + tail_tokens + count for budget, count in zip(cache_budgets, query_counts))
         blocks_per_request = math.ceil(max_logical_tokens / BLOCK_SIZE)
 
-        hbm_block_table_cpu = torch.arange(
-            batch_size * blocks_per_request, dtype=torch.int32
-        ).view(batch_size, blocks_per_request)
+        hbm_block_table_cpu = torch.arange(batch_size * blocks_per_request, dtype=torch.int32).view(
+            batch_size, blocks_per_request
+        )
         hbm_blocks = batch_size * blocks_per_request
-        initial_hbm_kpe_cpu = torch.randn(
-            hbm_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.bfloat16
-        )
-        initial_hbm_ckv_cpu = torch.randn(
-            hbm_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.bfloat16
-        )
+        initial_hbm_kpe_cpu = torch.randn(hbm_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.bfloat16)
+        initial_hbm_ckv_cpu = torch.randn(hbm_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.bfloat16)
         expected_hbm_kpe_cpu = initial_hbm_kpe_cpu.clone()
         expected_hbm_ckv_cpu = initial_hbm_ckv_cpu.clone()
-        query_cpu = torch.randn(
-            total_query_tokens, heads, CKV_DIM, dtype=torch.bfloat16
-        )
-        query_rope_cpu = torch.randn(
-            total_query_tokens, heads, KPE_DIM, dtype=torch.bfloat16
-        )
+        query_cpu = torch.randn(total_query_tokens, heads, CKV_DIM, dtype=torch.bfloat16)
+        query_rope_cpu = torch.randn(total_query_tokens, heads, KPE_DIM, dtype=torch.bfloat16)
 
-        sparse_slots_cpu = torch.arange(TOPK, dtype=torch.int32).view(
-            1, 1, TOPK
-        ).expand(total_query_tokens, 1, TOPK).contiguous()
-        topk_src_ids_cpu = (
-            torch.full_like(sparse_slots_cpu, -777)
-            if first_fill
-            else sparse_slots_cpu.clone()
+        sparse_slots_cpu = (
+            torch.arange(TOPK, dtype=torch.int32).view(1, 1, TOPK).expand(total_query_tokens, 1, TOPK).contiguous()
         )
-        topk_miss_counts_cpu = torch.full(
-            (total_query_tokens,), TOPK if first_fill else 0, dtype=torch.int32
-        )
+        topk_src_ids_cpu = torch.full_like(sparse_slots_cpu, -777) if first_fill else sparse_slots_cpu.clone()
+        topk_miss_counts_cpu = torch.full((total_query_tokens,), TOPK if first_fill else 0, dtype=torch.int32)
         actual_q_cpu = torch.tensor(prefix_sum(query_counts), dtype=torch.int32)
         # The last route sees this full length; earlier routes hide their
         # request-local future speculative rows.
         actual_kv_cpu = torch.tensor(
-            [
-                budget + tail_tokens + count
-                for budget, count in zip(cache_budgets, query_counts)
-            ],
+            [budget + tail_tokens + count for budget, count in zip(cache_budgets, query_counts)],
             dtype=torch.int32,
         )
         cache_tokens_cpu = torch.tensor(cache_budgets, dtype=torch.int32)
 
-        miss_src_ids_cpu = torch.full(
-            (batch_size, MISS_CAPACITY), -1, dtype=torch.int32
-        )
+        miss_src_ids_cpu = torch.full((batch_size, MISS_CAPACITY), -1, dtype=torch.int32)
         miss_dst_slots_cpu = torch.full_like(miss_src_ids_cpu, -1)
         miss_counts_cpu = torch.zeros(batch_size, dtype=torch.int32)
-        dram_blocks_per_request = (
-            math.ceil(max(cache_budgets) / BLOCK_SIZE) if first_fill else 1
+        dram_blocks_per_request = math.ceil(max(cache_budgets) / BLOCK_SIZE) if first_fill else 1
+        dram_block_table_cpu = torch.arange(batch_size * dram_blocks_per_request, dtype=torch.int32).view(
+            batch_size, dram_blocks_per_request
         )
-        dram_block_table_cpu = torch.arange(
-            batch_size * dram_blocks_per_request, dtype=torch.int32
-        ).view(batch_size, dram_blocks_per_request)
         dram_blocks = batch_size * dram_blocks_per_request
-        dram_kpe_cpu = torch.randn(
-            dram_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.bfloat16
-        )
-        dram_ckv_cpu = torch.randn(
-            dram_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.bfloat16
-        )
+        dram_kpe_cpu = torch.randn(dram_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.bfloat16)
+        dram_ckv_cpu = torch.randn(dram_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.bfloat16)
         if first_fill:
             first_fill_budget = cache_budgets[0]
-            miss_src_ids_cpu[0, :first_fill_budget] = torch.arange(
-                first_fill_budget, dtype=torch.int32
-            )
-            miss_dst_slots_cpu[0, :first_fill_budget] = torch.arange(
-                first_fill_budget, dtype=torch.int32
-            )
+            miss_src_ids_cpu[0, :first_fill_budget] = torch.arange(first_fill_budget, dtype=torch.int32)
+            miss_dst_slots_cpu[0, :first_fill_budget] = torch.arange(first_fill_budget, dtype=torch.int32)
             miss_counts_cpu[0] = first_fill_budget
             logical_slots = torch.arange(first_fill_budget, dtype=torch.int64)
-            source_blocks = dram_block_table_cpu[
-                0, logical_slots // BLOCK_SIZE
-            ].to(torch.int64)
+            source_blocks = dram_block_table_cpu[0, logical_slots // BLOCK_SIZE].to(torch.int64)
             source_offsets = logical_slots % BLOCK_SIZE
-            destination_blocks = hbm_block_table_cpu[
-                0, logical_slots // BLOCK_SIZE
-            ].to(torch.int64)
+            destination_blocks = hbm_block_table_cpu[0, logical_slots // BLOCK_SIZE].to(torch.int64)
             destination_offsets = logical_slots % BLOCK_SIZE
-            expected_hbm_kpe_cpu[
-                destination_blocks, destination_offsets
-            ] = dram_kpe_cpu[source_blocks, source_offsets]
-            expected_hbm_ckv_cpu[
-                destination_blocks, destination_offsets
-            ] = dram_ckv_cpu[source_blocks, source_offsets]
+            expected_hbm_kpe_cpu[destination_blocks, destination_offsets] = dram_kpe_cpu[source_blocks, source_offsets]
+            expected_hbm_ckv_cpu[destination_blocks, destination_offsets] = dram_ckv_cpu[source_blocks, source_offsets]
 
         scale = 1.0 / math.sqrt(CKV_DIM + KPE_DIM)
         expected_rows: list[torch.Tensor] = []
@@ -167,15 +120,11 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
         for request, query_count in enumerate(query_counts):
             cache_tokens = cache_budgets[request]
             for route in range(query_count):
-                visible_kv = (
-                    int(actual_kv_cpu[request]) - (query_count - 1 - route)
-                )
+                visible_kv = int(actual_kv_cpu[request]) - (query_count - 1 - route)
                 logical_slots = torch.cat(
                     (
                         torch.arange(TOPK, dtype=torch.int64),
-                        torch.arange(
-                            cache_tokens, visible_kv, dtype=torch.int64
-                        ),
+                        torch.arange(cache_tokens, visible_kv, dtype=torch.int64),
                     )
                 )
                 selected_ckv = logical_rows(
@@ -191,8 +140,7 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
                     logical_slots,
                 ).float()
                 scores = (
-                    query_cpu[global_row].float() @ selected_ckv.T
-                    + query_rope_cpu[global_row].float() @ selected_kpe.T
+                    query_cpu[global_row].float() @ selected_ckv.T + query_rope_cpu[global_row].float() @ selected_kpe.T
                 ) * scale
                 expected_rows.append(torch.softmax(scores, dim=-1) @ selected_ckv)
                 global_row += 1
@@ -203,12 +151,8 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
 
         query = to_npu(query_cpu)
         query_rope = to_npu(query_rope_cpu)
-        hbm_kpe = to_npu(initial_hbm_kpe_cpu).view(
-            hbm_blocks, BLOCK_SIZE, 1, KPE_DIM
-        )
-        hbm_ckv = to_npu(initial_hbm_ckv_cpu).view(
-            hbm_blocks, BLOCK_SIZE, 1, CKV_DIM
-        )
+        hbm_kpe = to_npu(initial_hbm_kpe_cpu).view(hbm_blocks, BLOCK_SIZE, 1, KPE_DIM)
+        hbm_ckv = to_npu(initial_hbm_ckv_cpu).view(hbm_blocks, BLOCK_SIZE, 1, CKV_DIM)
         actual_q = to_npu(actual_q_cpu)
         if query_prefix_buffer is not None:
             query_prefix_buffer.zero_()
@@ -249,7 +193,7 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
             output,
         ]
         if pad_heads:
-            with self.assertRaisesRegex(RuntimeError, "query head count N must be 8 or 128"):
+            with self.assertRaisesRegex(RuntimeError, "query head count N must be one of"):
                 torch.ops._C_ascend.npu_fused_copy_sfa_mtp.default(*call_args)
             query, query_rope = prepare_copy_sfa_queries(query, query_rope)
             output = torch.empty_like(query)
@@ -262,10 +206,7 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
         self.assertLess(
             max_abs,
             0.08,
-            msg=(
-                f"dynamic TND mismatch: query_counts={query_counts}, "
-                f"heads={heads}, max_abs={max_abs}"
-            ),
+            msg=(f"dynamic TND mismatch: query_counts={query_counts}, heads={heads}, max_abs={max_abs}"),
         )
         torch.testing.assert_close(
             hbm_kpe.cpu().view_as(expected_hbm_kpe_cpu),
@@ -280,27 +221,35 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
             atol=0,
         )
         if pad_heads:
-            print(json.dumps({
-                "head_padding_case": "first-fill" if first_fill else "steady",
-                "query_counts": query_counts, "logical_heads": heads,
-                "kernel_heads": query.shape[1], "max_abs": max_abs,
-                "cache_exact": True,
-                "native_inputs": [
-                    {"shape": list(arg.shape), "stride": list(arg.stride()),
-                     "dtype": str(arg.dtype), "device": str(arg.device)}
-                    if isinstance(arg, torch.Tensor) else arg for arg in call_args
-                ],
-            }))
+            print(
+                json.dumps(
+                    {
+                        "head_padding_case": "first-fill" if first_fill else "steady",
+                        "query_counts": query_counts,
+                        "logical_heads": heads,
+                        "kernel_heads": query.shape[1],
+                        "max_abs": max_abs,
+                        "cache_exact": True,
+                        "native_inputs": [
+                            {
+                                "shape": list(arg.shape),
+                                "stride": list(arg.stride()),
+                                "dtype": str(arg.dtype),
+                                "device": str(arg.device),
+                            }
+                            if isinstance(arg, torch.Tensor)
+                            else arg
+                            for arg in call_args
+                        ],
+                    }
+                )
+            )
             # The serving adapter is eager-only. Existing native-head cases
             # below retain their independent graph capture/replay coverage.
             return
 
-        graph_hbm_kpe = to_npu(initial_hbm_kpe_cpu).view(
-            hbm_blocks, BLOCK_SIZE, 1, KPE_DIM
-        )
-        graph_hbm_ckv = to_npu(initial_hbm_ckv_cpu).view(
-            hbm_blocks, BLOCK_SIZE, 1, CKV_DIM
-        )
+        graph_hbm_kpe = to_npu(initial_hbm_kpe_cpu).view(hbm_blocks, BLOCK_SIZE, 1, KPE_DIM)
+        graph_hbm_ckv = to_npu(initial_hbm_ckv_cpu).view(hbm_blocks, BLOCK_SIZE, 1, CKV_DIM)
         graph_topk_src_ids = topk_src_ids.clone()
         graph_topk_miss_counts = topk_miss_counts.clone()
         graph_miss_counts = miss_counts.clone()
@@ -351,10 +300,7 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
         self.assertLess(
             graph_max_abs,
             0.08,
-            msg=(
-                f"dynamic TND graph mismatch: query_counts={query_counts}, "
-                f"heads={heads}, max_abs={graph_max_abs}"
-            ),
+            msg=(f"dynamic TND graph mismatch: query_counts={query_counts}, heads={heads}, max_abs={graph_max_abs}"),
         )
         torch.testing.assert_close(graph_output, output, rtol=0, atol=0)
         torch.testing.assert_close(
@@ -380,9 +326,14 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
     def test_n128(self) -> None:
         self.run_case([1], heads=128)
 
+    def test_expanded_native_head_counts(self) -> None:
+        for heads in (16, 32, 64):
+            for first_fill in (False, True):
+                with self.subTest(heads=heads, first_fill=first_fill):
+                    self.run_case([1, 4], heads=heads, first_fill=first_fill, cache_budgets=[8192, 8192])
+
     def test_tp16_four_heads_first_fill(self) -> None:
-        self.run_case([4, 1], heads=4, first_fill=True,
-                      cache_budgets=[8192, 8192], pad_heads=True)
+        self.run_case([4, 1], heads=4, first_fill=True, cache_budgets=[8192, 8192], pad_heads=True)
 
     def test_tp16_four_heads_steady(self) -> None:
         self.run_case([1, 4], heads=4, pad_heads=True)
@@ -392,8 +343,7 @@ class FusedCopySfaMtpDynamicTndTest(unittest.TestCase):
         # max_num_reqs+1 buffer, updated between target and draft calls.
         prefix_buffer = torch.zeros(3, dtype=torch.int32, device="npu:0")
         for count in (1, 4, 1, 4):
-            self.run_case([count], heads=4, cache_budgets=[8192],
-                          pad_heads=True, query_prefix_buffer=prefix_buffer)
+            self.run_case([count], heads=4, cache_budgets=[8192], pad_heads=True, query_prefix_buffer=prefix_buffer)
 
     def test_heterogeneous_first_fill_graph(self) -> None:
         self.run_case(

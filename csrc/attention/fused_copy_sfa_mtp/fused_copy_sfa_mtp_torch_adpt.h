@@ -46,8 +46,11 @@ inline void npu_fused_copy_sfa_mtp(
   TORCH_CHECK(query.size(0) >= batch_size &&
                   query.size(0) <= batch_size * kMaxQueryCount,
               "Fused MTP T must satisfy B <= T <= 16B (MTP0..MTP15).");
-  TORCH_CHECK(query.size(1) == 8 || query.size(1) == 128,
-              "Fused MTP query head count N must be 8 or 128.");
+  const int64_t num_query_heads = query.size(1);
+  TORCH_CHECK(num_query_heads >= 8 && num_query_heads <= 128 &&
+                  (num_query_heads & (num_query_heads - 1)) == 0,
+              "Fused MTP query head count N must be one of "
+              "{8, 16, 32, 64, 128}.");
   TORCH_CHECK(query_rope.dim() == 3 &&
                   query_rope.size(0) == query.size(0) &&
                   query_rope.size(1) == query.size(1) &&

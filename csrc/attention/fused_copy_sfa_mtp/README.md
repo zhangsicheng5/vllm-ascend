@@ -1,4 +1,4 @@
-> Imported from private `xwLearnsLLM/nanovllm-DSA-offload`, commit `98398fe4b5095b52cb2aa850c4d51defcfd8eed3`. The first-fill copy is included as `FirstFillScatterCopy`. The attention sources and tiling helpers are private to this operator, preserving the existing MTP0 implementation. The adapter uses the existing queue-safe `EXEC_NPU_CMD_ORDERED` allocator; upstream environment-controlled workspace reuse is not imported.
+> Imported from private `xwLearnsLLM/nanovllm-DSA-offload`, commit `1518a90dd17592dc3aa96c16869cfde597a250b4`. The first-fill copy is included as `FirstFillScatterCopy`. The attention sources and tiling helpers are private to this operator, preserving the existing MTP0 implementation. The adapter uses the existing queue-safe `EXEC_NPU_CMD_ORDERED` allocator; upstream environment-controlled workspace reuse is not imported.
 
 # COPYSFA-MTP 单算子调优工程
 
@@ -32,7 +32,7 @@ torch.ops._C_ascend.npu_fused_copy_sfa_mtp(
 | `scale_value` / `attention_out` | float / bf16/fp16 `[T,N,512]` | 只读 / 只写 | Attention scale 与输出。 |
 
 所有 tensor 必须连续并位于同一 NPU；浮点 tensor 必须同为 BF16 或 FP16。`N` 支持
-8/128；每请求 query 行数为 1..16，对应 MTP0..MTP15。`miss_*` 宽度 32768 等于
+8/16/32/64/128；每请求 query 行数为 1..16，对应 MTP0..MTP15。`miss_*` 宽度 32768 等于
 `16 × 2048`，覆盖 MTP15 最坏无重合 miss union。
 
 对请求 `b`，令 `start = b==0 ? 0 : actual_seq_lengths_query[b-1]`、

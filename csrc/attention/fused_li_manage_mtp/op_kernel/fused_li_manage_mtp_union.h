@@ -8,13 +8,16 @@ namespace MtpUnion {
 using namespace AscendC;
 
 constexpr uint32_t ROUTES = 4U;
-constexpr uint32_t MAX_ROUTES = 7U;
+constexpr uint32_t LOCAL_MAX_ROUTES = 7U;
+constexpr uint32_t MAX_ROUTES = 14U;
 constexpr uint32_t TOPK = 2048U;
+constexpr uint32_t MISS_CAPACITY = 32768U;
+constexpr uint32_t MAX_CACHE_TOKENS = 32640U;
 constexpr uint32_t PAIR_WORDS = TOPK * 2U;
 constexpr uint32_t CAPACITY = ROUTES * TOPK;
 // Keep the mature victim payload codec separate from the logical source-ID
-// codec. The payload remains [slot:14 | source_low18]; long steady eviction
-// carries source_high3 in the sort-key tag while union keys use the full ID.
+// codec. The payload remains [slot:15 | source_low17]; long steady eviction
+// carries source_high4 in the sort-key tag while union keys use the full ID.
 constexpr uint32_t PACKED_SOURCE_BITS = LIServiceVec::PACKED_SOURCE_BITS;
 constexpr uint32_t PACKED_SOURCE_MASK = LIServiceVec::PACKED_SOURCE_MASK;
 constexpr uint32_t LONG_SOURCE_BITS = LIServiceVec::LONG_SOURCE_BITS;
@@ -30,13 +33,14 @@ constexpr uint32_t EVICT_SORT_REPEATS = EVICT_CHUNK / 32U;
 // invalid-key and Sort32 work tensors on device.
 constexpr uint32_t EVICT_MASK_WORK_FLOATS = EVICT_CHUNK;
 constexpr uint32_t EVICT_SCRATCH_FLOATS = EVICT_CHUNK * 12U;
-constexpr uint32_t GENERAL_EVICT_SCRATCH_FLOATS = EVICT_CHUNK * 15U;
+constexpr uint32_t GENERAL_EVICT_SCRATCH_FLOATS =
+    EVICT_CHUNK * (MAX_ROUTES + 8U);
 constexpr uint32_t THRESHOLD_STRIDE = 8U;
 constexpr uint32_t ROUTE_COUNT_STRIDE = 8U;
 constexpr int32_t ROUTE_COUNTS_FROM_WORKSPACE = -1;
 constexpr uint32_t ROUTE_POSITION_BITS = 11U;
 constexpr uint32_t ROUTE_POSITION_MASK = (1U << ROUTE_POSITION_BITS) - 1U;
-constexpr uint32_t OCCURRENCE_ROUTE_BITS = 3U;
+constexpr uint32_t OCCURRENCE_ROUTE_BITS = 4U;
 constexpr uint32_t OCCURRENCE_ROUTE_MASK =
     (1U << OCCURRENCE_ROUTE_BITS) - 1U;
 constexpr uint32_t OCCURRENCE_UNION_SHIFT =
@@ -45,8 +49,23 @@ constexpr uint32_t OCCURRENCE_UNION_SHIFT =
 // below this limit; an all-four-routes-miss boundary falls back to the proven
 // source join instead of allocating the full 192-KiB UB capacity.
 constexpr uint32_t OCCURRENCE_CAPACITY = CAPACITY - 256U;
-constexpr uint32_t GENERAL_SORT_CAPACITY = TOPK;
+// The compact destination publication shares the expanded union UB layout.
+// Keep it within the same 4096-occurrence contract as SortAll; beyond this
+// boundary route-row publication can overwrite unionSources[4096].  Larger
+// unions remain in this generalized function and use its exact source join.
+constexpr uint32_t OCCURRENCE_FAST_CAPACITY = TOPK * 2U;
+constexpr uint32_t GENERAL_SORT_CAPACITY = TOPK * 2U;
+constexpr uint32_t GENERAL_ROUTE_ALIGN = 8U;
 constexpr uint32_t FIRST_DECODE_LIST_CAPACITY = CAPACITY * 2U;
+// First decode can keep eight complete TopK rows in the existing 16K pair
+// buffers.  Keep this limit independent from LOCAL_MAX_ROUTES: the steady
+// occurrence path still needs its seven-route alignment headroom.
+constexpr uint32_t LOCAL_FIRST_DECODE_ROUTES = 8U;
+constexpr uint32_t LOCAL_FIRST_DECODE_MAX =
+    LOCAL_FIRST_DECODE_ROUTES * TOPK;
+// DataCopyPad's block length is uint16 bytes.  Q1-Q7 retain their proven
+// single-DMA publication; the exact Q8 list is 65536 bytes and is chunked.
+constexpr uint32_t FIRST_DECODE_SINGLE_DMA_MAX = 16256U;
 constexpr uint32_t FIRST_DECODE_CLEAR_CHUNK = CAPACITY;
 // Arange has a proven 4096-element vector form in the -3 identity path.
 // Keep first-decode destination publication within that form: cache budgets
@@ -55,14 +74,22 @@ constexpr uint32_t FIRST_DECODE_CLEAR_CHUNK = CAPACITY;
 constexpr uint32_t FIRST_DECODE_LIST_CHUNK = 4096U;
 static_assert(GENERAL_SORT_CAPACITY <= OCCURRENCE_CAPACITY,
               "sorted generalized misses must fit occurrenceBuf");
+static_assert(LOCAL_MAX_ROUTES * (TOPK + GENERAL_ROUTE_ALIGN - 1U) <=
+                  CAPACITY * 2U,
+              "local generalized route prefixes must fit pairInBuf");
 static_assert(TOPK == (1U << ROUTE_POSITION_BITS),
               "route position encoding must cover one TopK row");
 static_assert(MAX_ROUTES <= (1U << OCCURRENCE_ROUTE_BITS),
               "occurrence route encoding must cover every MTP route");
-static_assert(MAX_ROUTES * TOPK <= CAPACITY * 2U,
-              "all generalized TopK rows must fit pairInBuf");
-static_assert(16256U <= FIRST_DECODE_LIST_CAPACITY,
+static_assert(LOCAL_MAX_ROUTES * TOPK <= CAPACITY * 2U,
+              "local generalized TopK rows must fit pairInBuf");
+static_assert(LOCAL_FIRST_DECODE_MAX <= FIRST_DECODE_LIST_CAPACITY,
               "maximum first-decode cache budget must fit pair buffers");
+static_assert(LOCAL_FIRST_DECODE_ROUTES * TOPK <=
+                  FIRST_DECODE_LIST_CAPACITY,
+              "local first-decode TopK rows must fit pair buffers");
+static_assert(FIRST_DECODE_SINGLE_DMA_MAX * sizeof(int32_t) <= 65535U,
+              "single-DMA first-decode source list must fit block length");
 static_assert(FIRST_DECODE_CLEAR_CHUNK * sizeof(int32_t) <= 65535U,
               "first-decode clear chunk must fit one DataCopyPad block");
 static_assert(FIRST_DECODE_LIST_CHUNK * 2U <= CAPACITY,
@@ -88,10 +115,15 @@ __aicore__ inline int32_t MissKeyDecodeBase(uint32_t sourceMask)
     return static_cast<int32_t>(MISS_KEY_BASE_BITS + sourceMask);
 }
 
-// The hardware sort pair payload has the same 18-bit source-ID contract as
-// the LI TopK payload.  For a 21-bit source, retain the low 18 bits there and
-// place the three high bits in otherwise insignificant low bits of the sort
-// key.  EVICT_CHUNK divides 2^18, so every candidate chunk has one shared
+__aicore__ inline bool UseCompactOccurrenceMap(uint32_t total)
+{
+    return total <= OCCURRENCE_FAST_CAPACITY;
+}
+
+// The hardware sort pair payload has the same 17-bit source-ID contract as
+// the LI TopK payload.  For a 21-bit source, retain the low 17 bits there and
+// place the four high bits in otherwise insignificant low bits of the sort
+// key.  EVICT_CHUNK divides 2^17, so every candidate chunk has one shared
 // high-bit value.  This is the eviction equivalent of LIVector::TagLongIndex.
 __aicore__ inline void TagLongEvictSource(
     LocalTensor<float> key, uint32_t sourceBase, uint32_t count)
@@ -254,23 +286,21 @@ private:
         return false;
     }
 
-    // Each LI row is published as two source-ID-sorted ranges: the miss
-    // prefix and the hit suffix.  Load all rows once, merge at most fourteen
-    // sorted ranges in UB, then append the lowest non-union source IDs until
-    // the cache budget is full.  No pool row is touched until the complete
-    // selection has been validated.
-    __aicore__ inline bool BuildFirstDecodeSelection(
+    // Merge up to eight complete TopK rows in UB.  Each LI row is published
+    // as two source-ID-sorted ranges: the miss prefix and the hit suffix.
+    // Keeping union construction separate lets Q9-Q14 invoke this same
+    // proven operation for two route groups without changing steady state.
+    __aicore__ inline bool BuildFirstDecodeUnion(
         uint32_t queryStart, uint32_t queryEnd, uint32_t length,
-        uint32_t cacheCount, LocalTensor<int32_t> residentSources,
+        LocalTensor<int32_t> routeSources,
         LocalTensor<int32_t> unionSources, uint32_t &unionCount)
     {
         const uint32_t routes = queryEnd - queryStart;
-        uint32_t cursors[MAX_ROUTES * 2U] = {
-            0U, 0U, 0U, 0U, 0U, 0U, 0U,
-            0U, 0U, 0U, 0U, 0U, 0U, 0U};
-        uint32_t ends[MAX_ROUTES * 2U] = {
-            0U, 0U, 0U, 0U, 0U, 0U, 0U,
-            0U, 0U, 0U, 0U, 0U, 0U, 0U};
+        if (routes == 0U || routes > LOCAL_FIRST_DECODE_ROUTES) {
+            return false;
+        }
+        uint32_t cursors[MAX_ROUTES * 2U] = {0U};
+        uint32_t ends[MAX_ROUTES * 2U] = {0U};
 
         for (uint32_t route = 0U; route < routes; ++route) {
             const int32_t splitValue = routeMissCountsGm.GetValue(
@@ -286,7 +316,7 @@ private:
             cursors[route * 2U + 1U] = rowBase + split;
             ends[route * 2U + 1U] = rowBase + TOPK;
             DataCopyPad(
-                residentSources[rowBase],
+                routeSources[rowBase],
                 topkSourcesGm[
                     static_cast<uint64_t>(queryStart + route) * TOPK],
                 AscendC::DataCopyExtParams{
@@ -302,26 +332,42 @@ private:
             for (uint32_t segment = 0U; segment < segments; ++segment) {
                 if (cursors[segment] >= ends[segment]) continue;
                 const int32_t source =
-                    residentSources.GetValue(cursors[segment]);
+                    routeSources.GetValue(cursors[segment]);
                 if (source < 0 || static_cast<uint32_t>(source) >= length) {
                     return false;
                 }
                 if (source < nextSource) nextSource = source;
             }
             if (nextSource == INT32_MAX) break;
-            if (unionCount >= cacheCount ||
-                unionCount >= FIRST_DECODE_LIST_CAPACITY) {
+            if (unionCount >= FIRST_DECODE_LIST_CAPACITY) {
                 return false;
             }
             unionSources.SetValue(unionCount, nextSource);
             ++unionCount;
             for (uint32_t segment = 0U; segment < segments; ++segment) {
                 while (cursors[segment] < ends[segment] &&
-                       residentSources.GetValue(cursors[segment]) ==
+                       routeSources.GetValue(cursors[segment]) ==
                            nextSource) {
                     ++cursors[segment];
                 }
             }
+        }
+        return true;
+    }
+
+    // The local first-decode path loads all rows once, then appends the
+    // lowest non-union source IDs until the resident cache budget is full.
+    // No pool row is touched until the complete selection is validated.
+    __aicore__ inline bool BuildFirstDecodeSelection(
+        uint32_t queryStart, uint32_t queryEnd, uint32_t length,
+        uint32_t cacheCount, LocalTensor<int32_t> residentSources,
+        LocalTensor<int32_t> unionSources, uint32_t &unionCount)
+    {
+        if (!BuildFirstDecodeUnion(queryStart, queryEnd, length,
+                                   residentSources, unionSources,
+                                   unionCount) ||
+            unionCount > cacheCount) {
+            return false;
         }
 
         // pairInBuf is no longer needed as route storage after the union has
@@ -345,6 +391,110 @@ private:
             ++residentCount;
         }
         return residentCount == cacheCount;
+    }
+
+    // Q9-Q14 use the same UB union operation as Q1-Q8, split into an
+    // eight-route group and one remaining group.  Only the two already
+    // deduplicated group unions are merged through GM, reducing the old
+    // per-output scan from up to 28 GM segment heads to one GM head and one
+    // UB head.  missDestinations temporarily holds the first group while the
+    // merged union and fillers are written directly to public missSources.
+    __aicore__ inline bool BuildWideFirstDecodeSelection(
+        uint32_t batch, uint32_t queryStart, uint32_t queryEnd,
+        uint32_t length, uint32_t cacheCount,
+        LocalTensor<int32_t> routeSources,
+        LocalTensor<int32_t> groupUnion, uint32_t &unionCount)
+    {
+        const uint32_t routeCount = queryEnd - queryStart;
+        if (routeCount <= LOCAL_FIRST_DECODE_ROUTES ||
+            routeCount > MAX_ROUTES || cacheCount > MISS_CAPACITY) {
+            return false;
+        }
+        const uint64_t missBase =
+            static_cast<uint64_t>(batch) * MISS_CAPACITY;
+        const uint32_t groupEnd = queryStart + LOCAL_FIRST_DECODE_ROUTES;
+        uint32_t firstCount = 0U;
+        if (!BuildFirstDecodeUnion(queryStart, groupEnd, length,
+                                   routeSources, groupUnion, firstCount)) {
+            return false;
+        }
+
+        Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
+        for (uint32_t offset = 0U; offset < firstCount;
+             offset += FIRST_DECODE_LIST_CHUNK) {
+            const uint32_t valid =
+                firstCount - offset < FIRST_DECODE_LIST_CHUNK
+                    ? firstCount - offset
+                    : FIRST_DECODE_LIST_CHUNK;
+            DataCopyPad(
+                missDestinationsGm[missBase + offset], groupUnion[offset],
+                {1, static_cast<uint16_t>(valid * sizeof(int32_t)), 0, 0});
+        }
+        Sync<HardEvent::MTE3_S>(HardEvent::MTE3_S);
+
+        uint32_t secondCount = 0U;
+        if (!BuildFirstDecodeUnion(groupEnd, queryEnd, length,
+                                   routeSources, groupUnion, secondCount)) {
+            return false;
+        }
+
+        uint32_t firstCursor = 0U;
+        uint32_t secondCursor = 0U;
+        uint32_t output = 0U;
+        int32_t firstSource = firstCursor < firstCount
+            ? missDestinationsGm.GetValue(missBase + firstCursor)
+            : INT32_MAX;
+        int32_t secondSource = secondCursor < secondCount
+            ? groupUnion.GetValue(secondCursor)
+            : INT32_MAX;
+        while (firstSource != INT32_MAX || secondSource != INT32_MAX) {
+            const int32_t source = firstSource < secondSource
+                ? firstSource : secondSource;
+            if (source < 0 || static_cast<uint32_t>(source) >= length ||
+                output >= cacheCount || output >= MISS_CAPACITY) {
+                return false;
+            }
+            missSourcesGm.SetValue(missBase + output, source);
+            ++output;
+            if (firstSource == source) {
+                ++firstCursor;
+                firstSource = firstCursor < firstCount
+                    ? missDestinationsGm.GetValue(missBase + firstCursor)
+                    : INT32_MAX;
+            }
+            if (secondSource == source) {
+                ++secondCursor;
+                secondSource = secondCursor < secondCount
+                    ? groupUnion.GetValue(secondCursor)
+                    : INT32_MAX;
+            }
+        }
+        unionCount = output;
+
+        uint32_t unionCursor = 0U;
+        uint32_t residentCount = unionCount;
+        int32_t unionSource = unionCursor < unionCount
+            ? missSourcesGm.GetValue(missBase + unionCursor)
+            : INT32_MAX;
+        for (uint32_t source = 0U;
+             source < length && residentCount < cacheCount; ++source) {
+            if (unionSource == static_cast<int32_t>(source)) {
+                ++unionCursor;
+                unionSource = unionCursor < unionCount
+                    ? missSourcesGm.GetValue(
+                          missBase + unionCursor)
+                    : INT32_MAX;
+                continue;
+            }
+            missSourcesGm.SetValue(
+                missBase + residentCount, static_cast<int32_t>(source));
+            ++residentCount;
+        }
+        if (residentCount != cacheCount) {
+            return false;
+        }
+
+        return true;
     }
 
     // Generate one immutable invalid block and reuse it to clear the complete
@@ -377,19 +527,40 @@ private:
 
     __aicore__ inline void PublishFirstDecodeLists(
         uint32_t batch, uint32_t cacheCount,
-        LocalTensor<int32_t> residentSources)
+        LocalTensor<int32_t> residentSources, bool sourcesAlreadyPublished)
     {
-        const uint64_t missBase = static_cast<uint64_t>(batch) * 16384U;
+        const uint64_t missBase =
+            static_cast<uint64_t>(batch) * MISS_CAPACITY;
         LocalTensor<int32_t> identityBase = unionSourceBuf.Get<int32_t>();
         LocalTensor<int32_t> destinations =
             identityBase[FIRST_DECODE_LIST_CHUNK];
 
         // residentSources is already laid out as sorted union sources followed
-        // by sorted fillers, so the source transfer list is one contiguous DMA.
-        Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
-        DataCopyPad(
-            missSourcesGm[missBase], residentSources,
-            {1, static_cast<uint16_t>(cacheCount * sizeof(int32_t)), 0, 0});
+        // by sorted fillers.  Preserve the Q1-Q7 single-DMA fast path.  The
+        // exact Q8 list occupies 65536 bytes, one byte beyond DataCopyPad's
+        // uint16 block-length range, so publish only that boundary in chunks.
+        if (!sourcesAlreadyPublished) {
+            Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
+            if (cacheCount <= FIRST_DECODE_SINGLE_DMA_MAX) {
+                DataCopyPad(
+                    missSourcesGm[missBase], residentSources,
+                    {1, static_cast<uint16_t>(
+                            cacheCount * sizeof(int32_t)), 0, 0});
+            } else {
+                for (uint32_t source = 0U; source < cacheCount;
+                     source += FIRST_DECODE_LIST_CHUNK) {
+                    const uint32_t valid =
+                        cacheCount - source < FIRST_DECODE_LIST_CHUNK
+                            ? cacheCount - source
+                            : FIRST_DECODE_LIST_CHUNK;
+                    DataCopyPad(
+                        missSourcesGm[missBase + source],
+                        residentSources[source],
+                        {1, static_cast<uint16_t>(
+                                valid * sizeof(int32_t)), 0, 0});
+                }
+            }
+        }
 
         // Destination slots are the identity range [0, C).  Build the
         // immutable 0..4095 base once, then use Adds for each chunk.  This is
@@ -423,7 +594,8 @@ private:
 
     __aicore__ inline void ResolveFirstDecodeTopk(
         uint32_t queryStart, uint32_t queryEnd, uint32_t unionCount,
-        LocalTensor<int32_t> unionSources)
+        LocalTensor<int32_t> unionSources, uint32_t cacheRow,
+        bool resolveFromPool)
     {
         LocalTensor<int32_t> routeStorage = unionSourceBuf.Get<int32_t>();
         LocalTensor<int32_t> routeSources = routeStorage;
@@ -436,6 +608,26 @@ private:
                     1, TOPK * sizeof(int32_t), 0, 0, 0},
                 AscendC::DataCopyPadExtParams<int32_t>{false, 0, 0, 0});
             Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
+
+            if (resolveFromPool) {
+                const uint64_t cacheBase =
+                    static_cast<uint64_t>(cacheRow) * sourceCapacity;
+                for (uint32_t position = 0U; position < TOPK; ++position) {
+                    const int32_t source = routeSources.GetValue(position);
+                    const int32_t slot = source >= 0 &&
+                            static_cast<uint32_t>(source) < sourceCapacity
+                        ? cacheSlotsGm.GetValue(
+                              cacheBase + static_cast<uint32_t>(source))
+                        : -1;
+                    routeDestinations.SetValue(position, slot);
+                }
+                Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
+                DataCopyPad(
+                    topkDestinationsGm[topkBase], routeDestinations,
+                    {1, static_cast<uint16_t>(TOPK * sizeof(int32_t)), 0, 0});
+                Sync<HardEvent::MTE3_S>(HardEvent::MTE3_S);
+                continue;
+            }
 
             const int32_t splitValue = routeMissCountsGm.GetValue(
                 static_cast<uint64_t>(route) * ROUTE_COUNT_STRIDE);
@@ -477,7 +669,8 @@ private:
             static_cast<uint32_t>(actualSeqLengthsQueryGm.GetValue(batch - 1U));
         const uint32_t queryEnd =
             static_cast<uint32_t>(actualSeqLengthsQueryGm.GetValue(batch));
-        if (queryStart >= queryEnd || queryEnd > tSize || queryEnd - queryStart > 7U) {
+        if (queryStart >= queryEnd || queryEnd > tSize ||
+            queryEnd - queryStart > MAX_ROUTES) {
             PublishCounts(batch, queryStart, queryEnd, 0, 0);
             return;
         }
@@ -496,22 +689,111 @@ private:
         LocalTensor<int32_t> unionSources =
             pairOutBuf.Get<float>().ReinterpretCast<int32_t>();
         uint32_t unionCount = 0U;
-        if (!BuildFirstDecodeSelection(queryStart, queryEnd, length,
-                                       cacheCount, residentSources,
-                                       unionSources, unionCount)) {
-            PublishSafeFailure(batch, queryStart, queryEnd);
-            return;
+        const uint32_t routeCount = queryEnd - queryStart;
+        const bool useLocalSelection =
+            (routeCount <= LOCAL_MAX_ROUTES &&
+             cacheCount <= FIRST_DECODE_SINGLE_DMA_MAX) ||
+            (routeCount == LOCAL_FIRST_DECODE_ROUTES &&
+             cacheCount <= LOCAL_FIRST_DECODE_MAX);
+        const uint64_t missBase =
+            static_cast<uint64_t>(batch) * MISS_CAPACITY;
+        if (useLocalSelection) {
+            if (!BuildFirstDecodeSelection(queryStart, queryEnd, length,
+                                           cacheCount, residentSources,
+                                           unionSources, unionCount)) {
+                PublishSafeFailure(batch, queryStart, queryEnd);
+                return;
+            }
+        } else if (routeCount > LOCAL_FIRST_DECODE_ROUTES) {
+            if (!BuildWideFirstDecodeSelection(
+                    batch, queryStart, queryEnd, length, cacheCount,
+                    residentSources, unionSources, unionCount)) {
+                PublishSafeFailure(batch, queryStart, queryEnd);
+                return;
+            }
+        } else {
+            uint64_t cursors[MAX_ROUTES * 2U] = {0U};
+            uint64_t ends[MAX_ROUTES * 2U] = {0U};
+            for (uint32_t route = 0U; route < routeCount; ++route) {
+                const int32_t splitValue = routeMissCountsGm.GetValue(
+                    static_cast<uint64_t>(queryStart + route) *
+                    ROUTE_COUNT_STRIDE);
+                if (splitValue < 0 ||
+                    splitValue > static_cast<int32_t>(TOPK)) {
+                    PublishSafeFailure(batch, queryStart, queryEnd);
+                    return;
+                }
+                const uint64_t routeBase =
+                    static_cast<uint64_t>(queryStart + route) * TOPK;
+                const uint32_t split = static_cast<uint32_t>(splitValue);
+                cursors[route * 2U] = routeBase;
+                ends[route * 2U] = routeBase + split;
+                cursors[route * 2U + 1U] = routeBase + split;
+                ends[route * 2U + 1U] = routeBase + TOPK;
+            }
+            const uint32_t segments = routeCount * 2U;
+            while (true) {
+                int32_t nextSource = INT32_MAX;
+                for (uint32_t segment = 0U; segment < segments; ++segment) {
+                    if (cursors[segment] >= ends[segment]) continue;
+                    const int32_t source =
+                        topkSourcesGm.GetValue(cursors[segment]);
+                    if (source < 0 ||
+                        static_cast<uint32_t>(source) >= length) {
+                        PublishSafeFailure(batch, queryStart, queryEnd);
+                        return;
+                    }
+                    if (source < nextSource) nextSource = source;
+                }
+                if (nextSource == INT32_MAX) break;
+                if (unionCount >= cacheCount ||
+                    unionCount >= MISS_CAPACITY) {
+                    PublishSafeFailure(batch, queryStart, queryEnd);
+                    return;
+                }
+                missSourcesGm.SetValue(missBase + unionCount, nextSource);
+                ++unionCount;
+                for (uint32_t segment = 0U; segment < segments; ++segment) {
+                    while (cursors[segment] < ends[segment] &&
+                           topkSourcesGm.GetValue(cursors[segment]) ==
+                               nextSource) {
+                        ++cursors[segment];
+                    }
+                }
+            }
+            uint32_t unionCursor = 0U;
+            uint32_t residentCount = unionCount;
+            for (uint32_t source = 0U;
+                 source < length && residentCount < cacheCount; ++source) {
+                if (unionCursor < unionCount &&
+                    missSourcesGm.GetValue(missBase + unionCursor) ==
+                        static_cast<int32_t>(source)) {
+                    ++unionCursor;
+                    continue;
+                }
+                missSourcesGm.SetValue(
+                    missBase + residentCount, static_cast<int32_t>(source));
+                ++residentCount;
+            }
+            if (residentCount != cacheCount) {
+                PublishSafeFailure(batch, queryStart, queryEnd);
+                return;
+            }
         }
         ClearFirstDecodePool(static_cast<uint32_t>(row));
         for (uint32_t written = 0U; written < cacheCount; ++written) {
             const uint32_t source = static_cast<uint32_t>(
-                residentSources.GetValue(written));
+                useLocalSelection
+                    ? residentSources.GetValue(written)
+                    : missSourcesGm.GetValue(missBase + written));
             cacheSlotsGm.SetValue(cacheBase + source,
                                   static_cast<int32_t>(written));
         }
-        PublishFirstDecodeLists(batch, cacheCount, residentSources);
+        PublishFirstDecodeLists(batch, cacheCount, residentSources,
+                                !useLocalSelection);
         ResolveFirstDecodeTopk(queryStart, queryEnd, unionCount,
-                               unionSources);
+                               unionSources, static_cast<uint32_t>(row),
+                               !useLocalSelection);
         PublishCounts(batch, queryStart, queryEnd,
                       static_cast<int32_t>(cacheCount),
                       static_cast<int32_t>(TOPK));
@@ -521,7 +803,8 @@ private:
         uint32_t batch, uint32_t queryStart, uint32_t queryEnd,
         int32_t &row, uint32_t &length, uint32_t &cacheCount)
     {
-        if (queryEnd <= queryStart || queryEnd - queryStart > 7U) return false;
+        if (queryEnd <= queryStart ||
+            queryEnd - queryStart > MAX_ROUTES) return false;
         row = reqEntriesGm.GetValue(batch);
         const int32_t lengthValue = candidateLengthsGm.GetValue(batch);
         const int32_t cacheValue = cacheTokensGm.GetValue(batch);
@@ -537,7 +820,8 @@ private:
             (lengthValue & 127) != 0 || (cacheValue & 127) != 0) return false;
         if ((static_cast<uint32_t>(lengthValue) <= routes * TOPK && cacheValue != lengthValue) ||
             (static_cast<uint32_t>(lengthValue) > routes * TOPK &&
-             (static_cast<uint32_t>(cacheValue) < routes * TOPK || cacheValue > 16256))) return false;
+             (static_cast<uint32_t>(cacheValue) < routes * TOPK ||
+              cacheValue > static_cast<int32_t>(MAX_CACHE_TOKENS)))) return false;
         length = static_cast<uint32_t>(lengthValue);
         cacheCount = static_cast<uint32_t>(cacheValue);
         return true;
@@ -572,7 +856,8 @@ private:
             return;
         }
         const uint64_t cacheBase = static_cast<uint64_t>(row) * sourceCapacity;
-        const uint64_t missBase = static_cast<uint64_t>(batch) * 16384U;
+        const uint64_t missBase =
+            static_cast<uint64_t>(batch) * MISS_CAPACITY;
         // Identity-to-offload normalization is handled once by
         // PrepareNonOffloadRows.  Steady decode must not rescan the row.
         uint32_t missCount = 0U;
@@ -595,8 +880,8 @@ private:
             // Every route's miss prefix is already source-ID sorted by the LI
             // producer.  Merge those prefixes directly instead of scanning
             // all L sources and repeatedly searching Q TopK rows.
-            uint32_t cursors[7] = {0U, 0U, 0U, 0U, 0U, 0U, 0U};
-            uint32_t routeMisses[7] = {0U, 0U, 0U, 0U, 0U, 0U, 0U};
+            uint32_t cursors[MAX_ROUTES] = {0U};
+            uint32_t routeMisses[MAX_ROUTES] = {0U};
             const uint32_t routes = queryEnd - queryStart;
             for (uint32_t route = 0U; route < routes; ++route) {
                 const int32_t value = routeMissCountsGm.GetValue(
@@ -681,11 +966,12 @@ private:
                       ROUTE_COUNTS_FROM_WORKSPACE);
     }
 
-    // Q=1..7 steady path. Q=1..4 reuse the mature MrgSort4/vector-dedup path.
-    // Q=5..7 concatenate up to 2048 miss occurrences and reuse the proven
+    // Q=1..14 steady path. Q=1..4 reuse the mature MrgSort4/vector-dedup path.
+    // Q=5..14 concatenate up to 4096 miss occurrences and reuse the proven
     // fixed-size SortAll pipeline; larger correctness boundaries retain the
     // source-sorted k-way union. Both paths carry occurrence metadata so slot
-    // distribution needs neither a second GM read nor a source-to-union join.
+    // Q1-Q7 also carry occurrence metadata; wider routes stream their
+    // destination publication through one reusable local row.
     __aicore__ inline void ProcessGeneralizedSteady(uint32_t batch,
                                                     uint32_t queryStart,
                                                     uint32_t queryEnd)
@@ -713,11 +999,11 @@ private:
         LocalTensor<uint32_t> occurrences = occurrenceBuf.Get<uint32_t>();
         const bool useMaturePairUnion = routeCount <= ROUTES;
 
-        uint32_t lengths[MAX_ROUTES] = {
-            0U, 0U, 0U, 0U, 0U, 0U, 0U};
-        uint32_t cursors[MAX_ROUTES] = {
-            0U, 0U, 0U, 0U, 0U, 0U, 0U};
+        uint32_t lengths[MAX_ROUTES] = {0U};
+        uint32_t cursors[MAX_ROUTES] = {0U};
+        uint32_t routeOffsets[MAX_ROUTES] = {0U};
         uint32_t total = 0U;
+        uint32_t routeStorageCount = 0U;
         for (uint32_t route = 0U; route < routeCount; ++route) {
             const int32_t value = routeMissCountsGm.GetValue(
                 static_cast<uint64_t>(queryStart + route) *
@@ -726,10 +1012,28 @@ private:
                                      value <= static_cast<int32_t>(TOPK)
                                  ? static_cast<uint32_t>(value)
                                  : 0U;
+            routeOffsets[route] = routeStorageCount;
+            routeStorageCount +=
+                (lengths[route] + GENERAL_ROUTE_ALIGN - 1U) /
+                GENERAL_ROUTE_ALIGN * GENERAL_ROUTE_ALIGN;
             total += lengths[route];
-            if (!useMaturePairUnion && lengths[route] != 0U) {
+        }
+        if (total == 0U) {
+            PublishCounts(batch, queryStart, queryEnd, 0, 0);
+            return;
+        }
+        // pairInBuf retains the Q1-Q7 fast-path footprint.  Wider or highly
+        // fragmented requests stay in this same generalized entry point and
+        // use its GM-backed k-way implementation.
+        if (!useMaturePairUnion && routeStorageCount > CAPACITY * 2U) {
+            ProcessGenericSteady(batch, queryStart, queryEnd);
+            return;
+        }
+        if (!useMaturePairUnion) {
+            for (uint32_t route = 0U; route < routeCount; ++route) {
+                if (lengths[route] == 0U) continue;
                 DataCopyPad(
-                    routeSources[route * TOPK],
+                    routeSources[routeOffsets[route]],
                     topkSourcesGm[
                         static_cast<uint64_t>(queryStart + route) * TOPK],
                     AscendC::DataCopyExtParams{
@@ -739,10 +1043,6 @@ private:
                         0, 0, 0},
                     AscendC::DataCopyPadExtParams<int32_t>{false, 0, 0, 0});
             }
-        }
-        if (total == 0U) {
-            PublishCounts(batch, queryStart, queryEnd, 0, 0);
-            return;
         }
         uint32_t unionCount = 0U;
         bool overflow = false;
@@ -795,7 +1095,8 @@ private:
             sources.src4 = input[PAIR_WORDS * 3U];
             MrgSort<float>(workspace, sources, params);
             PipeBarrier<PIPE_V>();
-            capturedOccurrences = total <= OCCURRENCE_CAPACITY;
+            capturedOccurrences = routeCount <= LOCAL_MAX_ROUTES &&
+                                  UseCompactOccurrenceMap(total);
             unionCount = DeduplicateMergedMisses(
                 workspace, input, total, unionSources, occurrences,
                 capturedOccurrences, sourceMask);
@@ -803,7 +1104,9 @@ private:
             Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
             if (total <= GENERAL_SORT_CAPACITY) {
                 uint32_t sortLength = 128U;
-                if (total > 1024U) {
+                if (total > 2048U) {
+                    sortLength = 4096U;
+                } else if (total > 1024U) {
                     sortLength = 2048U;
                 } else if (total > 512U) {
                     sortLength = 1024U;
@@ -818,7 +1121,7 @@ private:
                 // SortAll consumes [keys, payloads] and emits interleaved
                 // (key, payload) pairs.  Encode the same descending source
                 // key used by the mature LI producer, while carrying the
-                // three-bit route and final miss-prefix position as payload.
+                // four-bit route and final miss-prefix position as payload.
                 LocalTensor<uint32_t> sortWords =
                     workspace.ReinterpretCast<uint32_t>();
                 uint32_t packed = 0U;
@@ -826,7 +1129,7 @@ private:
                     for (uint32_t position = 0U;
                          position < lengths[route]; ++position) {
                         const int32_t source = routeSources.GetValue(
-                            route * TOPK + position);
+                            routeOffsets[route] + position);
                         if (source < 0 ||
                             static_cast<uint32_t>(source) >= length) {
                             PublishSafeFailure(batch, queryStart, queryEnd);
@@ -849,13 +1152,14 @@ private:
                 Sync<HardEvent::S_V>(HardEvent::S_V);
                 LIServiceVec::SortAll(workspace, input, sortLength);
                 PipeBarrier<PIPE_V>();
-                capturedOccurrences = true;
+                capturedOccurrences = routeCount <= LOCAL_MAX_ROUTES;
                 unionCount = DeduplicateMergedMisses(
-                    workspace, input, total, unionSources, occurrences, true,
-                    sourceMask);
+                    workspace, input, total, unionSources, occurrences,
+                    capturedOccurrences, sourceMask);
             } else {
                 const bool captureOccurrences =
-                    total <= OCCURRENCE_CAPACITY;
+                    routeCount <= LOCAL_MAX_ROUTES &&
+                    UseCompactOccurrenceMap(total);
                 uint32_t occurrenceCount = 0U;
                 while (true) {
                     int32_t nextSource = INT32_MAX;
@@ -864,7 +1168,7 @@ private:
                             continue;
                         }
                         const int32_t source = routeSources.GetValue(
-                            route * TOPK + cursors[route]);
+                            routeOffsets[route] + cursors[route]);
                         if (source < nextSource) {
                             nextSource = source;
                         }
@@ -881,7 +1185,7 @@ private:
                     for (uint32_t route = 0U; route < routeCount; ++route) {
                         while (cursors[route] < lengths[route] &&
                                routeSources.GetValue(
-                                   route * TOPK + cursors[route]) ==
+                                   routeOffsets[route] + cursors[route]) ==
                                    nextSource) {
                             if (captureOccurrences) {
                                 occurrences.SetValue(
@@ -909,6 +1213,7 @@ private:
             accumulator, unionSources, unionDestinations);
 
         LocalTensor<int32_t> topkDestinationRows = routeSources;
+        bool topkDestinationsPublished = false;
         if (capturedOccurrences) {
             // unionDestinations occupies workspace's upper half.  Q5-Q7
             // destination rows extend past route 3 and would overwrite that
@@ -920,14 +1225,14 @@ private:
                             input);
             topkDestinationRows = input.ReinterpretCast<int32_t>();
         } else {
-            // Q5-Q7 (and the unusually large Q4 fallback) do not fit the
-            // compact occurrence map.  Reload and join only miss prefixes.
+            // Stream each miss prefix through one reusable row so Q8-Q14
+            // never require all destination rows to coexist in local UB.
             for (uint32_t route = 0U; route < routeCount; ++route) {
                 if (lengths[route] == 0U) {
                     continue;
                 }
                 DataCopyPad(
-                    routeSources[route * TOPK],
+                    routeSources,
                     topkSourcesGm[
                         static_cast<uint64_t>(queryStart + route) * TOPK],
                     AscendC::DataCopyExtParams{
@@ -936,27 +1241,33 @@ private:
                                               sizeof(int32_t)),
                         0, 0, 0},
                     AscendC::DataCopyPadExtParams<int32_t>{false, 0, 0, 0});
-            }
-            Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
-            for (uint32_t route = 0U; route < routeCount; ++route) {
+                Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
                 uint32_t unionCursor = 0U;
-                LocalTensor<int32_t> rowSources =
-                    routeSources[route * TOPK];
                 for (uint32_t position = 0U;
                      position < lengths[route]; ++position) {
-                    const int32_t source = rowSources.GetValue(position);
+                    const int32_t source = routeSources.GetValue(position);
                     while (unionCursor < updated &&
                            unionSources.GetValue(unionCursor) < source) {
                         ++unionCursor;
                     }
-                    rowSources.SetValue(
+                    routeSources.SetValue(
                         position,
                         unionCursor < updated &&
                                 unionSources.GetValue(unionCursor) == source
                             ? unionDestinations.GetValue(unionCursor)
                             : -1);
                 }
+                Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
+                DataCopyPad(
+                    topkDestinationsGm[
+                        static_cast<uint64_t>(queryStart + route) * TOPK],
+                    routeSources,
+                    {1, static_cast<uint16_t>(lengths[route] *
+                                               sizeof(int32_t)),
+                     0, 0});
+                Sync<HardEvent::MTE3_S>(HardEvent::MTE3_S);
             }
+            topkDestinationsPublished = true;
         }
 
         countLocal.SetValue(0U, static_cast<int32_t>(updated));
@@ -967,14 +1278,15 @@ private:
         Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
         if (updated != 0U) {
             const uint64_t missBase =
-                static_cast<uint64_t>(batch) * 16384U;
+                static_cast<uint64_t>(batch) * MISS_CAPACITY;
             const uint16_t unionBytes =
                 static_cast<uint16_t>(updated * sizeof(int32_t));
             DataCopyPad(missSourcesGm[missBase], unionSources,
                         {1, unionBytes, 0, 0});
             DataCopyPad(missDestinationsGm[missBase], unionDestinations,
                         {1, unionBytes, 0, 0});
-            for (uint32_t route = 0U; route < routeCount; ++route) {
+            for (uint32_t route = 0U;
+                 !topkDestinationsPublished && route < routeCount; ++route) {
                 if (lengths[route] == 0U) {
                     continue;
                 }
@@ -1126,7 +1438,7 @@ private:
 
         // Pack only after invalid cache entries have been excluded.  Their
         // payload bit pattern is irrelevant because their sort key is masked.
-        // The payload is [slot:14 | source_low18].  Preserve the historical
+        // The payload is [slot:15 | source_low17].  Preserve the historical
         // direct source construction on the short path; long-source high
         // bits belong exclusively in TagLongEvictSource's sort-key tag.
         const uint32_t payloadStart = longSource
@@ -1137,7 +1449,7 @@ private:
             EVICT_CHUNK);
         PipeBarrier<PIPE_V>();
         if (longSource) {
-            // Keep the mature [slot:14 | source_low18] payload and carry
+            // Keep the mature [slot:15 | source_low17] payload and carry
             // only the missing source high bits in the sort-key tag.
             TagLongEvictSource(key, start, valid);
         }
@@ -1195,17 +1507,19 @@ private:
         const float thresholds[MAX_ROUTES], LocalTensor<float> chunkPair,
         LocalTensor<float> scratch, bool longSource)
     {
-        LocalTensor<float> key = scratch[EVICT_CHUNK * 7U];
-        LocalTensor<float> temp = scratch[EVICT_CHUNK * 8U];
+        LocalTensor<float> key = scratch[EVICT_CHUNK * MAX_ROUTES];
+        LocalTensor<float> temp = scratch[EVICT_CHUNK * (MAX_ROUTES + 1U)];
         LocalTensor<int32_t> slots =
-            scratch[EVICT_CHUNK * 9U].ReinterpretCast<int32_t>();
+            scratch[EVICT_CHUNK * (MAX_ROUTES + 2U)].ReinterpretCast<int32_t>();
         LocalTensor<uint32_t> payload =
-            scratch[EVICT_CHUNK * 10U].ReinterpretCast<uint32_t>();
+            scratch[EVICT_CHUNK * (MAX_ROUTES + 3U)].ReinterpretCast<uint32_t>();
         LocalTensor<uint8_t> invalidMask =
-            scratch[EVICT_CHUNK * 11U].ReinterpretCast<uint8_t>();
+            scratch[EVICT_CHUNK * (MAX_ROUTES + 4U)].ReinterpretCast<uint8_t>();
         LocalTensor<float> invalidKey =
-            scratch[EVICT_CHUNK * 11U + EVICT_MASK_WORK_FLOATS];
-        LocalTensor<float> sortTmp = scratch[EVICT_CHUNK * 13U];
+            scratch[EVICT_CHUNK * (MAX_ROUTES + 4U) +
+                    EVICT_MASK_WORK_FLOATS];
+        LocalTensor<float> sortTmp =
+            scratch[EVICT_CHUNK * (MAX_ROUTES + 6U)];
 
         for (uint32_t route = 0U; route < routeCount; ++route) {
             LocalTensor<float> score = scratch[route * EVICT_CHUNK];
@@ -1517,8 +1831,8 @@ private:
         return updated;
     }
 
-    // The mature payload remains [slot:14 | source_low18] for long sources.
-    // The sort-key tag carries source_high3, allowing the final candidate to
+    // The mature payload remains [slot:15 | source_low17] for long sources.
+    // The sort-key tag carries source_high4, allowing the final candidate to
     // recover both its complete source ID and the slot captured by the same
     // MTE2 cache-row load that qualified it as an eviction candidate.  This
     // deliberately avoids a second scalar GM pool lookup after sorting.
@@ -1703,18 +2017,22 @@ private:
         if (written >= required) {
             return written;
         }
+        const bool useLocalTopk = routeCount <= LOCAL_MAX_ROUTES;
         LocalTensor<int32_t> allTopkSources =
             fallbackStorage.ReinterpretCast<int32_t>();
-        for (uint32_t route = 0U; route < routeCount; ++route) {
-            const uint64_t rowOffset =
-                static_cast<uint64_t>(queryStart + route) * TOPK;
-            DataCopyPad(
-                allTopkSources[route * TOPK], topkSourcesGm[rowOffset],
-                AscendC::DataCopyExtParams{
-                    1, static_cast<uint32_t>(TOPK * sizeof(int32_t)), 0, 0, 0},
-                AscendC::DataCopyPadExtParams<int32_t>{false, 0, 0, 0});
+        if (useLocalTopk) {
+            for (uint32_t route = 0U; route < routeCount; ++route) {
+                const uint64_t rowOffset =
+                    static_cast<uint64_t>(queryStart + route) * TOPK;
+                DataCopyPad(
+                    allTopkSources[route * TOPK], topkSourcesGm[rowOffset],
+                    AscendC::DataCopyExtParams{
+                        1, static_cast<uint32_t>(TOPK * sizeof(int32_t)),
+                        0, 0, 0},
+                    AscendC::DataCopyPadExtParams<int32_t>{false, 0, 0, 0});
+            }
+            Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
         }
-        Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
         const uint64_t cacheBase =
             static_cast<uint64_t>(cacheRow) * sourceCapacity;
         for (uint32_t source = 0U;
@@ -1735,9 +2053,12 @@ private:
                 }
                 tied = tied || score == thresholds[route];
             }
-            if (above || !tied ||
-                IsProtectedTopkGeneral(allTopkSources, source, lengths,
-                                       routeCount)) {
+            const bool protectedTopk = useLocalTopk
+                ? IsProtectedTopkGeneral(allTopkSources, source, lengths,
+                                         routeCount)
+                : TopkContains(queryStart, queryStart + routeCount,
+                               static_cast<int32_t>(source));
+            if (above || !tied || protectedTopk) {
                 continue;
             }
             const int32_t missSource = unionSources.GetValue(written);
@@ -1790,8 +2111,7 @@ private:
                 AscendC::DataCopyPadExtParams<float>{true, 0, 7U, 0.0F});
         }
         Sync<HardEvent::MTE2_S>(HardEvent::MTE2_S);
-        float thresholds[MAX_ROUTES] = {
-            0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+        float thresholds[MAX_ROUTES] = {0.0F};
         for (uint32_t route = 0U; route < routeCount; ++route) {
             thresholds[route] = thresholdLocal.GetValue(route * 8U);
         }
@@ -2080,7 +2400,7 @@ private:
         Sync<HardEvent::S_MTE3>(HardEvent::S_MTE3);
         if (count != 0U) {
             const uint64_t unionOffset =
-                static_cast<uint64_t>(batch) * 16384U;
+                static_cast<uint64_t>(batch) * MISS_CAPACITY;
             const uint16_t unionBytes =
                 static_cast<uint16_t>(count * sizeof(int32_t));
             DataCopyPad(missSourcesGm[unionOffset], unionSources,
@@ -2228,7 +2548,7 @@ private:
         MrgSort<float>(merged, sources, params);
         PipeBarrier<PIPE_V>();
 
-        const bool captureOccurrences = total <= OCCURRENCE_CAPACITY;
+        const bool captureOccurrences = UseCompactOccurrenceMap(total);
         const uint32_t count = DeduplicateMergedMisses(
             merged, input, total, unionSources, occurrences,
             captureOccurrences, sourceMask);
