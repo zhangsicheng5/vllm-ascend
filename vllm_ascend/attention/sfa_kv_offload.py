@@ -435,6 +435,8 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
             raise RuntimeError(
                 f"nano fused_li_manage requires an indexer. layer_name={self.layer_name}."
             )
+        if self.enable_sparse_li_c8:
+            raise NotImplementedError("nano fused_li_manage does not support sparse LI C8")
         assert self.wk_weights_proj is not None
         assert self.wq_b is not None
 
@@ -511,15 +513,6 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
             q_li_pe = q_li_pe.squeeze(2)
             q_li = torch.cat([q_li_pe, q_li_nope], dim=-1)
 
-        if self.enable_sparse_li_c8:
-            q_li = q_li @ AscendSFAImpl.q_hadamard
-            q_li_int8, q_li_scale = torch_npu.npu_dynamic_quant(
-                q_li.view(-1, self.head_dim), dst_type=self.c8_k_cache_dtype
-            )
-            q_li_scale = q_li_scale.to(self.c8_k_scale_cache_dtype)
-            q_li = q_li_int8.view(num_decodes, self.n_head, self.head_dim)
-            q_li_scale = q_li_scale.view(num_decodes, self.n_head)
-
         q_li = q_li[:num_decodes]
         weights = weights[:num_decodes]
         if q_li.shape[1] not in (32, 64):
@@ -564,54 +557,19 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
         if not index_key_cache.is_contiguous():
             index_key_cache = index_key_cache.contiguous()
 
-        if self.enable_sparse_li_c8:
-            index_key_scale = kv_cache[self.kv_cache_indexer_scale_idx]
-            if index_key_scale.ndim == 4 and index_key_scale.size(1) == block_size and index_key_scale.size(2) == 1:
-                index_key_scale_cache = index_key_scale
-            else:
-                index_key_scale_cache = index_key_scale.view(-1, block_size, 1, 1)
-            if not index_key_scale_cache.is_contiguous():
-                index_key_scale_cache = index_key_scale_cache.contiguous()
-
-            torch.ops._C_ascend.npu_fused_li_manage_c8(
-                q_li.contiguous(),
-                q_li_scale.contiguous(),
-                weights.contiguous(),
-                index_key_cache,
-                index_key_scale_cache,
-                block_table,
-                num_candidate_tokens,
-                num_cache_tokens,
-                req_pool_entries,
-                cache_slots_pool,
-                topk_src_ids,
-                topk_dst_slots,
-                miss_counts,
-            )
-            logger.info(
-                "LIM c8 debug: layer=%s num_candidate=%s num_cache=%s "
-                "miss=%s src_top8=%s dst_top8=%s",
-                layer_name,
-                num_candidate_tokens.detach().to(device="cpu").tolist(),
-                num_cache_tokens.detach().to(device="cpu").tolist(),
-                miss_counts.detach().to(device="cpu").tolist(),
-                topk_src_ids[0, 0, :8].detach().to(device="cpu").tolist(),
-                topk_dst_slots[0, 0, :8].detach().to(device="cpu").tolist(),
-            )
-        else:
-            torch.ops._C_ascend.npu_fused_li_manage(
-                q_li.contiguous(),
-                weights.contiguous(),
-                index_key_cache,
-                block_table,
-                num_candidate_tokens,
-                num_cache_tokens,
-                req_pool_entries,
-                cache_slots_pool,
-                topk_src_ids,
-                topk_dst_slots,
-                miss_counts,
-            )
+        torch.ops._C_ascend.npu_fused_li_manage(
+            q_li.contiguous(),
+            weights.contiguous(),
+            index_key_cache,
+            block_table,
+            num_candidate_tokens,
+            num_cache_tokens,
+            req_pool_entries,
+            cache_slots_pool,
+            topk_src_ids,
+            topk_dst_slots,
+            miss_counts,
+        )
         manager.mark_lim_outputs_ready(num_decodes)
 
         # IndexShare / skip_topk consumers reuse topk_indices_buffer.
