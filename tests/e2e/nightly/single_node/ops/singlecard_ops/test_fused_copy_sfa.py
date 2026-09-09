@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gc
 import math
+import os
 
 import pytest
 import torch
@@ -27,10 +28,21 @@ CKV_DIM = 512
 KPE_DIM = 64
 SPARSE_COUNT = 2048
 
+from memfabric_hybrid import offload as _offload
+_offload_cfg = _offload.OffloadConfig()
+_offload_cfg.scene = _offload.Scene.LOCAL
+_offload_cfg.alloc_size = 4 * 1024 * 1024 * 1024
+_offload_cfg.reserve_size = 4 * 1024 * 1024 * 1024
+_offload_cfg.world_size = 1
+_offload_cfg.rank_id = 0
+_offload_cfg.device_id = int(os.environ.get("ASCEND_DEVICE_ID", "0"))
+_offload.initialize(_offload_cfg)
 
-def _host_from_cpu(cpu):
-    """Offloaded DRAM KV stays on host for fused_copy_sfa."""
-    return cpu.contiguous()
+
+def _alloc_dram_tensor(cpu_tensor, device):
+    t = _offload.empty(list(cpu_tensor.shape), dtype=cpu_tensor.dtype, pin_memory=True)
+    t.copy_(cpu_tensor)
+    return t
 
 
 def _logical_rows(cache, block_table, request, logical_slots):
@@ -39,7 +51,7 @@ def _logical_rows(cache, block_table, request, logical_slots):
     return cache[blocks, slots % BLOCK_SIZE]
 
 
-def _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed):
+def _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed, dtype=torch.bfloat16):
     torch.manual_seed(seed)
     torch.npu.manual_seed_all(seed)
     final_kv_len = cache_tokens + tail_tokens
@@ -64,22 +76,22 @@ def _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed
     copy_counts = counts_cpu.to(device)
     hbm_table = hbm_table_cpu.to(device)
     dram_table = dram_table_cpu.to(device)
-    dram_kpe_cpu = torch.randn(batch * source_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
-    dram_ckv_cpu = torch.randn(batch * source_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.float32).mul_(0.25).to(torch.bfloat16)
-    dram_kpe = _host_from_cpu(dram_kpe_cpu)
-    dram_ckv = _host_from_cpu(dram_ckv_cpu)
+    dram_kpe_cpu = torch.randn(batch * source_blocks, BLOCK_SIZE, KPE_DIM, dtype=torch.float32).mul_(0.25).to(dtype)
+    dram_ckv_cpu = torch.randn(batch * source_blocks, BLOCK_SIZE, CKV_DIM, dtype=torch.float32).mul_(0.25).to(dtype)
+    dram_kpe = _alloc_dram_tensor(dram_kpe_cpu, device)
+    dram_ckv = _alloc_dram_tensor(dram_ckv_cpu, device)
     total_hbm_blocks = batch * cache_blocks
-    initial_kpe = torch.zeros(total_hbm_blocks, BLOCK_SIZE, 1, KPE_DIM, dtype=torch.bfloat16, device=device)
-    initial_ckv = torch.zeros(total_hbm_blocks, BLOCK_SIZE, 1, CKV_DIM, dtype=torch.bfloat16, device=device)
-    query = torch.randn(batch, heads, CKV_DIM, dtype=torch.bfloat16, device=device).mul_(0.25)
-    query_rope = torch.randn(batch, heads, KPE_DIM, dtype=torch.bfloat16, device=device).mul_(0.25)
+    initial_kpe = torch.zeros(total_hbm_blocks, BLOCK_SIZE, 1, KPE_DIM, dtype=dtype, device=device)
+    initial_ckv = torch.zeros(total_hbm_blocks, BLOCK_SIZE, 1, CKV_DIM, dtype=dtype, device=device)
+    query = torch.randn(batch, heads, CKV_DIM, dtype=dtype, device=device).mul_(0.25)
+    query_rope = torch.randn(batch, heads, KPE_DIM, dtype=dtype, device=device).mul_(0.25)
     actual_q = torch.tensor([1] * batch, dtype=torch.int32, device=device)
     actual_kv = torch.full((batch,), final_kv_len, dtype=torch.int32, device=device)
     cache_tokens_t = torch.full((batch,), cache_tokens, dtype=torch.int32, device=device)
     scale = 1.0 / math.sqrt(CKV_DIM + KPE_DIM)
     fused_kpe = initial_kpe.clone()
     fused_ckv = initial_ckv.clone()
-    fused_out = torch.empty(batch, heads, CKV_DIM, dtype=torch.bfloat16, device=device)
+    fused_out = torch.empty(batch, heads, CKV_DIM, dtype=dtype, device=device)
     return {
         "device": device, "batch": batch, "heads": heads, "source_len": source_len,
         "cache_tokens": cache_tokens, "tail_tokens": tail_tokens, "final_kv_len": final_kv_len,
@@ -170,4 +182,70 @@ def test_fused_copy_sfa_chain(device, batch, heads, source_len, cache_tokens, ta
     actual = case["fused_out"].float().cpu()
     torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
     print(f"FUSED_COPY_SFA_CHECK batch={batch} heads={heads} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("batch,heads,source_len,cache_tokens,tail_tokens", [
+    (4, 2, 20992, 8192, 64),
+])
+def test_fused_copy_sfa_graph(device, batch, heads, source_len, cache_tokens, tail_tokens):
+    case = _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed=7)
+    warm_case = _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed=7)
+    _launch_fused(warm_case)
+    torch.npu.synchronize()
+    del warm_case
+
+    graph_kpe = case["fused_kpe"].clone()
+    graph_ckv = case["fused_ckv"].clone()
+    graph_out = torch.empty_like(case["fused_out"])
+    case["fused_kpe"] = graph_kpe
+    case["fused_ckv"] = graph_ckv
+    case["fused_out"] = graph_out
+
+    graph = torch.npu.NPUGraph()
+    pool = torch.npu.graph_pool_handle()
+    with torch.npu.graph(graph, pool=pool):
+        _launch_fused(case)
+    torch.npu.synchronize()
+
+    graph_kpe.copy_(case["initial_kpe"])
+    graph_ckv.copy_(case["initial_ckv"])
+    graph_out.zero_()
+    torch.npu.synchronize()
+    graph.replay()
+    torch.npu.synchronize()
+
+    golden = _cpu_golden(case)
+    actual = case["fused_out"].float().cpu()
+    torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
+    print(f"FUSED_COPY_SFA_GRAPH_CHECK batch={batch} heads={heads} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("batch,heads,source_len,cache_tokens,tail_tokens", [
+    (1, 2, 20992, 8192, 64),
+    (4, 4, 20992, 8192, 64),
+    (4, 2, 20992, 8192, 0),
+    (4, 2, 20992, 8192, 129),
+])
+def test_fused_copy_sfa_parametrize(device, batch, heads, source_len, cache_tokens, tail_tokens):
+    case = _make_case(device, batch, heads, source_len, cache_tokens, tail_tokens, seed=7)
+    _launch_fused(case)
+    torch.npu.synchronize()
+    golden = _cpu_golden(case)
+    actual = case["fused_out"].float().cpu()
+    torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
+    print(f"FUSED_COPY_SFA_PARAM batch={batch} heads={heads} tail={tail_tokens} ok=1", flush=True)
+    gc.collect(); torch.npu.empty_cache()
+
+
+@pytest.mark.parametrize("dtype", [torch.float16])
+def test_fused_copy_sfa_fp16(device, dtype):
+    case = _make_case(device, 4, 2, 20992, 8192, 64, seed=7, dtype=dtype)
+    _launch_fused(case)
+    torch.npu.synchronize()
+    golden = _cpu_golden(case)
+    actual = case["fused_out"].float().cpu()
+    torch.testing.assert_close(actual, golden, rtol=0.08, atol=0.08)
+    print(f"FUSED_COPY_SFA_FP16_CHECK ok=1", flush=True)
     gc.collect(); torch.npu.empty_cache()
