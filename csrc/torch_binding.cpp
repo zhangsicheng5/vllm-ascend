@@ -52,6 +52,7 @@
 #include "attention/fused_copy_sfa_mtp/fused_copy_sfa_mtp_torch_adpt.h"
 #include "attention/fused_li_manage/fused_li_manage_torch_adpt.h"
 #include "attention/fused_li_manage_c8/fused_li_manage_c8_torch_adpt.h"
+#include "attention/fused_li_manage_mtp_c8/fused_li_manage_mtp_c8_torch_adpt.h"
 #include "attention/fused_copy_sfa/fused_copy_sfa_torch_adpt.h"
 #include "attention/sparse_tail_attention/sparse_tail_attention_torch_adpt.h"
 #include <c10/core/Device.h>
@@ -2583,6 +2584,21 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
     );
     ops.impl("npu_fused_li_manage_c8", torch::kPrivateUse1,
              &vllm_ascend::npu_fused_li_manage_c8);
+
+    // fused_li_manage_mtp_c8 (nanovllm fused_li_manage_mtp port)
+    ops.def(
+        "npu_fused_li_manage_mtp_c8(Tensor index_weights, Tensor query_dequant_scale, "
+        "Tensor query, Tensor index_key_dequant_scale, Tensor index_key_cache, "
+        "Tensor index_block_table, Tensor actual_seq_lengths_query, "
+        "Tensor actual_seq_lengths_key, Tensor offload_seq_lengths_key, "
+        "Tensor num_cache_tokens, Tensor request_state, Tensor req_pool_entries, "
+        "Tensor(a!) cache_slots_pool, Tensor(b!) topk_src_ids, "
+        "Tensor(c!) topk_dst_slots, Tensor(d!) topk_miss_counts, "
+        "Tensor(e!) miss_src_ids, Tensor(f!) miss_dst_slots, "
+        "Tensor(g!) miss_counts) -> ()"
+    );
+    ops.impl("npu_fused_li_manage_mtp_c8", torch::kPrivateUse1,
+             &vllm_ascend::npu_fused_li_manage_mtp_c8);
 
     // fused_copy_sfa
     ops.def(

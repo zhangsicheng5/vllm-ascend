@@ -1491,6 +1491,30 @@ void npu_fused_li_manage_c8_meta(
     return;
 }
 
+void npu_fused_li_manage_mtp_c8_meta(
+    const at::Tensor &index_weights,
+    const at::Tensor &query_dequant_scale,
+    const at::Tensor &query,
+    const at::Tensor &index_key_dequant_scale,
+    const at::Tensor &index_key_cache,
+    const at::Tensor &index_block_table,
+    const at::Tensor &actual_seq_lengths_query,
+    const at::Tensor &actual_seq_lengths_key,
+    const at::Tensor &offload_seq_lengths_key,
+    const at::Tensor &num_cache_tokens,
+    const at::Tensor &request_state,
+    const at::Tensor &req_pool_entries,
+    at::Tensor cache_slots_pool,
+    at::Tensor topk_src_ids,
+    at::Tensor topk_dst_slots,
+    at::Tensor topk_miss_counts,
+    at::Tensor miss_src_ids,
+    at::Tensor miss_dst_slots,
+    at::Tensor miss_counts)
+{
+    return;
+}
+
 void npu_fused_copy_sfa_meta(
     const at::Tensor &query_rope,
     const at::Tensor &query,
@@ -1637,6 +1661,8 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
     ops.impl("npu_fused_li_manage", &vllm_ascend::meta::npu_fused_li_manage_meta);
     // fused_li_manage_c8
     ops.impl("npu_fused_li_manage_c8", &vllm_ascend::meta::npu_fused_li_manage_c8_meta);
+    // fused_li_manage_mtp_c8
+    ops.impl("npu_fused_li_manage_mtp_c8", &vllm_ascend::meta::npu_fused_li_manage_mtp_c8_meta);
     // fused_copy_sfa
     ops.impl("npu_fused_copy_sfa", &vllm_ascend::meta::npu_fused_copy_sfa_meta);
     // sparse_tail_attention

@@ -186,6 +186,7 @@ elif [[ "$SOC_VERSION" =~ ^ascend910_93 ]]; then
         "first_fill_scatter_copy"
         "fused_li_manage"
         "fused_li_manage_c8"
+        "fused_li_manage_mtp_c8"
         "fused_copy_sfa"
         "sparse_tail_attention"
     )
