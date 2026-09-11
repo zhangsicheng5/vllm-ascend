@@ -568,14 +568,16 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
     ) -> torch.Tensor:
         if not self.has_indexer:
             raise RuntimeError(f"nano fused_li_manage requires an indexer. layer_name={self.layer_name}.")
-        if self.enable_sparse_li_c8:
-            raise NotImplementedError("nano fused_li_manage does not support sparse LI C8")
-        assert self.wk_weights_proj is not None
-        assert self.wq_b is not None
-
         num_decodes = int(attn_metadata.num_decodes or 0)
         num_decode_tokens = int(attn_metadata.num_decode_tokens or 0)
         mtp_batch = getattr(attn_metadata, "mtp_batch", None)
+        # Non-MTP sparse LI C8 is not supported (revert e7c7669a0: no perf
+        # gain and small offload_lens issues); the MTP path below dispatches
+        # to npu_fused_li_manage_mtp_c8 with int8 query/key + fp16 scales.
+        if self.enable_sparse_li_c8 and mtp_batch is None:
+            raise NotImplementedError("nano fused_li_manage does not support sparse LI C8 (non-MTP)")
+        assert self.wk_weights_proj is not None
+        assert self.wq_b is not None
         if num_decodes <= 0:
             raise RuntimeError("nano fused_li_manage requires decode requests")
         if mtp_batch is None and num_decode_tokens != num_decodes:
@@ -674,26 +676,73 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
                 block_table.size(1) * block_size,
                 q_li.device,
             )
-            # The pinned floating-point LIM ABI reserves scale inputs; the
-            # kernel does not read their values (this is not LI C8 support).
-            query_scale = torch.empty(q_li.shape[:2], dtype=torch.float32, device=q_li.device)
-            key_scale = torch.empty(index_key_cache.shape[:3], dtype=torch.float32, device=q_li.device)
-            torch.ops._C_ascend.npu_fused_li_manage_mtp(
-                weights.contiguous(),
-                query_scale,
-                q_li.contiguous(),
-                key_scale,
-                index_key_cache.contiguous(),
-                block_table.contiguous(),
-                mtp_batch.query_ends,
-                mtp_batch.seq_lens,
-                mtp_batch.offload_lens,
-                mtp_batch.cache_tokens,
-                states,
-                mtp_batch.pool_entries,
-                mapping,
-                *outputs,
-            )
+            if self.enable_sparse_li_c8:
+                # Match the int8 indexer key cache, which is stored
+                # Hadamard-rotated + int8 (sfa_v1 store path). q_hadamard ==
+                # k_hadamard (orthogonal), so (qH).(kH) == q.k preserves the
+                # L2/topk retrieval semantics; per-token fp16 dequant scales
+                # are folded with index_weights inside the kernel.
+                q_li_h = q_li @ AscendSFAImpl.q_hadamard
+                q_li_i8, q_li_scale_f32 = torch_npu.npu_dynamic_quant(
+                    q_li_h.reshape(-1, self.head_dim),
+                    dst_type=self.c8_k_cache_dtype,
+                )
+                q_li = q_li_i8.view(query_rows, self.n_head, self.head_dim)
+                q_li_scale = q_li_scale_f32.to(self.c8_k_scale_cache_dtype).view(
+                    query_rows, self.n_head
+                )
+                index_key_scale = kv_cache[self.kv_cache_indexer_scale_idx]
+                if (
+                    index_key_scale.ndim == 4
+                    and index_key_scale.size(1) == block_size
+                    and index_key_scale.size(2) == 1
+                ):
+                    index_key_dequant_scale = index_key_scale.squeeze(-1)
+                else:
+                    index_key_dequant_scale = index_key_scale.view(
+                        -1, block_size, 1
+                    ).to(self.c8_k_scale_cache_dtype)
+                torch.ops._C_ascend.npu_fused_li_manage_mtp_c8(
+                    weights.contiguous(),
+                    q_li_scale.contiguous(),
+                    q_li.contiguous(),
+                    index_key_dequant_scale.contiguous(),
+                    index_key_cache.contiguous(),
+                    block_table.contiguous(),
+                    mtp_batch.query_ends,
+                    mtp_batch.seq_lens,
+                    mtp_batch.offload_lens,
+                    mtp_batch.cache_tokens,
+                    states,
+                    mtp_batch.pool_entries,
+                    mapping,
+                    *outputs,
+                )
+            else:
+                # The pinned floating-point LIM ABI reserves scale inputs; the
+                # kernel does not read their values (this is not LI C8 support).
+                query_scale = torch.empty(
+                    q_li.shape[:2], dtype=torch.float32, device=q_li.device
+                )
+                key_scale = torch.empty(
+                    index_key_cache.shape[:3], dtype=torch.float32, device=q_li.device
+                )
+                torch.ops._C_ascend.npu_fused_li_manage_mtp(
+                    weights.contiguous(),
+                    query_scale,
+                    q_li.contiguous(),
+                    key_scale,
+                    index_key_cache.contiguous(),
+                    block_table.contiguous(),
+                    mtp_batch.query_ends,
+                    mtp_batch.seq_lens,
+                    mtp_batch.offload_lens,
+                    mtp_batch.cache_tokens,
+                    states,
+                    mtp_batch.pool_entries,
+                    mapping,
+                    *outputs,
+                )
             if (
                 mtp_batch.graph_buffers is None
                 and manager.nano_debug_enabled()
