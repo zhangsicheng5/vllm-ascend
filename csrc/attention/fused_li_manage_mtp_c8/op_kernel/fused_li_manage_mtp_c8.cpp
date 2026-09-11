@@ -23,10 +23,14 @@ __aicore__ inline void PrepareNonOffloadRows(
 {
     if ASCEND_IS_AIV {
     if ((GetBlockIdx() & 1U) != 0U) return;
-    // A 4096-element block reduces a 65536-entry row from 128 vector/DMA
-    // rounds to 16, while its 16384-byte MTE3 transfer remains representable
-    // by DataCopyPad's uint16_t byte count.
-    constexpr uint32_t IDENTITY_CHUNK = 4096U;
+    // Preserve 4096-element chunks for short rows so they retain enough AIV
+    // owners.  Long rows use 8192 elements to halve each owner's serialized
+    // vector/DMA rounds; the 32768-byte MTE3 transfer remains representable by
+    // DataCopyPad's uint16_t byte count.
+    constexpr uint32_t IDENTITY_SHORT_CHUNK = 4096U;
+    constexpr uint32_t IDENTITY_LONG_CHUNK = 8192U;
+    constexpr uint32_t IDENTITY_LONG_CUTOFF = 512U * 1024U;
+    constexpr uint32_t IDENTITY_BUFFER_CAPACITY = IDENTITY_LONG_CHUNK;
     // Keep the transition cleanup independent from the -3 identity-fill
     // buffers.  Start with a conservative 512-entry DMA block; only a row
     // positively identified as an identity row uses this buffer.
@@ -54,14 +58,21 @@ __aicore__ inline void PrepareNonOffloadRows(
     TBuf<TPosition::VECCALC> transitionInvalidBuf;
     bool identityBufferReady = false;
     bool transitionCleanupBufferReady = false;
-    for (uint32_t batch = owner; batch < batchSize; batch += owners) {
+    // Every owner participates in every standard row.  The previous
+    // batch-strided assignment left all but one owner idle for BS=1, making a
+    // large identity row a single-AIV GM write.  Standard LI does not consume
+    // cacheSlots, so owners can publish disjoint chunks before the outer
+    // SyncAll without introducing a data dependency.  Keep the transition
+    // cleanup on its established one-owner-per-request assignment below.
+    for (uint32_t batch = 0U; batch < batchSize; ++batch) {
         const int32_t state = states.GetValue(batch);
         if (state != -3 && state != -1) continue;
+        if (state == -1 && batch % owners != owner) continue;
         const int32_t queryEnd = queryEnds.GetValue(batch);
         const int32_t queryStart = batch == 0U ? 0 : queryEnds.GetValue(batch - 1U);
         const int32_t routes = queryEnd - queryStart;
         const int32_t keyLength = keyLengths.GetValue(batch);
-        if (routes < 1 || routes > 7 || queryEnd > static_cast<int32_t>(totalQueries) ||
+        if (routes < 1 || routes > 14 || queryEnd > static_cast<int32_t>(totalQueries) ||
             keyLength < routes || keyLength > static_cast<int32_t>(sourceCapacity)) {
             continue;
         }
@@ -76,7 +87,7 @@ __aicore__ inline void PrepareNonOffloadRows(
                 (cacheCount & 127) != 0 ||
                 (length <= routes * 2048 && cacheCount != length) ||
                 (length > routes * 2048 &&
-                 (cacheCount < routes * 2048 || cacheCount > 16256)) ||
+                 (cacheCount < routes * 2048 || cacheCount > 32640)) ||
                 static_cast<uint32_t>(length) >
                     ((static_cast<uint32_t>(keyLength) - static_cast<uint32_t>(routes)) / 128U) * 128U) {
                 continue;
@@ -128,26 +139,32 @@ __aicore__ inline void PrepareNonOffloadRows(
             }
             continue;
         }
+        const uint32_t identityChunk =
+            sourceCapacity >= IDENTITY_LONG_CUTOFF
+                ? IDENTITY_LONG_CHUNK : IDENTITY_SHORT_CHUNK;
+        const uint32_t firstSource = owner * identityChunk;
+        if (firstSource >= sourceCapacity) continue;
         if (!identityBufferReady) {
             pipe->InitBuffer(identityBaseBuf,
-                             IDENTITY_CHUNK * sizeof(int32_t));
+                             IDENTITY_BUFFER_CAPACITY * sizeof(int32_t));
             pipe->InitBuffer(identityValuesBuf,
-                             IDENTITY_CHUNK * sizeof(int32_t));
+                             IDENTITY_BUFFER_CAPACITY * sizeof(int32_t));
             LocalTensor<int32_t> identityBase =
                 identityBaseBuf.Get<int32_t>();
             Arange<int32_t>(identityBase, 0, 1,
-                            static_cast<int32_t>(IDENTITY_CHUNK));
+                            static_cast<int32_t>(identityChunk));
             PipeBarrier<PIPE_V>();
             identityBufferReady = true;
         }
         LocalTensor<int32_t> identityBase = identityBaseBuf.Get<int32_t>();
         LocalTensor<int32_t> identityValues = identityValuesBuf.Get<int32_t>();
-        for (uint32_t source = 0U; source < sourceCapacity;
-             source += IDENTITY_CHUNK) {
+        for (uint32_t source = firstSource;
+             source < sourceCapacity;
+             source += owners * identityChunk) {
             const uint32_t valid =
-                sourceCapacity - source < IDENTITY_CHUNK
+                sourceCapacity - source < identityChunk
                     ? sourceCapacity - source
-                    : IDENTITY_CHUNK;
+                    : identityChunk;
             Adds(identityValues, identityBase, static_cast<int32_t>(source),
                  valid);
             PipeBarrier<PIPE_V>();
@@ -190,15 +207,15 @@ __aicore__ inline bool FinalizeStandardCounts(
         const uint32_t queryEnd =
             static_cast<uint32_t>(queryEnds.GetValue(batch));
         if (states.GetValue(batch) != -3 || queryEnd <= queryStart ||
-            queryEnd > totalQueries || queryEnd - queryStart > 7U) {
+            queryEnd > totalQueries || queryEnd - queryStart > 14U) {
             return false;
         }
     }
 
     TBuf<TPosition::VECCALC> countBuf;
-    pipe->InitBuffer(countBuf, 8U * sizeof(int32_t));
+    pipe->InitBuffer(countBuf, 16U * sizeof(int32_t));
     LocalTensor<int32_t> zeros = countBuf.Get<int32_t>();
-    Duplicate(zeros, 0, 8U);
+    Duplicate(zeros, 0, 16U);
     PipeBarrier<PIPE_V>();
     LIMtpC8ServiceVec::SetWaitFlag<HardEvent::V_MTE3>(HardEvent::V_MTE3);
     for (uint32_t batch = first; batch < batchSize; batch += stride) {
@@ -236,9 +253,11 @@ __aicore__ inline bool FinalizeStandardCounts(
             user + MtpC8Workspace::ScoreOffset(GetBlockNum(), tiling_data->n1Size, tiling_data->bSize);                  \
         __gm__ uint8_t *thresholdScratch =                                                                              \
             user + MtpC8Workspace::ThresholdOffset(GetBlockNum(), tiling_data->n1Size, tiling_data->bSize,               \
+                                                   tiling_data->tSize,                                                   \
                                                    tiling_data->cacheSlotsSize);                                         \
         __gm__ uint8_t *routeMissCounts =                                                                               \
             user + MtpC8Workspace::RouteCountOffset(GetBlockNum(), tiling_data->n1Size, tiling_data->bSize,              \
+                                                    tiling_data->tSize,                                                  \
                                                     tiling_data->cacheSlotsSize);                                        \
         LIMtpC8Preload<LIType<__VA_ARGS__, int32_t, true, LI_LAYOUT::TND, LI_LAYOUT::PA_BSND>> op;                           \
         op.Init(query, key, weights, queryDequantScale, keyDequantScale, reqPoolEntries, cacheSlots,                   \

@@ -31,8 +31,8 @@ namespace vllm_ascend {
 //   topk_src_ids              - int32 [T, 1, 2048], write-only
 //   topk_dst_slots            - int32 [T, 1, 2048], write-only
 //   topk_miss_counts          - int32 [T], write-only
-//   miss_src_ids              - int32 [B, 16384], write-only
-//   miss_dst_slots            - int32 [B, 16384], write-only
+//   miss_src_ids              - int32 [B, 32768], write-only
+//   miss_dst_slots            - int32 [B, 32768], write-only
 //   miss_counts               - int32 [B], write-only
 inline void npu_fused_li_manage_mtp_c8(
     const at::Tensor& index_weights, const at::Tensor& query_dequant_scale,
@@ -47,7 +47,7 @@ inline void npu_fused_li_manage_mtp_c8(
     at::Tensor topk_miss_counts, at::Tensor miss_src_ids,
     at::Tensor miss_dst_slots, at::Tensor miss_counts) {
   constexpr int64_t kTopK = 2048;
-  constexpr int64_t kMissCapacity = 16384;
+  constexpr int64_t kMissCapacity = 32768;
   constexpr int64_t kBlockSize = 128;
   TORCH_CHECK(query.dim() == 3 &&
                   (query.size(1) == 32 || query.size(1) == 64) &&
@@ -94,7 +94,7 @@ inline void npu_fused_li_manage_mtp_c8(
   TORCH_CHECK(miss_src_ids.dim() == 2 && miss_src_ids.size(0) == batch_size &&
                   miss_src_ids.size(1) == kMissCapacity &&
                   miss_dst_slots.sizes() == miss_src_ids.sizes(),
-              "LIM-MTP-C8 miss outputs must be [B, 16384].");
+              "LIM-MTP-C8 miss outputs must be [B, 32768].");
   check_batch_vector(miss_counts, "miss_counts");
 
   TORCH_CHECK(query.scalar_type() == at::kChar &&

@@ -635,7 +635,12 @@ __aicore__ inline void LIVectorMtpC8<LIT>::ProcessVec0(const LIMtpC8Common::RunI
     // cube 头归约的 fp16 A 操作数: 每个 half 广播成完整 BLOCK_CUBE 块 (Brcb),
     // 由 cube 的 WeightDmaCopy/LoadWeightToL0a 消费。weights 是 bf16 且本架构
     // 无直接 bf16->half Cast, 因此在 fp32 中相乘后一次性舍入到 fp16。
+    // 输入偏移必须含本 gS1 块的行基址 (gS1Idx * mBaseSize 个 [T,H] 元素)——
+    // 缺省时多 gS1 块 (q>8) 会复用第 0 块权重, 第二块起 topk 全错
+    // (2026-09-10 q9+ 活形态实测指纹: 前 8 路 100%, 第 9 路起 ~5%)。
     uint32_t foldNum = info.actMBaseSize;
+    const int64_t foldGmOffset = info.tensorWeightsOffset +
+        static_cast<int64_t>(info.gS1Idx) * constInfo_.mBaseSize;
     LocalTensor<float> bufUb = vec0Buf_.Get<float>();
     LocalTensor<float> scaleFloatUb = bufUb;
     LocalTensor<float> weightFloatUb = bufUb[foldNum];
@@ -646,8 +651,8 @@ __aicore__ inline void LIVectorMtpC8<LIT>::ProcessVec0(const LIMtpC8Common::RunI
     AscendC::DataCopyExtParams copyInParams{1, static_cast<uint32_t>(foldNum * sizeof(half)), 0, 0, 0};
     AscendC::DataCopyPadExtParams<half> padParams{false, 0, 0, 0};
     AscendC::DataCopyPadExtParams<bfloat16_t> padTParams{false, 0, 0, 0};
-    AscendC::DataCopyPad(scaleHalfUb, queryScaleGm_[info.tensorWeightsOffset], copyInParams, padParams);
-    AscendC::DataCopyPad(weightBf16Ub, weightsGm[info.tensorWeightsOffset], copyInParams, padTParams);
+    AscendC::DataCopyPad(scaleHalfUb, queryScaleGm_[foldGmOffset], copyInParams, padParams);
+    AscendC::DataCopyPad(weightBf16Ub, weightsGm[foldGmOffset], copyInParams, padTParams);
     SetWaitFlag<HardEvent::MTE2_V>(HardEvent::MTE2_V);
 
     AscendC::Cast(scaleFloatUb, scaleHalfUb, RoundMode::CAST_NONE, foldNum);

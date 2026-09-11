@@ -7,7 +7,7 @@ constexpr uint32_t QUERY_INDEX = 2;
 constexpr uint32_t BLOCK_TABLE_INDEX = 5;
 constexpr uint32_t CACHE_POOL_INDEX = 12;
 constexpr int64_t TOPK = 2048;
-constexpr int64_t MISS_CAPACITY = 16384;
+constexpr int64_t MISS_CAPACITY = 32768;
 
 static ge::graphStatus InferShapeFusedLiManageMtpC8(gert::InferShapeContext *context)
 {

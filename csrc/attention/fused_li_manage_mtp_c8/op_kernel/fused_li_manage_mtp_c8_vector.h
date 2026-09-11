@@ -20,22 +20,22 @@
 namespace LIMtpC8ServiceVec {
 using namespace AscendC;
 
-// The sort payload reserves 14 bits for a cache slot, leaving 18 bits for
+// The sort payload reserves 15 bits for a cache slot, leaving 17 bits for
 // the directly packed portion of a source ID. Long-source LI carries the
 // remaining bits in the score tag; keep both widths explicit so consumers do
 // not accidentally use the packed width as the logical source-ID limit.
-constexpr uint32_t PACKED_SOURCE_BITS = 18;
+constexpr uint32_t PACKED_SOURCE_BITS = 17;
 constexpr uint32_t INDEX_BITS = PACKED_SOURCE_BITS;
 constexpr uint32_t INDEX_MASK_SHIFT = 32U - INDEX_BITS;
-constexpr uint32_t INDEX_HIGH_BITS = 3;
+constexpr uint32_t INDEX_HIGH_BITS = 4;
 constexpr uint32_t LONG_SOURCE_BITS = INDEX_BITS + INDEX_HIGH_BITS;
 constexpr uint32_t PACKED_SOURCE_MASK = (1U << PACKED_SOURCE_BITS) - 1U;
 constexpr uint32_t LONG_SOURCE_MASK = (1U << LONG_SOURCE_BITS) - 1U;
 constexpr uint32_t SCORE_TAG_CLEAR_SHIFT = INDEX_HIGH_BITS;
 constexpr uint32_t SCORE_TAG_EXTRACT_SHIFT = 32U - INDEX_HIGH_BITS;
-constexpr uint32_t INVALID_FLAG_SHIFT = 14;
-constexpr int32_t INVALID_SLOT14 = (1 << INVALID_FLAG_SHIFT) - 1;
-constexpr int32_t INVALID_SLOT_DELTA = -16384;
+constexpr uint32_t INVALID_FLAG_SHIFT = 15;
+constexpr int32_t INVALID_SLOT15 = (1 << INVALID_FLAG_SHIFT) - 1;
+constexpr int32_t INVALID_SLOT_DELTA = -32768;
 
 constexpr int32_t NEG_INF = 0xFF800000;
 constexpr int32_t INVALID_INDEX = -1;
@@ -199,7 +199,7 @@ __aicore__ inline void InitSortOutBuf(const LocalTensor<float> &src, int64_t ele
 /**
   src: logits和索引，前logitsNum为logits，后logitsNum为索引
   tmp: 计算使用到的临时空间，大小与src一致
-  logitsNum: 排序的元素个数, 暂只支持[128,256,384,512,1024,2048]
+  logitsNum: 排序的元素个数, 暂只支持[128,256,384,512,1024,2048,4096]
  */
 __aicore__ inline void SortAll(LocalTensor<float> &src, LocalTensor<float> &tmp, int64_t logitsNum)
 {

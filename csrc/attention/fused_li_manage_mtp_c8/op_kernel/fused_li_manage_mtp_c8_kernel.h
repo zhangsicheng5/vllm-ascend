@@ -176,7 +176,7 @@ __aicore__ inline void LIMtpC8Preload<LIT>::InitTilingData(const FusedLiManageMt
     constInfo.batchSize = tilingData->bSize;
     constInfo.qHeadNum = constInfo.gSize = tilingData->n1Size;
     constInfo.kSeqSize = tilingData->s2Size;
-    constInfo.qSeqSize = 7U;
+    constInfo.qSeqSize = 14U;
     constInfo.attenMaskFlag = false;
     constInfo.kCacheBlockSize = tilingData->blockSize;
     constInfo.maxBlockNumPerBatch = tilingData->maxBlockNumPerBatch;
@@ -265,7 +265,7 @@ __aicore__ inline void LIMtpC8Preload<LIT>::GetS1S2ActualSeqLen(uint32_t bIdx, u
     const uint32_t queryStart = bIdx == 0U ? 0U : actualSeqLengthsGmQ.GetValue(bIdx - 1U);
     const int32_t state = requestStateGm.GetValue(bIdx);
     if (queryEnd <= queryStart || queryEnd > totalQueries ||
-        queryEnd - queryStart > 7U ||
+        queryEnd - queryStart > 14U ||
         (state != -3 && state != -2 && state != -1) ||
         actS2Size > constInfo.kSeqSize || actS2Size < actS1Size) {
         actS1Size = 0U;
@@ -632,8 +632,12 @@ __aicore__ inline void LIMtpC8Preload<LIT>::ProcessInvalid()
 {
     if ASCEND_IS_AIV {
         uint32_t aivCoreNum = GetBlockNum() * 2; // 2 means c:v = 1:2
+        uint64_t queryRows = totalQueries;
+        if constexpr (LAYOUT_T != LI_LAYOUT::TND) {
+            queryRows = constInfo.batchSize * constInfo.qSeqSize;
+        }
         uint64_t totalOutputSize =
-            constInfo.batchSize * constInfo.qSeqSize * constInfo.kHeadNum * constInfo.sparseCount;
+            queryRows * constInfo.kHeadNum * constInfo.sparseCount;
         uint64_t singleCoreSize =
             LIMtpC8Common::Align((totalOutputSize + aivCoreNum - 1) / aivCoreNum, GM_ALIGN_BYTES / sizeof(OUT_T));
         uint64_t baseSize = tmpBlockIdx * singleCoreSize;
