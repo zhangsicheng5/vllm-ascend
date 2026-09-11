@@ -85,6 +85,7 @@ def _mtp_runtime(manager) -> GeneralizedMtpRuntime:
 class AscendSFAKVOffloadMetadata(AscendSFAMetadata):
     mtp_batch: MtpBatch | None = None
     mtp_graph_capture: bool = False
+    mtp_graph_dummy: bool = False
     main_slot_mapping: torch.Tensor | None = None
     indexer_block_table: torch.Tensor | None = None
 
@@ -140,7 +141,8 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
         for_graph_capture: bool = False,
         draft_index: int = 0,
     ) -> AscendSFAMetadata:
-        if _generalized_mtp_enabled() and not for_graph_capture:
+        is_dummy = getattr(common_attn_metadata, "offload_is_dummy", False)
+        if _generalized_mtp_enabled() and not for_graph_capture and not is_dummy:
             # FIA/FlashComm padding adds artificial requests. Ownership and
             # the generalized ABI describe only the scheduled query rows.
             starts = common_attn_metadata.query_start_loc_cpu[: common_attn_metadata.num_reqs]
@@ -177,13 +179,15 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
             metadata.req_topk_buffer_slots = common_attn_metadata.req_topk_buffer_slots
             manager = get_sparse_kv_offload_manager()
             _mtp_runtime(manager)
-            if for_graph_capture:
+            if for_graph_capture or is_dummy:
                 from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp_graph import (
-                    make_capture_batch,
+                    make_dummy_batch,
                 )
 
-                metadata.mtp_graph_capture = True
-                metadata.mtp_batch = make_capture_batch(
+                metadata.mtp_graph_capture = for_graph_capture
+                metadata.mtp_graph_dummy = is_dummy
+                metadata.slot_mapping.fill_(-1)
+                metadata.mtp_batch = make_dummy_batch(
                     metadata,
                     manager,
                     self._mtp_capture_width if draft_index == 0 else 1,
@@ -196,7 +200,16 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
                     seq_lens=common_attn_metadata.seq_lens,
                     block_table=common_attn_metadata.block_table_tensor,
                 )
-                metadata.mtp_batch = make_mtp_batch(actual, manager)
+                host_lengths = getattr(common_attn_metadata, "_seq_lens_cpu", None)
+                if host_lengths is None:
+                    host_lengths = getattr(common_attn_metadata, "seq_lens_cpu", None)
+                metadata.mtp_batch = make_mtp_batch(
+                    actual,
+                    manager,
+                    query_ends_cpu=common_attn_metadata.query_start_loc_cpu[1:],
+                    seq_lens_cpu=host_lengths,
+                    pool_rows_cpu=getattr(common_attn_metadata, "req_topk_buffer_slots_cpu", None),
+                )
             if metadata.mtp_batch is None:
                 _mtp_runtime(manager).invalidate()
             return metadata
@@ -1164,7 +1177,7 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
                 "pool_rows=%s hbm_shape=%s dram_shape=%s",
                 layer_name,
                 tuple(query.shape),
-                batch.query_ends.cpu().tolist(),
+                batch.query_ends_cpu,
                 batch.pool_rows,
                 tuple(hbm_kv.shape),
                 tuple(dram_kv.shape),

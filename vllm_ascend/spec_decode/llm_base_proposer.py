@@ -1952,6 +1952,8 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
             req_ids_tensor=common_attn_metadata.req_ids_tensor,
             token_to_req=token_to_req,
             req_topk_buffer_slots=common_attn_metadata.req_topk_buffer_slots,
+            req_topk_buffer_slots_cpu=getattr(common_attn_metadata, "req_topk_buffer_slots_cpu", None),
+            offload_is_dummy=getattr(common_attn_metadata, "offload_is_dummy", False),
         )
         return spec_common_attn_metadata, token_indices
 
@@ -2050,6 +2052,8 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
             req_ids_tensor=common_attn_metadata.req_ids_tensor,
             token_to_req=common_attn_metadata.token_to_req,
             req_topk_buffer_slots=common_attn_metadata.req_topk_buffer_slots,
+            req_topk_buffer_slots_cpu=getattr(common_attn_metadata, "req_topk_buffer_slots_cpu", None),
+            offload_is_dummy=getattr(common_attn_metadata, "offload_is_dummy", False),
         )
 
         return spec_common_attn_metadata, token_indices, token_indices_to_sample, num_rejected_tokens_gpu

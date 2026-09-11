@@ -12,6 +12,7 @@ pytest.importorskip("vllm")
 from vllm_ascend.attention.attention_v1 import AscendAttentionState  # noqa: E402
 from vllm_ascend.attention.sfa_kv_offload import (  # noqa: E402
     AscendSFAKVOffloadImpl,
+    AscendSFAKVOffloadMetadata,
     AscendSFAKVOffloadMetadataBuilder,
 )
 from vllm_ascend.attention.sfa_v1 import AscendSFAMetadataBuilder  # noqa: E402
@@ -189,3 +190,51 @@ def test_generalized_fallback_lengths_survive_later_draft_builds(offload_config,
             "test.layer",
         )
     assert output.shape == query.shape
+
+
+@pytest.mark.parametrize("is_dummy", [False, True])
+def test_only_explicit_runtime_dummy_gets_synthetic_graph_metadata(offload_config, is_dummy):
+    from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp_graph import eligible_graph_steps
+
+    offload_config.sparse_kv_offload_config.generalized_mtp = True
+    lengths = torch.tensor([4], dtype=torch.int32)
+    starts = torch.tensor([0, 4], dtype=torch.int32)
+    table = torch.zeros((1, 128), dtype=torch.int32)
+    metadata = AscendSFAKVOffloadMetadata(
+        num_actual_tokens=4,
+        num_input_tokens=4,
+        slot_mapping=torch.arange(4),
+        seq_lens=lengths,
+        seq_lens_cpu=lengths,
+        cum_query_lens=starts[1:],
+        block_table=table,
+        sin=torch.zeros(4, 64),
+        cos=torch.ones(4, 64),
+    )
+    common = SimpleNamespace(
+        num_reqs=1, num_actual_tokens=4, query_start_loc_cpu=starts, query_start_loc=starts,
+        seq_lens=lengths, _seq_lens_cpu=lengths, block_table_tensor=table,
+        req_topk_buffer_slots=torch.tensor([-1 if is_dummy else 0], dtype=torch.int32),
+        req_topk_buffer_slots_cpu=torch.tensor([-1 if is_dummy else 0], dtype=torch.int32),
+        req_ids_tensor=None, token_to_req=None, offload_is_dummy=is_dummy,
+    )
+    common.unpadded = lambda *_: common
+    manager = SimpleNamespace(block_size=128, topk_buffer_size=8192, max_num_reqs=1)
+    builder = AscendSFAKVOffloadMetadataBuilder.__new__(AscendSFAKVOffloadMetadataBuilder)
+    builder.decode_threshold = 4
+    builder.is_pd_decode_consumer = True
+    builder._mtp_capture_width = 4
+    module = "vllm_ascend.attention.sfa_kv_offload."
+    with (
+        patch(module + "split_decodes_and_prefills", return_value=(1, 0, 4, 0)),
+        patch(module + "get_sparse_kv_offload_manager", return_value=manager),
+    ):
+        builder._populate_offload_metadata(metadata, common)
+    assert metadata.mtp_graph_capture is False
+    assert metadata.mtp_graph_dummy is is_dummy
+    assert eligible_graph_steps([{"owner": metadata}]) is is_dummy
+    if is_dummy:
+        assert metadata.mtp_batch.seq_lens_cpu == (8196,)
+        assert metadata.slot_mapping.tolist() == [-1] * 4
+    else:
+        assert metadata.mtp_batch is None

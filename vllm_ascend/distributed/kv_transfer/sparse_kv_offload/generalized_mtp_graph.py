@@ -71,6 +71,8 @@ class MtpGraphBuffers:
             prefix_lengths=[],
             cache_sizes=[],
             num_tokens=self.tokens,
+            query_ends_cpu=tuple((row + 1) * query_width for row in range(self.requests)),
+            seq_lens_cpu=(0,) * self.requests,
             graph_buffers=self,
         )
         self.tail_valid = zeros(self.requests * 2 * manager.block_size, torch.bool)
@@ -91,10 +93,10 @@ class MtpGraphBuffers:
         count = len(batch.pool_rows)
         # FULL_DECODE_ONLY captures uniform decode. Variable-width batches
         # remain eager rather than reusing a graph with different segmentation.
-        expected = [self.query_width * (row + 1) for row in range(count)]
-        return batch.query_ends.cpu().tolist() == expected
+        expected = tuple(self.query_width * (row + 1) for row in range(count))
+        return batch.query_ends_cpu == expected
 
-    def update(self, batch, *, is_capture=False):
+    def update(self, batch, *, is_capture=False, is_dummy=False):
         """Refresh graph inputs outside capture, on the replay's input stream."""
         if torch.npu.is_current_stream_capturing():
             raise RuntimeError("MTP graph input preparation must run before capture/replay")
@@ -103,7 +105,7 @@ class MtpGraphBuffers:
         manager, graph = self.manager, self.batch
         # Startup capture has no live requests. Select private rows before
         # constructing tables, just as for padding during normal replay.
-        count = 0 if is_capture else len(batch.pool_rows)
+        count = 0 if is_capture or is_dummy else len(batch.pool_rows)
         self.active_requests = count
         self.active_mask.zero_()
         self.active_mask[:count].fill_(True)
@@ -111,10 +113,11 @@ class MtpGraphBuffers:
         pools = batch.pool_rows[:count] + scratch
         prefixes = batch.prefix_lengths[:count] + [manager.topk_buffer_size] * (self.requests - count)
         caches = batch.cache_sizes[:count] + [manager.topk_buffer_size] * (self.requests - count)
-        lengths = batch.seq_lens[:count].cpu().tolist() + [manager.topk_buffer_size + self.query_width] * (
+        lengths = list(batch.seq_lens_cpu[:count]) + [manager.topk_buffer_size + self.query_width] * (
             self.requests - count
         )
         graph.pool_rows, graph.prefix_lengths, graph.cache_sizes = pools, prefixes, caches
+        graph.seq_lens_cpu = tuple(lengths)
         for dst, values in (
             (graph.seq_lens, lengths),
             (graph.offload_lens, prefixes),
@@ -231,8 +234,8 @@ def update_graph_metadata(destination, source, *, skip_fields=()):
                 dst.copy_(src)
 
 
-def make_capture_batch(metadata, manager, query_width):
-    """Safe, long, uniform dummy input; used only during startup capture."""
+def make_dummy_batch(metadata, manager, query_width):
+    """Uniform synthetic input for capture and all-inactive dummy replay."""
     count = min(manager.max_num_reqs, max(1, metadata.num_input_tokens // query_width))
     device = metadata.seq_lens.device
     dummy = SimpleNamespace(
@@ -243,7 +246,13 @@ def make_capture_batch(metadata, manager, query_width):
         req_topk_buffer_slots=torch.arange(count, dtype=torch.int32, device=device),
         block_table=torch.zeros((count, metadata.block_table.shape[1]), dtype=torch.int32, device=device),
     )
-    return make_mtp_batch(dummy, manager)
+    return make_mtp_batch(
+        dummy,
+        manager,
+        query_ends_cpu=tuple((row + 1) * query_width for row in range(count)),
+        seq_lens_cpu=(manager.topk_buffer_size + query_width,) * count,
+        pool_rows_cpu=tuple(range(count)),
+    )
 
 
 class MtpGraphMetadataSet:
@@ -326,7 +335,10 @@ class MtpGraphMetadataSet:
         for indexers, step in zip(self.indexer_steps, metadata_steps):
             for name, owned in indexers.items():
                 update_graph_metadata(owned, step[name])
-                if any(getattr(metadata, "mtp_graph_capture", False) for metadata in step.values()):
+                if any(
+                    getattr(metadata, "mtp_graph_capture", False) or getattr(metadata, "mtp_graph_dummy", False)
+                    for metadata in step.values()
+                ):
                     owned.slot_mapping.fill_(-1)
         for groups, step in zip(self.groups, metadata_steps):
             for owned, buffers, names in groups:
@@ -336,7 +348,11 @@ class MtpGraphMetadataSet:
                     incoming,
                     skip_fields=("cum_query_lens", "seq_lens", "block_table", "req_topk_buffer_slots"),
                 )
-                buffers.update(incoming.mtp_batch, is_capture=incoming.mtp_graph_capture)
+                buffers.update(
+                    incoming.mtp_batch,
+                    is_capture=incoming.mtp_graph_capture,
+                    is_dummy=getattr(incoming, "mtp_graph_dummy", False),
+                )
                 # Slot -1 suppresses D2H for padded query rows; active_mask
                 # independently suppresses their tail H2D descriptors.
                 active_tokens = buffers.active_requests * buffers.query_width
@@ -366,8 +382,8 @@ def eligible_graph_steps(metadata_steps):
             batch = getattr(metadata, "mtp_batch", None)
             if batch is None:
                 return False
-            ends = batch.query_ends.cpu().tolist()
-            widths = [end - start for start, end in zip([0] + ends[:-1], ends)]
+            ends = batch.query_ends_cpu
+            widths = [end - start for start, end in zip((0,) + ends[:-1], ends)]
             if not widths or len(set(widths)) != 1:
                 return False
     return found_sparse_metadata

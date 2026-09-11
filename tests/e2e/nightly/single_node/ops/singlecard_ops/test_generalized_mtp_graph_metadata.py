@@ -3,10 +3,12 @@
 """Persistent metadata and scratch ownership across NPU graph replays."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
 import torch_npu  # noqa: F401
+from vllm.config import CUDAGraphMode
 
 from vllm_ascend.attention.indexer import AscendSFAIndexerMetadata
 from vllm_ascend.attention.sfa_kv_offload import AscendSFAKVOffloadMetadata
@@ -18,6 +20,7 @@ from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.generalized_mtp_graph
     MtpGraphBuffers,
     MtpGraphMetadataSet,
     eligible_graph_steps,
+    make_dummy_batch,
 )
 from vllm_ascend.distributed.kv_transfer.sparse_kv_offload.sparse_kv_offload_manager import (
     allocate_kv_offload_topk_buffer_pair,
@@ -105,6 +108,93 @@ def test_graph_capture_uses_only_private_nonoffload_rows():
     buffers.update(batch)
     buffers.prepare_layer("owner")
     assert buffers.layers["owner"][1].cpu().tolist() == [-2, -2, -3]
+
+
+def test_runtime_dummy_keeps_residency_and_graph_checks_on_cpu(monkeypatch):
+    manager, metadata, buffers = fixture()
+    real = make_mtp_batch(metadata, manager)
+    buffers.update(real)
+    buffers.prepare_layer("owner")
+    residents = dict(buffers.runtime.residents["owner"])
+    dummy_metadata = SimpleNamespace(
+        num_input_tokens=12, seq_lens=metadata.seq_lens, block_table=metadata.block_table
+    )
+    original_cpu = torch.Tensor.cpu
+
+    def reject_device_readback(tensor, *args, **kwargs):
+        assert tensor.device.type == "cpu", "graph metadata must not read device values"
+        return original_cpu(tensor, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(torch.Tensor, "cpu", reject_device_readback)
+        dummy = make_dummy_batch(dummy_metadata, manager, 4)
+        assert eligible_graph_steps([{"owner": SimpleNamespace(mtp_batch=dummy)}])
+        assert buffers.accepts(dummy)
+        buffers.update(dummy, is_dummy=True)
+        buffers.prepare_layer("owner")
+    assert buffers.batch.pool_rows == [3, 4, 5]
+    assert buffers.active_requests == 0
+    assert not buffers.active_mask.any().item()
+    assert not buffers.tail_valid.any().item()
+    assert buffers.layers["owner"][1].cpu().tolist() == [-3, -3, -3]
+    assert buffers.runtime.residents["owner"] == residents
+    buffers.update(real)
+    buffers.prepare_layer("owner")
+    assert buffers.layers["owner"][1].cpu().tolist() == [-1, -1, -3]
+
+
+def test_wrapper_retains_full_mode_for_runtime_dummy_and_real_transitions(monkeypatch):
+    import vllm_ascend.compilation.acl_graph as graph_module
+
+    manager, source, buffers = fixture()
+    manager.generalized_mtp_runtime = buffers.runtime
+    batch = make_mtp_batch(source, manager)
+    device = source.seq_lens.device
+    metadata = AscendSFAKVOffloadMetadata(
+        num_actual_tokens=8, num_input_tokens=12,
+        slot_mapping=torch.arange(12, dtype=torch.int32, device=device),
+        seq_lens=source.seq_lens, seq_lens_cpu=source.seq_lens.cpu(),
+        cum_query_lens=source.cum_query_lens, block_table=source.block_table,
+        sin=torch.zeros(12, 64, device=device), cos=torch.ones(12, 64, device=device),
+        num_decodes=2, num_decode_tokens=8, mtp_batch=batch,
+    )
+    context = SimpleNamespace(
+        cudagraph_runtime_mode=CUDAGraphMode.FULL,
+        attn_metadata={"owner": metadata}, batch_descriptor="test-batch",
+    )
+    monkeypatch.setattr(graph_module, "get_forward_context", lambda: context)
+    monkeypatch.setattr(
+        "vllm_ascend.distributed.kv_transfer.sparse_kv_offload.sparse_kv_offload_manager.get_sparse_kv_offload_manager",
+        lambda: manager,
+    )
+    wrapper = graph_module.ACLGraphWrapper.__new__(graph_module.ACLGraphWrapper)
+    wrapper.generalized_mtp_offload = True
+    wrapper.runtime_mode = CUDAGraphMode.FULL
+    wrapper.concrete_aclgraph_entries = {}
+    wrapper.runnable = Mock(side_effect=AssertionError("unexpected local eager fallback"))
+    modes = []
+
+    def graph_call():
+        modes.append(context.cudagraph_runtime_mode)
+        return context.attn_metadata["owner"].mtp_batch
+
+    wrapper._call_graph = graph_call
+    live = wrapper()
+    pointer = live.seq_lens.data_ptr()
+    metadata.mtp_batch = make_dummy_batch(metadata, manager, 4)
+    metadata.mtp_graph_dummy = True
+    dummy = wrapper()
+    assert dummy.seq_lens.data_ptr() == pointer
+    assert dummy.graph_buffers.active_requests == 0
+    assert dummy.graph_buffers.layers["owner"][1].cpu().tolist() == [-3] * 3
+    metadata.mtp_batch = batch
+    metadata.mtp_graph_dummy = False
+    metadata.slot_mapping.copy_(torch.arange(12, dtype=torch.int32, device=device))
+    restored = wrapper()
+    assert restored.seq_lens.data_ptr() == pointer
+    assert restored.graph_buffers.layers["owner"][1].cpu().tolist() == [-1, -1, -3]
+    assert modes == [CUDAGraphMode.FULL] * 3
+    wrapper.runnable.assert_not_called()
 
 
 def test_padding_cache_and_tail_are_initialized_without_touching_live_rows(monkeypatch):

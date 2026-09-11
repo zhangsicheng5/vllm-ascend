@@ -247,8 +247,6 @@ class AscendRejectionSampler(RejectionSampler):
             ori_target_logits=raw_target_logits,
         )
 
-        self._log_rejection_sampler_exit(output_token_ids, metadata)
-
         logprobs_tensors = None
         if sampling_metadata.max_num_logprobs is not None:
             logprobs_tensors = self._get_logprobs_tensors(
@@ -295,39 +293,6 @@ class AscendRejectionSampler(RejectionSampler):
             self.sampler.logprobs_mode,
             self.is_processed_logprobs_mode,
             self.top_k,
-        )
-
-    def _log_rejection_sampler_exit(
-        self,
-        output_token_ids: torch.Tensor,
-        metadata: SpecDecodeMetadata,
-    ) -> None:
-        """DFX exit probe (acceptance signal) for rejection sampling.
-
-        Reports placeholder fill rate and an approximate acceptance ratio so
-        operators can tell at a glance whether the draft/target pairing is
-        healthy. The .ne()/.sum() calls force a host sync and only run when
-        DEBUG is on; production paths return early.
-        """
-        if not logger.isEnabledFor(logging.DEBUG):
-            return
-        valid_mask = output_token_ids.ne(PLACEHOLDER_TOKEN_ID)
-        num_accepted = int(valid_mask.sum().item())
-        num_slots = int(output_token_ids.numel())
-        num_total_drafts = (
-            int(metadata.num_draft_tokens.sum().item())
-            if torch.is_tensor(metadata.num_draft_tokens)
-            else sum(metadata.num_draft_tokens)
-        )
-        logger.debug(
-            "[spec/dfx] rejection_sampler done: "
-            "accepted=%d/%d (slot_fill=%.1f%%), drafted=%d, "
-            "approx_accept_rate=%.1f%%",
-            num_accepted,
-            num_slots,
-            100.0 * num_accepted / max(num_slots, 1),
-            num_total_drafts,
-            100.0 * num_accepted / max(num_total_drafts + output_token_ids.shape[0], 1),
         )
 
 

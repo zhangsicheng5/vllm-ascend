@@ -6,6 +6,7 @@ Registered host KV supplies sparse misses and bounded circular HBM tails.
 Colocated execution may additionally retain a full device cache for prefill.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import torch
@@ -55,10 +56,34 @@ class MtpBatch:
     prefix_lengths: list[int]
     cache_sizes: list[int]
     num_tokens: int
+    query_ends_cpu: tuple[int, ...]
+    seq_lens_cpu: tuple[int, ...]
     graph_buffers: object | None = None
 
 
-def make_mtp_batch(metadata, manager) -> MtpBatch | None:
+def _host_snapshot(values, tensor, count):
+    # Standalone operator callers may only supply device metadata. Serving
+    # passes exact CPU mirrors and never takes this compatibility readback.
+    if values is None:
+        values = tensor[:count].cpu()
+    if isinstance(values, torch.Tensor):
+        if values.device.type != "cpu":
+            raise ValueError("MTP host metadata must be on CPU")
+        values = values[:count].tolist()
+    snapshot = tuple(int(value) for value in values[:count])
+    if len(snapshot) != count:
+        raise ValueError("MTP host metadata is shorter than the request batch")
+    return snapshot
+
+
+def make_mtp_batch(
+    metadata,
+    manager,
+    *,
+    query_ends_cpu: Sequence[int] | torch.Tensor | None = None,
+    seq_lens_cpu: Sequence[int] | torch.Tensor | None = None,
+    pool_rows_cpu: Sequence[int] | torch.Tensor | None = None,
+) -> MtpBatch | None:
     """Snapshot scheduled lengths, including rejection-adjusted drafts."""
     if metadata.num_prefills or not metadata.num_decodes:
         return None
@@ -73,8 +98,8 @@ def make_mtp_batch(metadata, manager) -> MtpBatch | None:
             memory_format=torch.contiguous_format,
         )
     )
-    ends = query_ends.cpu().tolist()
-    widths = [end - start for start, end in zip([0] + ends[:-1], ends)]
+    ends = _host_snapshot(query_ends_cpu, query_ends, count)
+    widths = [end - start for start, end in zip((0,) + ends[:-1], ends)]
     seq_lens = (
         metadata.seq_lens[:count]
         .to(dtype=torch.int32)
@@ -82,7 +107,7 @@ def make_mtp_batch(metadata, manager) -> MtpBatch | None:
             memory_format=torch.contiguous_format,
         )
     )
-    lengths = seq_lens.cpu().tolist()
+    lengths = _host_snapshot(seq_lens_cpu, seq_lens, count)
     block_size = manager.block_size
     prefixes = [(length - width) // block_size * block_size for length, width in zip(lengths, widths)]
     if any(width < 1 or width > 7 for width in widths):
@@ -102,7 +127,7 @@ def make_mtp_batch(metadata, manager) -> MtpBatch | None:
             memory_format=torch.contiguous_format,
         )
     )
-    pool_rows = pools.cpu().tolist()
+    pool_rows = list(_host_snapshot(pool_rows_cpu, pools, count))
     if len(set(pool_rows)) != count or any(pool < 0 or pool >= manager.max_num_reqs for pool in pool_rows):
         raise ValueError("Generalized MTP requests must occupy distinct pool rows")
     device = seq_lens.device
@@ -140,6 +165,8 @@ def make_mtp_batch(metadata, manager) -> MtpBatch | None:
         prefixes,
         caches,
         ends[-1],
+        ends,
+        lengths,
     )
 
 

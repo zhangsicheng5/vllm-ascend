@@ -840,6 +840,43 @@ class TestNPUModelRunnerDebugger(unittest.TestCase):
         runner._start_dump_data.assert_called_once_with(scheduled_tokens={"req0": 1})
 
 
+class TestOffloadDummyRequestOwnership(unittest.TestCase):
+    def test_dummy_does_not_claim_retained_waiting_requests(self):
+        runner = NPUModelRunner.__new__(NPUModelRunner)
+        runner.kv_cache_config = SimpleNamespace(kv_cache_groups=[object()])
+        runner.sparse_kv_offload_enabled = True
+        runner.sparse_kv_offload_config = SimpleNamespace(generalized_mtp=True)
+        runner.input_batch = SimpleNamespace(req_ids=["waiting-request"])
+        runner.query_start_loc = None
+        runner.block_size = 128
+        runner.decode_threshold = 4
+        runner._positions_np_buf = np.arange(4)
+        runner.optimistic_seq_lens_cpu = torch.tensor([4])
+        for name in (
+            "req_ids_tensor",
+            "token_to_req",
+            "req_topk_buffer_slots",
+            "device_slot_mapping",
+            "device_block_table",
+            "seq_lengths_key",
+            "cache_state",
+            "cache_slots_pool",
+        ):
+            setattr(runner, f"_offload_{name}", None)
+
+        for is_dummy in (False, True):
+            with self.subTest(is_dummy=is_dummy):
+                with patch(
+                    "vllm_ascend.worker.model_runner_v1.update_sparse_kv_offload_metadata",
+                    side_effect=RuntimeError("metadata captured"),
+                ) as update_metadata:
+                    with self.assertRaisesRegex(RuntimeError, "metadata captured"):
+                        runner._build_attention_metadata(
+                            num_tokens=4, num_reqs=1, max_query_len=4, offload_is_dummy=is_dummy
+                        )
+                self.assertEqual(update_metadata.call_args.args[5], [] if is_dummy else ["waiting-request"])
+
+
 class TestCorrectOptimisticSeqLensCpu(unittest.TestCase):
     """Regression tests for async spec-decode seq_lens correction.
 

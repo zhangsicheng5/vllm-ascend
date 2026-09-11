@@ -103,6 +103,32 @@ def test_batch_metadata_survives_builder_buffer_reuse():
     torch.testing.assert_close(batch.source_block_table, expected_blocks, rtol=0, atol=0)
 
 
+def test_host_snapshots_remove_readbacks_and_survive_reuse(monkeypatch):
+    manager, metadata = fixture()
+    ends = metadata.cum_query_lens.cpu()
+    lengths = metadata.seq_lens.cpu()
+    pools = metadata.req_topk_buffer_slots.cpu()
+    original_cpu = torch.Tensor.cpu
+
+    def reject_device_readback(tensor, *args, **kwargs):
+        assert tensor.device.type == "cpu", "unexpected MTP metadata device readback"
+        return original_cpu(tensor, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(torch.Tensor, "cpu", reject_device_readback)
+        batch = make_mtp_batch(
+            metadata, manager, query_ends_cpu=ends, seq_lens_cpu=lengths, pool_rows_cpu=pools
+        )
+    ends.zero_()
+    lengths.zero_()
+    pools.fill_(-1)
+    assert batch.query_ends_cpu == (1, 5)
+    assert batch.seq_lens_cpu == (8450, 8195)
+    assert batch.pool_rows == [2, 0]
+    assert batch.prefix_lengths == [8448, 8064]
+    torch.testing.assert_close(batch.seq_lens, metadata.seq_lens)
+
+
 @pytest.mark.parametrize("heads", [8, 16, 32, 64, 128])
 def test_native_head_queries_preserve_contiguous_storage(heads):
     query = torch.randn(5, heads, 512, dtype=torch.bfloat16, device="npu:0")
@@ -141,6 +167,7 @@ def test_unpadded_metadata_preserves_offload_pool_ownership(with_offload):
         ),
         slot_mapping=torch.arange(16, dtype=torch.int64, device="npu:0"),
         req_topk_buffer_slots=(torch.tensor([2, 0, -1], dtype=torch.int32, device="npu:0") if with_offload else None),
+        req_topk_buffer_slots_cpu=(torch.tensor([2, 0, -1], dtype=torch.int32) if with_offload else None),
     )
     unpadded = common.unpadded(num_actual_tokens=5, num_actual_reqs=2)
     if not with_offload:
@@ -150,6 +177,7 @@ def test_unpadded_metadata_preserves_offload_pool_ownership(with_offload):
     # Nontrivial pool order must survive token/request padding removal;
     # the padded -1 row must never reach the draft's generalized LIM batch.
     assert unpadded.req_topk_buffer_slots.cpu().tolist() == [2, 0]
+    assert unpadded.req_topk_buffer_slots_cpu.tolist() == [2, 0]
     metadata.cum_query_lens = unpadded.query_start_loc[1:]
     metadata.seq_lens = unpadded.seq_lens
     metadata.block_table = unpadded.block_table_tensor

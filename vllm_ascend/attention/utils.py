@@ -255,6 +255,10 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
     # Sparse KV offload & nano fused op related metadata
     # topk_buffer slot id of each request in current batch (req_pool_entries)
     req_topk_buffer_slots: torch.Tensor | None = None
+    # Ordered CPU ownership mirror, snapshotted by generalized offload batches.
+    req_topk_buffer_slots_cpu: torch.Tensor | None = None
+    # Explicit runtime dummy identity; a real short-prefix request is not dummy.
+    offload_is_dummy: bool = False
     # slot_mapping & block_table corresponding to device kv cache (topk_buffer + 2 tail blocks)
     device_slot_mapping: torch.Tensor | None = None
     device_block_table: torch.Tensor | None = None
@@ -324,6 +328,8 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
             # FlashComm padding is removed before MTP drafting. Keep each
             # remaining request's offload pool ownership through that copy.
             req_topk_buffer_slots=_slice_reqs(self.req_topk_buffer_slots),
+            req_topk_buffer_slots_cpu=_slice_reqs(self.req_topk_buffer_slots_cpu),
+            offload_is_dummy=self.offload_is_dummy,
         )
 
 

@@ -454,9 +454,12 @@ class NPUModelRunner(GPUModelRunner):
         # Backends that consume CPU seq_lens (AscendAttentionBackend,
         # AscendMLABackend, and DSV4 compressed attention metadata) need
         # ``optimistic_seq_lens_cpu`` to match the corrected GPU seq_lens
-        # in async spec decode mode; others (SFA, GDN, etc.) do not.
-        self._needs_seq_lens_cpu_sync = self.use_compress or issubclass(
-            self.attn_backend, (AscendAttentionBackend, AscendMLABackend)
+        # in async spec decode mode. Generalized SFA offload also consumes
+        # exact CPU lengths when preparing its graph and tail metadata.
+        self._needs_seq_lens_cpu_sync = (
+            self.use_compress
+            or issubclass(self.attn_backend, (AscendAttentionBackend, AscendMLABackend))
+            or getattr(self.ascend_config.sparse_kv_offload_config, "generalized_mtp", False)
         )
 
         # kv role
@@ -2888,6 +2891,7 @@ class NPUModelRunner(GPUModelRunner):
         logits_indices: torch.Tensor | None = None,
         use_spec_decode: bool = False,
         for_cudagraph_capture: bool = False,
+        offload_is_dummy: bool = False,
         num_scheduled_tokens: dict[str, int] | None = None,
         num_scheduled_tokens_np: np.ndarray | None = None,
         cascade_attn_prefix_lens: list[list[int]] | None = None,
@@ -2901,13 +2905,16 @@ class NPUModelRunner(GPUModelRunner):
         num_tokens_padded = num_tokens_padded or num_tokens
         num_reqs_padded = num_reqs_padded or num_reqs
         if self.sparse_kv_offload_enabled:
+            # A runtime dummy may coexist with retained waiting requests. It
+            # must not allocate or update their offload cache ownership.
+            offload_req_ids = [] if offload_is_dummy else self.input_batch.req_ids[:num_reqs]
             update_sparse_kv_offload_metadata(
                 self.sparse_kv_offload_config,
                 num_tokens,
                 num_reqs,
                 num_tokens_padded,
                 num_reqs_padded,
-                self.input_batch.req_ids[:num_reqs],
+                offload_req_ids,
                 self.query_start_loc,
                 num_scheduled_tokens_np,
                 self.block_size,
@@ -3058,6 +3065,12 @@ class NPUModelRunner(GPUModelRunner):
                 else None
             ),
             req_topk_buffer_slots=_get_valid_meta(self._offload_req_topk_buffer_slots, num_reqs_padded),
+            req_topk_buffer_slots_cpu=(
+                self._offload_req_topk_buffer_slots.cpu[:num_reqs_padded]
+                if getattr(self.sparse_kv_offload_config, "generalized_mtp", False)
+                else None
+            ),
+            offload_is_dummy=offload_is_dummy,
             device_slot_mapping=_get_valid_meta(self._offload_device_slot_mapping, num_tokens_padded),
             device_block_table=_get_valid_meta(self._offload_device_block_table, num_reqs_padded),
             offload_seq_lengths_key=_get_valid_meta(self._offload_seq_lengths_key, num_reqs_padded),
@@ -3412,6 +3425,11 @@ class NPUModelRunner(GPUModelRunner):
                     max_query_len=max_query_len,
                     ubatch_slices=ubatch_slices_padded if pad_attn else ubatch_slices,
                     for_cudagraph_capture=is_graph_capturing,
+                    offload_is_dummy=(
+                        cudagraph_runtime_mode == CUDAGraphMode.FULL
+                        and not is_graph_capturing
+                        and getattr(self.sparse_kv_offload_config, "generalized_mtp", False)
+                    ),
                     num_scheduled_tokens_np=num_scheduled_tokens,
                 )
                 if not is_graph_capturing:
