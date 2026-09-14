@@ -337,10 +337,16 @@ def assert_correctness_c8(case: dict[str, object]) -> None:
             # Precision: dual-oracle top-k overlap (int8 cannot be exact).
             overlaps_a.append(_topk_overlap(actual_topk, bf_src[route, 0, :valid], valid))
             overlaps_b.append(_topk_overlap(actual_topk, reference[route, :valid], valid))
-        # Request-level miss count bounds; non-offload requests miss nothing.
-        assert 0 <= int(miss_count[request]) <= TOPK
+        # Request-level miss count (output[5], per-request; NOT the per-route
+        # topk_miss_counts which is bounded by TOPK). -3 non-offload -> 0;
+        # -2 first fill -> full cache budget; -1 steady -> new misses <= budget.
+        cap = case["cache_tokens"][request]
         if state == -3:
             assert int(miss_count[request]) == 0
+        elif state == -2:
+            assert int(miss_count[request]) == cap
+        else:
+            assert 0 <= int(miss_count[request]) <= cap
         query_start = query_end
 
     min_a = min(overlaps_a) if overlaps_a else 0.0
@@ -350,7 +356,10 @@ def assert_correctness_c8(case: dict[str, object]) -> None:
     assert min_b >= HIT_RATE, f"C8 vs native lightning top-k overlap {min_b:.4f} < {HIT_RATE}"
 
 
-@pytest.mark.parametrize("heads,dtype", [(32, "bf16"), (64, "fp16")])
+# mtp_c8 requires index_weights bf16 (OpDef DT_BF16) and quantizes query/key
+# to int8, so the bf16/fp16 dtype param from the non-C8 mtp e2e is meaningless
+# here — vary heads only, keep bf16.
+@pytest.mark.parametrize("heads,dtype", [(32, "bf16"), (64, "bf16")])
 def test_generalized_lim_c8_mixed_states_and_query_counts(heads, dtype):
     args = argparse.Namespace(
         source_capacity=16384, offload_len=8192, cache_tokens=8192, seed=7, dtype=dtype, heads=heads, device="npu:0"
