@@ -238,3 +238,201 @@ def test_only_explicit_runtime_dummy_gets_synthetic_graph_metadata(offload_confi
         assert metadata.slot_mapping.tolist() == [-1] * 4
     else:
         assert metadata.mtp_batch is None
+# ---------------------------------------------------------------------------
+# Sparse LI C8 dispatch contract in _nano_fused_li_manage (MTP path):
+# CPU-mockable tests for the guard, op selection, and int8/fp16 tensor
+# preparation. NPU-side top-k precision lives in tests/ut/ops.
+# ---------------------------------------------------------------------------
+
+_LIM_N_HEAD = 32
+_LIM_HEAD_DIM = 128
+_LIM_NUM_DECODES = 2
+_LIM_TOKENS_PER_REQ = 7
+_LIM_T = _LIM_NUM_DECODES * _LIM_TOKENS_PER_REQ
+_LIM_BLOCKS = 8
+
+
+def _lim_impl(*, enable_c8: bool):
+    impl = AscendSFAKVOffloadImpl.__new__(AscendSFAKVOffloadImpl)
+    impl.has_indexer = True
+    impl.enable_sparse_li_c8 = enable_c8
+    impl.enable_sparse_sfa_c8 = False  # default layout: indexer_k=2, scale=3
+    impl.n_head = _LIM_N_HEAD
+    impl.head_dim = _LIM_HEAD_DIM
+    impl.qk_rope_head_dim = 64
+    impl.is_rope_neox_style = False
+    impl.c8_k_cache_dtype = torch.int8
+    impl.c8_k_scale_cache_dtype = torch.float16
+    impl.layer_name = "test.layer"
+    impl._offload_layer_name = lambda: "test.layer"
+    return impl
+
+
+def _lim_mtp_metadata():
+    block_table = torch.zeros((_LIM_NUM_DECODES, _LIM_BLOCKS), dtype=torch.int32)
+    mtp_batch = SimpleNamespace(
+        num_tokens=_LIM_T,
+        source_block_table=block_table,
+        query_ends=torch.tensor([_LIM_TOKENS_PER_REQ, _LIM_T], dtype=torch.int32),
+        seq_lens=torch.full((_LIM_NUM_DECODES,), 8192, dtype=torch.int32),
+        offload_lens=torch.full((_LIM_NUM_DECODES,), 4096, dtype=torch.int32),
+        cache_tokens=torch.full((_LIM_NUM_DECODES,), 2048, dtype=torch.int32),
+        pool_entries=torch.arange(_LIM_NUM_DECODES, dtype=torch.int32),
+        prefix_lengths=[4096] * _LIM_NUM_DECODES,
+        cache_sizes=[2048] * _LIM_NUM_DECODES,
+        graph_buffers=None,
+    )
+    return SimpleNamespace(
+        num_decodes=_LIM_NUM_DECODES,
+        num_decode_tokens=_LIM_T,
+        num_prefills=0,
+        mtp_batch=mtp_batch,
+        block_table=block_table,
+        req_topk_buffer_slots=torch.arange(_LIM_NUM_DECODES, dtype=torch.int32),
+        indexer_block_table=None,
+    )
+
+
+def _lim_kv_cache():
+    index_key = torch.zeros(
+        (_LIM_BLOCKS, _LIM_HEAD_DIM, 1, _LIM_HEAD_DIM), dtype=torch.int8
+    )
+    index_key_scale = torch.zeros(
+        (_LIM_BLOCKS, _LIM_HEAD_DIM, 1, 1), dtype=torch.float16
+    )
+    return (None, None, index_key, index_key_scale)
+
+
+def _run_lim_dispatch(*, enable_c8: bool):
+    """Drive _nano_fused_li_manage end-to-end with mocked deps; return records."""
+    import torch_npu
+    from contextlib import ExitStack
+    from unittest.mock import MagicMock
+
+    from vllm_ascend.attention import sfa_kv_offload as mod
+    from vllm_ascend.attention.sfa_v1 import AscendSFAImpl
+
+    impl = _lim_impl(enable_c8=enable_c8)
+    metadata = _lim_mtp_metadata()
+    kv_cache = _lim_kv_cache()
+
+    torch.manual_seed(0)
+    q_li_flat = torch.randn((_LIM_T, _LIM_N_HEAD * _LIM_HEAD_DIM), dtype=torch.bfloat16)
+    kw = torch.randn((_LIM_T, _LIM_HEAD_DIM + _LIM_N_HEAD), dtype=torch.bfloat16)
+    impl.wq_b = MagicMock(return_value=(q_li_flat, None))
+    impl.wk_weights_proj = MagicMock(return_value=(kw, None))
+    q_li_raw = q_li_flat.view(_LIM_T, _LIM_N_HEAD, _LIM_HEAD_DIM)
+
+    # Non-identity orthogonal stand-in for the shared Hadamard matrix: a
+    # column-reversing permutation. Exact (no float error), so a forgotten
+    # rotation (input == raw) is distinguishable from an applied one.
+    hadamard = torch.zeros((_LIM_HEAD_DIM, _LIM_HEAD_DIM), dtype=torch.bfloat16)
+    for i in range(_LIM_HEAD_DIM):
+        hadamard[i, _LIM_HEAD_DIM - 1 - i] = 1.0
+
+    m_c8 = MagicMock()
+    m_mtp = MagicMock()
+    quant_inputs = []
+
+    def fake_quant(inp, dst_type=None):
+        quant_inputs.append(inp.detach().clone())
+        return inp.to(torch.int8), torch.ones(inp.shape[0], dtype=torch.float32)
+
+    manager = SimpleNamespace(
+        block_size=_LIM_HEAD_DIM, nano_debug_enabled=lambda: False
+    )
+    runtime = MagicMock()
+    mapping = torch.zeros(
+        (_LIM_NUM_DECODES, _LIM_BLOCKS * _LIM_HEAD_DIM), dtype=torch.int32
+    )
+    states = torch.zeros((_LIM_NUM_DECODES,), dtype=torch.int32)
+    outputs = (
+        torch.zeros((_LIM_T, 1, 2048), dtype=torch.int32),
+        torch.zeros((_LIM_T, 1, 2048), dtype=torch.int32),
+        torch.zeros((_LIM_T,), dtype=torch.int32),
+        torch.zeros((_LIM_NUM_DECODES, 32768), dtype=torch.int32),
+        torch.zeros((_LIM_NUM_DECODES, 32768), dtype=torch.int32),
+        torch.zeros((_LIM_NUM_DECODES,), dtype=torch.int32),
+    )
+    runtime.prepare_lim.return_value = (mapping, states, outputs)
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(torch.ops._C_ascend, "npu_fused_li_manage_mtp_c8", m_c8, create=True)
+        )
+        stack.enter_context(
+            patch.object(torch.ops._C_ascend, "npu_fused_li_manage_mtp", m_mtp, create=True)
+        )
+        stack.enter_context(patch.object(torch_npu, "npu_dynamic_quant", fake_quant))
+        stack.enter_context(patch.object(AscendSFAImpl, "q_hadamard", hadamard))
+        stack.enter_context(patch.object(mod, "HAS_TRITON", True))
+        stack.enter_context(patch.object(mod, "rope_forward_triton_siso", lambda *a, **k: a[0]))
+        stack.enter_context(patch.object(mod, "get_sparse_kv_offload_manager", return_value=manager))
+        stack.enter_context(patch.object(mod, "_mtp_runtime", return_value=runtime))
+        result = impl._nano_fused_li_manage(
+            torch.zeros((_LIM_T, 512), dtype=torch.bfloat16),
+            torch.zeros((_LIM_T, 512), dtype=torch.bfloat16),
+            kv_cache,
+            metadata,
+            torch.zeros(64, dtype=torch.bfloat16),
+            torch.zeros(64, dtype=torch.bfloat16),
+            torch.zeros((_LIM_NUM_DECODES,), dtype=torch.int32),
+        )
+
+    return {
+        "result": result,
+        "m_c8": m_c8,
+        "m_mtp": m_mtp,
+        "quant_inputs": quant_inputs,
+        "q_li_raw": q_li_raw,
+        "hadamard": hadamard,
+        "outputs": outputs,
+    }
+
+
+def test_li_c8_non_mtp_path_still_raises():
+    impl = _lim_impl(enable_c8=True)
+    metadata = SimpleNamespace(num_decodes=1, num_decode_tokens=1)
+    with pytest.raises(NotImplementedError, match="non-MTP"):
+        impl._nano_fused_li_manage(None, None, None, metadata, None, None, None)
+
+
+def test_li_c8_mtp_dispatches_to_c8_op_with_int8_inputs():
+    rec = _run_lim_dispatch(enable_c8=True)
+    assert rec["m_c8"].called, "C8 path must call npu_fused_li_manage_mtp_c8"
+    assert not rec["m_mtp"].called, "C8 path must not call the bf16 mtp op"
+
+    args = rec["m_c8"].call_args.args
+    weights, q_scale, query, key_scale, index_key_cache = args[:5]
+    assert weights.dtype == torch.bfloat16, "index_weights must be bf16"
+    assert q_scale.dtype == torch.float16, "query_dequant_scale must be fp16"
+    assert tuple(q_scale.shape) == (_LIM_T, _LIM_N_HEAD)
+    assert query.dtype == torch.int8, "query must be int8 after Hadamard+quant"
+    assert tuple(query.shape) == (_LIM_T, _LIM_N_HEAD, _LIM_HEAD_DIM)
+    assert key_scale.dtype == torch.float16, "index_key_dequant_scale must be fp16"
+    assert key_scale.ndim == 3, "key dequant scale must be 3D [blocks,128,1]"
+    assert tuple(key_scale.shape) == (_LIM_BLOCKS, _LIM_HEAD_DIM, 1)
+    assert index_key_cache.dtype == torch.int8, "index_key_cache must be int8"
+
+    # Hadamard was actually applied before quant (forgotten rotation would make
+    # the quant input equal the raw q_li, which differs from q_li @ hadamard).
+    assert rec["quant_inputs"], "npu_dynamic_quant must be called once"
+    expected = (rec["q_li_raw"] @ rec["hadamard"]).reshape(-1, _LIM_HEAD_DIM)
+    assert torch.equal(rec["quant_inputs"][0], expected), (
+        "query must be Hadamard-rotated before int8 quant"
+    )
+    assert rec["result"] is rec["outputs"][0]
+
+
+def test_li_non_c8_mtp_still_uses_bf16_mtp_op():
+    rec = _run_lim_dispatch(enable_c8=False)
+    assert rec["m_mtp"].called, "non-C8 path must call npu_fused_li_manage_mtp"
+    assert not rec["m_c8"].called, "non-C8 path must not call the c8 op"
+    assert not rec["quant_inputs"], "non-C8 path must not quantize the query"
+
+    args = rec["m_mtp"].call_args.args
+    # weights, placeholder query_scale, q_li, placeholder key_scale, index_key
+    weights, query_scale, query, key_scale, _ = args[:5]
+    assert query_scale.dtype == torch.float32, "non-C8 uses fp32 placeholder scale"
+    assert key_scale.dtype == torch.float32, "non-C8 uses fp32 placeholder scale"
+    assert query.dtype == torch.bfloat16, "non-C8 query stays bf16"
