@@ -48,7 +48,6 @@ def common(ends, lengths, pools=(1, 0), generations=(11, 12)):
         block_table_tensor=torch.arange(count * 128, dtype=torch.int32, device="npu").reshape(count, 128),
         req_ids_tensor=None,
         token_to_req=None,
-        nano_eligible=True,
         offload_dummy=False,
         max_query_len=4,
         num_reqs=count,
@@ -69,6 +68,7 @@ def populate(builder, cm, draft_index=None):
 
 def make_impl():
     impl = AscendSFAKVOffloadImpl.__new__(AscendSFAKVOffloadImpl)
+    impl.nano_hot_tokens = 8192
     impl.nano_states = torch.empty(4, dtype=torch.int32, device="npu")
     impl.nano_last_generation = torch.full((8,), -1, dtype=torch.int64, device="npu")
     impl.nano_last_prefix = torch.zeros(8, dtype=torch.int32, device="npu")
@@ -121,6 +121,65 @@ def test_generation_compaction_and_prefix_rollback_reset():
     cm.seq_lens[1] = 10243
     impl._prepare_nano_lim_state(populate(builder, cm))
     assert impl.nano_states[:2].cpu().tolist() == [-2, -2]
+
+
+def test_short_row_dense_geometry_in_mixed_batch():
+    builder = make_builder()
+    # Row 0: short (aligned prefix 4992 < hot 8192), row 1: long.
+    cm = common([4, 8], [5000, 10371])
+    metadata = populate(builder, cm)
+    assert metadata.nano_is_short.cpu().tolist() == [True, False]
+    assert metadata.nano_prefix_lens.cpu().tolist() == [4992, 10240]
+    # Short rows run copy-SFA's dense mode (C == 0) and see the whole
+    # sequence; long rows keep the full hot budget.
+    assert metadata.nano_cache_tokens.cpu().tolist() == [0, 8192]
+    assert metadata.nano_logical_lens.cpu().tolist() == [5000, 8323]
+    # Short row: identity block table for every stride block, zero tail, and
+    # front-to-back device slots (token p -> row slot p).
+    stride_blocks = 8192 // 128 + 2
+    assert metadata.nano_hbm_block_table[0].cpu().tolist() == [1 * stride_blocks + b for b in range(stride_blocks)]
+    assert metadata.nano_tail_lengths[0].cpu().tolist() == [0, 0]
+    assert metadata.nano_device_slots[:4].cpu().tolist() == [1 * (8192 + 256) + 4996 + p for p in range(4)]
+    # Long row keeps the ring-tail geometry.
+    long_ring = metadata.nano_hbm_block_table[1, 64:66].cpu().tolist()
+    assert long_ring == [
+        stride_blocks - 2 + (10240 // 128 + 64 - 64) % 2,
+        stride_blocks - 2 + (10240 // 128 + 65 - 64) % 2,
+    ]
+    assert metadata.nano_tail_lengths[1].cpu().tolist() == [127, 0]
+    assert metadata.nano_device_slots[4:].cpu().tolist() == [8192 + (10367 + p) % 256 for p in range(4)]
+
+
+def test_short_lifecycle_minus3_minus2_minus1():
+    builder, impl = make_builder(), make_impl()
+    # Short rows always run -3 (dense, C == 0): the row content is provided
+    # by the PD dense D2D / the eager full-row fill, not by a -2 rebuild.
+    cm = common([4], [5000], pools=(1,), generations=(11,))
+    for _ in range(3):
+        impl._prepare_nano_lim_state(populate(builder, cm))
+        assert impl.nano_states[:1].cpu().tolist() == [-3]
+    # Growth past the hot budget: the cache flip (0 -> hot) forces the -2
+    # offload init, then -1 steady state.
+    cm.seq_lens[0] = 8196
+    impl._prepare_nano_lim_state(populate(builder, cm))
+    assert impl.nano_states[:1].cpu().tolist() == [-2]
+    impl._prepare_nano_lim_state(populate(builder, cm))
+    assert impl.nano_states[:1].cpu().tolist() == [-1]
+    # Rollback below the budget: directly back to -3; the runner separately
+    # refills the row because the sparse layout is unreadable in dense mode.
+    cm.seq_lens[0] = 5000
+    impl._prepare_nano_lim_state(populate(builder, cm))
+    assert impl.nano_states[:1].cpu().tolist() == [-3]
+
+
+def test_tiny_row_stays_minus3_without_legal_init():
+    builder, impl = make_builder(), make_impl()
+    # L < 2048 has no legal -2 (operator contract), so the row must stay -3;
+    # in PD the read thread has already populated the dense content.
+    cm = common([4], [500], pools=(1,), generations=(11,))
+    for _ in range(3):
+        impl._prepare_nano_lim_state(populate(builder, cm))
+        assert impl.nano_states[:1].cpu().tolist() == [-3]
 
 
 def test_inactive_capture_becomes_active_on_graph_replay():

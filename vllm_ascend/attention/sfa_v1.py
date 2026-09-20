@@ -361,6 +361,9 @@ class AscendSFAMetadata:
     nano_pool_entries: torch.Tensor | None = None
     nano_generations: torch.Tensor | None = None
     nano_active: torch.Tensor | None = None
+    # Per-request short-sequence flag (aligned prefix < hot budget): the whole
+    # sequence stays dense in the request's topk row and LIM runs state -3.
+    nano_is_short: torch.Tensor | None = None
     nano_hbm_block_table: torch.Tensor | None = None
     nano_source_block_table: torch.Tensor | None = None
     nano_tail_src: torch.Tensor | None = None
