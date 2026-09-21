@@ -743,15 +743,16 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
                     group_key_idx=self.runner.group_key_idx.gpu[:num_reqs],
                     group_key_cache_idx=self.runner.group_key_cache_idx.gpu[:num_reqs],
                     req_topk_buffer_slots=(
-                        self.runner._offload_pool_slots.gpu[:num_reqs]
+                        self.runner._offload_pool_slots.cpu[:num_reqs]
                         if self.runner._offload_pool_slots is not None
                         else None
                     ),
                     req_topk_buffer_generations=(
-                        self.runner._offload_pool_generations.gpu[:num_reqs]
+                        self.runner._offload_pool_generations.cpu[:num_reqs]
                         if self.runner._offload_pool_generations is not None
                         else None
                     ),
+                    block_table_cpu=self.runner.input_batch.block_table[self.kv_cache_gid].get_cpu_tensor()[:num_reqs],
                     offload_dummy=True,
                     req_ids_tensor=req_ids_tensor,
                     token_to_req=token_to_req,
@@ -2245,6 +2246,7 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
             group_key_cache_idx=common_attn_metadata.group_key_cache_idx,
             req_topk_buffer_slots=common_attn_metadata.req_topk_buffer_slots,
             req_topk_buffer_generations=common_attn_metadata.req_topk_buffer_generations,
+            block_table_cpu=common_attn_metadata.block_table_cpu,
             offload_dummy=common_attn_metadata.offload_dummy,
             req_ids_tensor=common_attn_metadata.req_ids_tensor,
             token_to_req=token_to_req,
@@ -2345,6 +2347,7 @@ class AscendSpecDecodeBaseProposer(SpecDecodeBaseProposer):
             group_key_cache_idx=common_attn_metadata.group_key_cache_idx,
             req_topk_buffer_slots=common_attn_metadata.req_topk_buffer_slots,
             req_topk_buffer_generations=common_attn_metadata.req_topk_buffer_generations,
+            block_table_cpu=common_attn_metadata.block_table_cpu,
             offload_dummy=common_attn_metadata.offload_dummy,
             req_ids_tensor=common_attn_metadata.req_ids_tensor,
             token_to_req=common_attn_metadata.token_to_req,

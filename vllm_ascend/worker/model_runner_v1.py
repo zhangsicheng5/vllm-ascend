@@ -3586,10 +3586,11 @@ class NPUModelRunner(GPUModelRunner):
                 if self._offload_token_to_req is not None
                 else None
             ),
-            req_topk_buffer_slots=(self._offload_pool_slots.gpu[:num_reqs_padded]
+            req_topk_buffer_slots=(self._offload_pool_slots.cpu[:num_reqs_padded]
                                    if self._offload_pool_slots is not None else None),
-            req_topk_buffer_generations=(self._offload_pool_generations.gpu[:num_reqs_padded]
+            req_topk_buffer_generations=(self._offload_pool_generations.cpu[:num_reqs_padded]
                                          if self._offload_pool_generations is not None else None),
+            block_table_cpu=self.input_batch.block_table[0].get_cpu_tensor()[:num_reqs_padded],
             offload_dummy=offload_dummy,
             mm_req_doc_ranges=req_doc_ranges,
         )
@@ -3730,6 +3731,10 @@ class NPUModelRunner(GPUModelRunner):
                 cm.block_table_tensor, cm.slot_mapping = _get_block_table_and_slot_mapping(
                     kv_cache_gid
                 )
+                if not isinstance(kv_cache_group.kv_cache_spec, EncoderOnlyAttentionSpec):
+                    cm.block_table_cpu = self.input_batch.block_table[kv_cache_gid].get_cpu_tensor()[
+                        :num_reqs_padded
+                    ]
             if self.speculative_config and isinstance(self.drafter, (AscendStep3p5MTPProposer, AscendDSparkProposer)):
                 # step3p5 MTP draft layers span multiple KV cache groups; capture
                 # each group's block table / slot mapping so the proposer can

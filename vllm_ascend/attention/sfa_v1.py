@@ -350,9 +350,9 @@ class AscendSFAMetadata:
     # by AscendSFAKVOffloadMetadataBuilder.
     req_ids_tensor: torch.Tensor | None = None
     token_to_req: torch.Tensor | None = None
-    # Nano inputs are contiguous NPU tensors. No exact CPU length mirror is
-    # required, including after speculative-token rejection.
+    # Nano kernel inputs are device tensors filled by a CPU build + H2D.
     nano_enabled: bool = False
+    nano_states: torch.Tensor | None = None
     nano_query_ends: torch.Tensor | None = None
     nano_seq_lens: torch.Tensor | None = None
     nano_prefix_lens: torch.Tensor | None = None

@@ -324,8 +324,11 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
     # resident LRU (adler32-hashed request ids and token->request mapping).
     req_ids_tensor: torch.Tensor | None = None
     token_to_req: torch.Tensor | None = None
+    # Host mirrors used by nano metadata (CPU build + H2D). Prefer these
+    # over the device tensors so populate never syncs on the compute stream.
     req_topk_buffer_slots: torch.Tensor | None = None
     req_topk_buffer_generations: torch.Tensor | None = None
+    block_table_cpu: Any = None
     offload_dummy: bool = False
 
     # TODO: Remove it when vLLM no longer uses this function.
@@ -384,6 +387,7 @@ class AscendCommonAttentionMetadata(CommonAttentionMetadata):
             group_key_cache_idx=self.group_key_cache_idx,
             req_topk_buffer_slots=_slice_reqs(self.req_topk_buffer_slots),
             req_topk_buffer_generations=_slice_reqs(self.req_topk_buffer_generations),
+            block_table_cpu=_slice_reqs(self.block_table_cpu),
             offload_dummy=self.offload_dummy,
             req_ids_tensor=_slice_reqs(self.req_ids_tensor),
             token_to_req=(self.token_to_req[:num_actual_tokens] if self.token_to_req is not None else None),

@@ -363,3 +363,54 @@ def test_fused_overlap_common_inputs_are_reused_only_within_one_forward():
         refreshed.seq_len_thresholds.reshape(-1),
         torch.tensor([5, 6], dtype=torch.int32),
     )
+
+
+def _make_cpu_nano_builder():
+    builder = AscendSFAKVOffloadMetadataBuilder.__new__(AscendSFAKVOffloadMetadataBuilder)
+    builder.use_nano = True
+    builder.decode_threshold = 4
+    builder.is_pd_decode_consumer = True
+    config = SimpleNamespace(
+        scheduler_config=SimpleNamespace(max_num_seqs=2, max_num_batched_tokens=16),
+        speculative_config=SimpleNamespace(num_speculative_tokens=1),
+        model_config=SimpleNamespace(
+            max_model_len=16384, hf_text_config=SimpleNamespace(kv_lora_rank=512, qk_rope_head_dim=64)
+        ),
+    )
+    with patch(
+        "vllm_ascend.attention.sfa_kv_offload.get_ascend_config",
+        return_value=SimpleNamespace(sparse_kv_offload_config=SimpleNamespace(topk_buffer_size=8192)),
+    ):
+        builder._init_nano_metadata_buffers(config, torch.device("cpu"))
+    return builder
+
+
+def test_nano_lim_states_are_built_on_cpu_then_copied():
+    builder = _make_cpu_nano_builder()
+    seq_lens = torch.tensor([10371, 5000], dtype=torch.int32)
+    common_metadata = SimpleNamespace(
+        query_start_loc_cpu=torch.tensor([0, 4, 8], dtype=torch.int32),
+        seq_lens_cpu=seq_lens,
+        _seq_lens_cpu=seq_lens,
+        req_topk_buffer_slots=torch.tensor([1, 0], dtype=torch.int32),
+        req_topk_buffer_generations=torch.tensor([11, 12], dtype=torch.int64),
+        block_table_cpu=torch.arange(2 * 128, dtype=torch.int32).reshape(2, 128),
+        req_ids_tensor=None,
+        token_to_req=None,
+        offload_dummy=False,
+        max_query_len=4,
+        num_reqs=2,
+        num_input_tokens=8,
+    )
+    metadata = SimpleNamespace()
+    with patch(
+        "vllm_ascend.attention.sfa_kv_offload.split_decodes_and_prefills",
+        return_value=(2, 0, 8, 0),
+    ):
+        builder._populate_offload_metadata(metadata, common_metadata)
+        assert metadata.nano_enabled is True
+        assert metadata.nano_states.device.type == "cpu"
+        assert metadata.nano_states.tolist() == [-2, -3]
+        builder._populate_offload_metadata(metadata, common_metadata)
+        assert metadata.nano_states.tolist() == [-1, -3]
+        assert metadata.nano_prefix_lens.tolist() == [10240, 4992]

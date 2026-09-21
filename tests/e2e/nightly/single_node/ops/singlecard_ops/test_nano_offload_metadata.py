@@ -9,7 +9,6 @@ import torch
 import torch_npu  # noqa: F401
 
 from vllm_ascend.attention.sfa_kv_offload import (
-    AscendSFAKVOffloadImpl,
     AscendSFAKVOffloadMetadataBuilder,
 )
 
@@ -38,14 +37,18 @@ def make_builder():
 
 def common(ends, lengths, pools=(1, 0), generations=(11, 12)):
     count = len(lengths)
+    seq_lens_cpu = torch.tensor(lengths, dtype=torch.int32)
+    block_table_cpu = torch.arange(count * 128, dtype=torch.int32).reshape(count, 128)
     return SimpleNamespace(
-        query_start_loc=torch.tensor([0, *ends], dtype=torch.int32, device="npu"),
+        query_start_loc=torch.tensor([0, *ends], dtype=torch.int32),
         query_start_loc_cpu=torch.tensor([0, *ends], dtype=torch.int32),
-        # Intentionally no CPU sequence-length attribute: lengths must stay on device.
-        seq_lens=torch.tensor(lengths, dtype=torch.int32, device="npu"),
-        req_topk_buffer_slots=torch.tensor(pools, dtype=torch.int32, device="npu"),
-        req_topk_buffer_generations=torch.tensor(generations, dtype=torch.int64, device="npu"),
-        block_table_tensor=torch.arange(count * 128, dtype=torch.int32, device="npu").reshape(count, 128),
+        seq_lens=seq_lens_cpu,
+        seq_lens_cpu=seq_lens_cpu,
+        _seq_lens_cpu=seq_lens_cpu,
+        req_topk_buffer_slots=torch.tensor(pools, dtype=torch.int32),
+        req_topk_buffer_generations=torch.tensor(generations, dtype=torch.int64),
+        block_table_cpu=block_table_cpu,
+        block_table_tensor=block_table_cpu,
         req_ids_tensor=None,
         token_to_req=None,
         offload_dummy=False,
@@ -64,16 +67,6 @@ def populate(builder, cm, draft_index=None):
             with patch(MODULE + ".AscendSFAMetadataBuilder.build_for_drafting", return_value=metadata):
                 metadata = builder.build_for_drafting(cm, draft_index=draft_index)
     return metadata
-
-
-def make_impl():
-    impl = AscendSFAKVOffloadImpl.__new__(AscendSFAKVOffloadImpl)
-    impl.nano_hot_tokens = 8192
-    impl.nano_states = torch.empty(4, dtype=torch.int32, device="npu")
-    impl.nano_last_generation = torch.full((8,), -1, dtype=torch.int64, device="npu")
-    impl.nano_last_prefix = torch.zeros(8, dtype=torch.int32, device="npu")
-    impl.nano_last_cache = torch.zeros(8, dtype=torch.int32, device="npu")
-    return impl
 
 
 def test_prefill_batches_carry_pool_slots_and_skip_flag_is_unconditional():
@@ -118,30 +111,28 @@ def test_device_lengths_tail_geometry_and_rejection():
         8192 + 8320 % 256
     ]
     address = metadata.nano_prefix_lens.data_ptr()
-    cm.seq_lens.copy_(torch.tensor([10243, 8321], dtype=torch.int32, device="npu"))
+    cm.seq_lens_cpu.copy_(torch.tensor([10243, 8321], dtype=torch.int32))
     revised = populate(builder, cm)
     assert revised.nano_prefix_lens.data_ptr() == address
     assert revised.nano_prefix_lens.cpu().tolist() == [10112, 8320]
 
 
 def test_generation_compaction_and_prefix_rollback_reset():
-    builder, impl = make_builder(), make_impl()
+    builder = make_builder()
     cm = common([4, 8], [10371, 8324])
     metadata = populate(builder, cm)
-    impl._prepare_nano_lim_state(metadata)
-    assert impl.nano_states[:2].cpu().tolist() == [-2, -2]
-    impl._prepare_nano_lim_state(metadata)
-    assert impl.nano_states[:2].cpu().tolist() == [-1, -1]
+    assert metadata.nano_states[:2].cpu().tolist() == [-2, -2]
+    metadata = populate(builder, cm)
+    assert metadata.nano_states[:2].cpu().tolist() == [-1, -1]
     # Swap batch order, keeping request-owned pool and generation together.
     cm = common([4, 8], [8324, 10371], pools=(0, 1), generations=(12, 11))
     metadata = populate(builder, cm)
-    impl._prepare_nano_lim_state(metadata)
-    assert impl.nano_states[:2].cpu().tolist() == [-1, -1]
+    assert metadata.nano_states[:2].cpu().tolist() == [-1, -1]
     # New generation and rollback independently force cold fill.
     cm.req_topk_buffer_generations[0] = 13
-    cm.seq_lens[1] = 10243
-    impl._prepare_nano_lim_state(populate(builder, cm))
-    assert impl.nano_states[:2].cpu().tolist() == [-2, -2]
+    cm.seq_lens_cpu[1] = 10243
+    metadata = populate(builder, cm)
+    assert metadata.nano_states[:2].cpu().tolist() == [-2, -2]
 
 
 def test_short_row_dense_geometry_in_mixed_batch():
@@ -172,39 +163,39 @@ def test_short_row_dense_geometry_in_mixed_batch():
 
 
 def test_short_lifecycle_minus3_minus2_minus1():
-    builder, impl = make_builder(), make_impl()
+    builder = make_builder()
     # Short rows always run -3 (dense, C == 0): the row content is provided
     # by the PD dense D2D / the eager full-row fill, not by a -2 rebuild.
     cm = common([4], [5000], pools=(1,), generations=(11,))
     for _ in range(3):
-        impl._prepare_nano_lim_state(populate(builder, cm))
-        assert impl.nano_states[:1].cpu().tolist() == [-3]
+        metadata = populate(builder, cm)
+        assert metadata.nano_states[:1].cpu().tolist() == [-3]
     # Growth past the hot budget: the cache flip (0 -> hot) forces the -2
     # offload init, then -1 steady state.
-    cm.seq_lens[0] = 8196
-    impl._prepare_nano_lim_state(populate(builder, cm))
-    assert impl.nano_states[:1].cpu().tolist() == [-2]
-    impl._prepare_nano_lim_state(populate(builder, cm))
-    assert impl.nano_states[:1].cpu().tolist() == [-1]
+    cm.seq_lens_cpu[0] = 8196
+    metadata = populate(builder, cm)
+    assert metadata.nano_states[:1].cpu().tolist() == [-2]
+    metadata = populate(builder, cm)
+    assert metadata.nano_states[:1].cpu().tolist() == [-1]
     # Rollback below the budget: directly back to -3; the runner separately
     # refills the row because the sparse layout is unreadable in dense mode.
-    cm.seq_lens[0] = 5000
-    impl._prepare_nano_lim_state(populate(builder, cm))
-    assert impl.nano_states[:1].cpu().tolist() == [-3]
+    cm.seq_lens_cpu[0] = 5000
+    metadata = populate(builder, cm)
+    assert metadata.nano_states[:1].cpu().tolist() == [-3]
 
 
 def test_tiny_row_stays_minus3_without_legal_init():
-    builder, impl = make_builder(), make_impl()
+    builder = make_builder()
     # L < 2048 has no legal -2 (operator contract), so the row must stay -3;
     # in PD the read thread has already populated the dense content.
     cm = common([4], [500], pools=(1,), generations=(11,))
     for _ in range(3):
-        impl._prepare_nano_lim_state(populate(builder, cm))
-        assert impl.nano_states[:1].cpu().tolist() == [-3]
+        metadata = populate(builder, cm)
+        assert metadata.nano_states[:1].cpu().tolist() == [-3]
 
 
 def test_inactive_capture_becomes_active_on_graph_replay():
-    builder, impl = make_builder(), make_impl()
+    builder = make_builder()
     cm = common([4, 8], [0, 0], pools=(0, 0), generations=(-1, -1))
     metadata = populate(builder, cm)
     # Private pools 4 and 5; positive cache budgets avoid copy-SFA's cold-fill predicate.
@@ -212,26 +203,26 @@ def test_inactive_capture_becomes_active_on_graph_replay():
     assert metadata.nano_cache_tokens.cpu().tolist() == [2048, 2048]
     assert metadata.nano_tail_lengths.count_nonzero().item() == 0
     assert metadata.nano_device_slots.min().item() >= 4 * (8192 + 256)
-    for _ in range(3):
-        impl._prepare_nano_lim_state(metadata)
+    assert metadata.nano_states[:2].cpu().tolist() == [-3, -3]
+    observed = torch.empty_like(metadata.nano_states)
     graph = torch.npu.NPUGraph()
     with torch.npu.graph(graph):
-        impl._prepare_nano_lim_state(metadata)
-    assert impl.nano_states[:2].cpu().tolist() == [-3, -3]
-    cm.seq_lens.copy_(torch.tensor([10371, 0], dtype=torch.int32, device="npu"))
+        observed.copy_(metadata.nano_states)
+    cm.seq_lens_cpu.copy_(torch.tensor([10371, 0], dtype=torch.int32))
     cm.req_topk_buffer_generations[0] = 11
     cm.req_topk_buffer_slots[0] = 1
     populate(builder, cm)
     graph.replay()
-    assert impl.nano_states[:2].cpu().tolist() == [-2, -3]
+    assert observed[:2].cpu().tolist() == [-2, -3]
+    populate(builder, cm)
     graph.replay()
-    assert impl.nano_states[:2].cpu().tolist() == [-1, -3]
+    assert observed[:2].cpu().tolist() == [-1, -3]
     # Dummy execution must not change real request 1's residency.
     cm.req_topk_buffer_generations.fill_(-1)
     populate(builder, cm)
     graph.replay()
-    assert impl.nano_states[:2].cpu().tolist() == [-3, -3]
-    assert impl.nano_last_generation[1].item() == 11
+    assert observed[:2].cpu().tolist() == [-3, -3]
+    assert int(builder._nano_last_generation[1]) == 11
 
 
 def test_eager_sp_padding_uses_private_tail_and_exact_query_count():
