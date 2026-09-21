@@ -172,11 +172,10 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
         self._nano_last_generation = np.full(pool_rows, -1, dtype=np.int64)
         self._nano_last_prefix = np.zeros(pool_rows, dtype=np.int32)
         self._nano_last_cache = np.zeros(pool_rows, dtype=np.int32)
-        # Keep two generations of H2D sources alive so async metadata build
-        # cannot free/overwrite a buffer the previous non-blocking copy still
-        # reads.
-        self._nano_h2d_hold: tuple[list[torch.Tensor], list[torch.Tensor]] = ([], [])
-        self._nano_h2d_gen = 0
+        # Same pattern as attention_v1 / mla_v1: pin_memory then non_blocking
+        # H2D. Keep the pinned sources until the next populate so copy_ does
+        # not drop them before the DMA runs.
+        self._nano_pinned_src: list[torch.Tensor] = []
         type(self)._nano_lim_history_owner = self
         self.nano_hbm_block_table = torch.empty(
             (steps, requests, self.nano_stride_blocks), dtype=torch.int32, device=device
@@ -223,11 +222,15 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
         return np.ascontiguousarray(arr)
 
     def _copy_host_to_device(self, dest: torch.Tensor, host: np.ndarray) -> torch.Tensor:
+        # Match attention_v1 / mla_v1: cpu.pin_memory() then non_blocking H2D.
+        # copy_ into the graph-fixed dest instead of allocating a new tensor.
         src = torch.from_numpy(np.ascontiguousarray(host))
+        if dest.device.type != "cpu" and not src.is_pinned():
+            src = src.pin_memory()
         dest.copy_(src, non_blocking=True)
-        hold = getattr(self, "_nano_h2d_hold", None)
-        if hold is not None:
-            hold[self._nano_h2d_gen].append(src)
+        pinned = getattr(self, "_nano_pinned_src", None)
+        if pinned is not None:
+            pinned.append(src)
         return dest
 
     def _populate_offload_metadata(
@@ -251,9 +254,8 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
         metadata.num_decode_tokens = num_decode_tokens
         metadata.req_ids_tensor = common_attn_metadata.req_ids_tensor
         metadata.token_to_req = common_attn_metadata.token_to_req
-        if getattr(self, "_nano_h2d_hold", None) is not None:
-            self._nano_h2d_gen ^= 1
-            self._nano_h2d_hold[self._nano_h2d_gen].clear()
+        if getattr(self, "_nano_pinned_src", None) is not None:
+            self._nano_pinned_src.clear()
         metadata.nano_enabled = (
             self.use_nano
             and (num_prefills == 0 or common_attn_metadata.offload_dummy)
@@ -406,7 +408,10 @@ class AscendSFAKVOffloadMetadataBuilder(AscendSFAMetadataBuilder):
         metadata.nano_copy_lengths = self._copy_host_to_device(
             self.nano_copy_lengths[draft_index, :descriptor_count], copy_len
         )
-        self.nano_copy_count[draft_index].fill_(descriptor_count)
+        self._copy_host_to_device(
+            self.nano_copy_count[draft_index],
+            np.asarray([descriptor_count], dtype=np.int32),
+        )
         metadata.nano_copy_count = self.nano_copy_count[draft_index]
         metadata.nano_device_slots = self._copy_host_to_device(
             self.nano_device_slots[draft_index, :tokens], device_slots
