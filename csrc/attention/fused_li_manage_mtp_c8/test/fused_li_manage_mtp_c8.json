@@ -1,0 +1,8 @@
+{"case": "steady_mtp3_basic", "heads": 64, "batch": 1, "routes": [4], "state": [-1], "candidate": [4096], "cache": [4096], "actual_key": [8192], "blocks": 32, "dtype": "bfloat16", "expect": "steady", "golden": true}
+{"case": "steady_mtp3_large", "heads": 64, "batch": 1, "routes": [4], "state": [-1], "candidate": [16256], "cache": [8192], "actual_key": [16384], "blocks": 128, "dtype": "bfloat16", "expect": "steady", "golden": true}
+{"case": "first_decode", "heads": 64, "batch": 1, "routes": [4], "state": [-2], "candidate": [4096], "cache": [4096], "actual_key": [8192], "blocks": 32, "dtype": "bfloat16", "expect": "first_decode", "golden": true}
+{"case": "standard_causal", "heads": 64, "batch": 1, "routes": [1], "state": [-3], "candidate": [4096], "cache": [0], "actual_key": [4096], "blocks": 32, "dtype": "bfloat16", "expect": "standard", "golden": true}
+{"case": "guard_cache_lt_2048", "heads": 64, "batch": 1, "routes": [4], "state": [-1], "candidate": [4096], "cache": [1920], "actual_key": [8192], "blocks": 32, "dtype": "bfloat16", "expect": "safe_failure"}
+{"case": "guard_cache_gt_candidate", "heads": 64, "batch": 1, "routes": [4], "state": [-1], "candidate": [4096], "cache": [4224], "actual_key": [8192], "blocks": 32, "dtype": "bfloat16", "expect": "safe_failure"}
+{"case": "multi_request_mixed", "heads": 64, "batch": 3, "routes": [4, 1, 2], "state": [-1, -1, -2], "candidate": [8192, 4096, 6144], "cache": [8192, 4096, 6144], "actual_key": [16384, 8192, 12288], "blocks": 128, "dtype": "bfloat16", "expect": "mixed", "golden": true}
+{"case": "heads32_steady", "heads": 32, "batch": 1, "routes": [4], "state": [-1], "candidate": [4096], "cache": [4096], "actual_key": [8192], "blocks": 32, "dtype": "float16", "expect": "steady", "golden": true}
