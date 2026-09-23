@@ -1,7 +1,7 @@
 """Regression tests for SFA KV-offload attention metadata."""
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -363,3 +363,219 @@ def test_fused_overlap_common_inputs_are_reused_only_within_one_forward():
         refreshed.seq_len_thresholds.reshape(-1),
         torch.tensor([5, 6], dtype=torch.int32),
     )
+
+
+# ---------------------------------------------------------------------------
+# Sparse LI C8 dispatch contract in _nano_select:
+# indexer already Hadamard-rotates + int8-quantizes q; nano only folds the
+# fp16 scales and dispatches npu_fused_li_manage_mtp_c8. NPU-side top-k
+# precision lives in tests/ut/ops and the nightly e2e.
+# ---------------------------------------------------------------------------
+
+_LIM_N_HEAD = 32
+_LIM_HEAD_DIM = 128
+_LIM_NUM_DECODES = 2
+_LIM_T = 2
+_LIM_BLOCKS = 8
+
+
+def _nano_select_impl(*, enable_c8: bool):
+    impl = AscendSFAKVOffloadImpl.__new__(AscendSFAKVOffloadImpl)
+    impl.enable_sparse_li_c8 = enable_c8
+    impl.c8_k_scale_cache_dtype = torch.float16
+    impl.nano_slot_map = torch.full(
+        (_LIM_NUM_DECODES * 2, _LIM_BLOCKS * _LIM_HEAD_DIM),
+        -(1 << 31),
+        dtype=torch.int32,
+    )
+    impl.nano_topk_src = torch.zeros((_LIM_T, 1, 2048), dtype=torch.int32)
+    impl.nano_topk_dst = torch.zeros_like(impl.nano_topk_src)
+    impl.nano_topk_misses = torch.zeros(_LIM_T, dtype=torch.int32)
+    impl.nano_miss_src = torch.empty((_LIM_NUM_DECODES, 32768), dtype=torch.int32)
+    impl.nano_miss_dst = torch.empty_like(impl.nano_miss_src)
+    impl.nano_misses = torch.zeros(_LIM_NUM_DECODES, dtype=torch.int32)
+    impl.nano_reuse_logical_lens = torch.empty(_LIM_NUM_DECODES, dtype=torch.int32)
+    impl.nano_reuse_cache_tokens = torch.empty(_LIM_NUM_DECODES, dtype=torch.int32)
+    impl.nano_reuse_request_count = 0
+    impl.nano_query_scale = None
+    impl.nano_key_scale = None
+    impl.nano_c8_query = None
+    impl.nano_c8_query_scale = None
+    impl.nano_c8_weights = None
+    impl.nano_c8_key_scale = None
+    impl._nano_metadata = SimpleNamespace(
+        nano_pool_entries=torch.arange(_LIM_NUM_DECODES, dtype=torch.int32),
+        num_decode_tokens=_LIM_T,
+        nano_prefix_lens=torch.full((_LIM_NUM_DECODES,), 4096, dtype=torch.int32),
+        nano_cache_tokens=torch.full((_LIM_NUM_DECODES,), 2048, dtype=torch.int32),
+        nano_query_ends=torch.tensor([1, 2], dtype=torch.int32),
+        nano_seq_lens=torch.full((_LIM_NUM_DECODES,), 8192, dtype=torch.int32),
+        nano_request_state=torch.tensor([-2, -3], dtype=torch.int32),
+        nano_reuse_logical_lens=None,
+    )
+    return impl
+
+
+def _run_nano_select(*, enable_c8: bool, query_scale=None, key_scale_4d=True):
+    impl = _nano_select_impl(enable_c8=enable_c8)
+    if enable_c8:
+        query = torch.randint(-8, 8, (_LIM_T * _LIM_N_HEAD, _LIM_HEAD_DIM), dtype=torch.int8)
+        if query_scale is None:
+            query_scale = torch.ones(_LIM_T * _LIM_N_HEAD, dtype=torch.float16)
+        index_key = torch.zeros((_LIM_BLOCKS, _LIM_HEAD_DIM, 1, _LIM_HEAD_DIM), dtype=torch.int8)
+    else:
+        query = torch.randn(_LIM_T, _LIM_N_HEAD, _LIM_HEAD_DIM, dtype=torch.bfloat16)
+        index_key = torch.zeros((_LIM_BLOCKS, _LIM_HEAD_DIM, 1, _LIM_HEAD_DIM), dtype=torch.bfloat16)
+    weights = torch.randn(_LIM_T, _LIM_N_HEAD, dtype=torch.bfloat16)
+    if key_scale_4d:
+        index_scale = torch.zeros((_LIM_BLOCKS, _LIM_HEAD_DIM, 1, 1), dtype=torch.float16)
+    else:
+        index_scale = torch.zeros((_LIM_BLOCKS, _LIM_HEAD_DIM, 1), dtype=torch.float16)
+    indexer = SimpleNamespace(
+        n_head=_LIM_N_HEAD,
+        head_dim=_LIM_HEAD_DIM,
+        k_cache=SimpleNamespace(kv_cache=(index_key, index_scale)),
+    )
+    indexer_metadata = SimpleNamespace(
+        block_table=torch.zeros((_LIM_NUM_DECODES, _LIM_BLOCKS), dtype=torch.int32),
+    )
+    m_c8 = MagicMock()
+    m_mtp = MagicMock()
+    fake_ops = SimpleNamespace(
+        npu_fused_li_manage_mtp_c8=m_c8,
+        npu_fused_li_manage_mtp=m_mtp,
+    )
+    with patch("vllm_ascend.attention.sfa_kv_offload.torch.ops._C_ascend", fake_ops):
+        result = impl._nano_select(query, weights, indexer, indexer_metadata, query_scale)
+    return {
+        "result": result,
+        "impl": impl,
+        "m_c8": m_c8,
+        "m_mtp": m_mtp,
+        "query": query,
+        "query_scale": query_scale,
+        "weights": weights,
+    }
+
+
+def test_li_c8_nano_select_dispatches_to_c8_op_with_int8_inputs():
+    rec = _run_nano_select(enable_c8=True)
+    assert rec["m_c8"].called, "C8 path must call npu_fused_li_manage_mtp_c8"
+    assert not rec["m_mtp"].called, "C8 path must not call the bf16 mtp op"
+
+    args = rec["m_c8"].call_args.args
+    weights, q_scale, query, key_scale, index_key_cache = args[:5]
+    assert weights.dtype == torch.bfloat16
+    assert q_scale.dtype == torch.float16
+    assert tuple(q_scale.shape) == (_LIM_T, _LIM_N_HEAD)
+    assert query.dtype == torch.int8
+    assert tuple(query.shape) == (_LIM_T, _LIM_N_HEAD, _LIM_HEAD_DIM)
+    assert key_scale.dtype == torch.float16
+    assert key_scale.ndim == 3
+    assert tuple(key_scale.shape) == (_LIM_BLOCKS, _LIM_HEAD_DIM, 1)
+    assert index_key_cache.dtype == torch.int8
+    assert rec["result"] is rec["impl"].nano_topk_src[:_LIM_T]
+    # Graph-fixed C8 buffers must be reused instead of per-step allocations.
+    assert rec["impl"].nano_c8_query is not None
+    assert rec["impl"].nano_c8_query_scale is not None
+    assert rec["impl"].nano_c8_weights is not None
+
+
+def test_li_c8_nano_select_accepts_3d_key_scale_cache():
+    rec = _run_nano_select(enable_c8=True, key_scale_4d=False)
+    key_scale = rec["m_c8"].call_args.args[3]
+    assert tuple(key_scale.shape) == (_LIM_BLOCKS, _LIM_HEAD_DIM, 1)
+
+
+def test_li_c8_nano_select_requires_indexer_query_scale():
+    impl = _nano_select_impl(enable_c8=True)
+    query = torch.randint(-8, 8, (_LIM_T * _LIM_N_HEAD, _LIM_HEAD_DIM), dtype=torch.int8)
+    weights = torch.randn(_LIM_T, _LIM_N_HEAD, dtype=torch.bfloat16)
+    indexer = SimpleNamespace(
+        n_head=_LIM_N_HEAD,
+        head_dim=_LIM_HEAD_DIM,
+        k_cache=SimpleNamespace(
+            kv_cache=(
+                torch.zeros((_LIM_BLOCKS, _LIM_HEAD_DIM, 1, _LIM_HEAD_DIM), dtype=torch.int8),
+                torch.zeros((_LIM_BLOCKS, _LIM_HEAD_DIM, 1, 1), dtype=torch.float16),
+            )
+        ),
+    )
+    indexer_metadata = SimpleNamespace(
+        block_table=torch.zeros((_LIM_NUM_DECODES, _LIM_BLOCKS), dtype=torch.int32),
+    )
+    with pytest.raises(RuntimeError, match="query_dequant_scale"):
+        impl._nano_select(query, weights, indexer, indexer_metadata, None)
+
+
+def test_li_non_c8_nano_select_still_uses_bf16_mtp_op():
+    rec = _run_nano_select(enable_c8=False)
+    assert rec["m_mtp"].called, "non-C8 path must call npu_fused_li_manage_mtp"
+    assert not rec["m_c8"].called, "non-C8 path must not call the c8 op"
+
+    args = rec["m_mtp"].call_args.args
+    weights, query_scale, query, key_scale, _ = args[:5]
+    assert query_scale.dtype == torch.float32
+    assert key_scale.dtype == torch.float32
+    assert query.dtype == torch.bfloat16
+    assert rec["impl"].nano_query_scale is not None
+
+
+def test_indexer_passes_c8_query_scale_to_nano_topk_selector():
+    from vllm_ascend.attention.indexer import AscendSFAIndexerBackend
+
+    indexer = AscendSFAIndexerBackend.__new__(AscendSFAIndexerBackend)
+    indexer.enable_sparse_li_c8 = True
+    indexer.n_head = _LIM_N_HEAD
+    indexer.head_dim = _LIM_HEAD_DIM
+    indexer.qk_rope_head_dim = 64
+    indexer.is_rope_neox_style = True
+    indexer.c8_k_cache_dtype = torch.int8
+    indexer.c8_k_scale_cache_dtype = torch.float16
+    indexer.k_cache = SimpleNamespace(kv_cache=(None, None))
+    indexer._pcp_active = False
+    indexer._dsa_cp_active = False
+    indexer.forward_k = MagicMock(return_value=(torch.zeros((_LIM_T, _LIM_HEAD_DIM)), None, None))
+    indexer._gather_cache_inputs = MagicMock(
+        return_value=(torch.zeros((_LIM_T, _LIM_HEAD_DIM)), None, torch.zeros(_LIM_T, dtype=torch.int64))
+    )
+    indexer.write_cache = MagicMock()
+    q_li = torch.zeros((_LIM_T, _LIM_N_HEAD, _LIM_HEAD_DIM), dtype=torch.bfloat16)
+    q_li_scale = torch.ones(_LIM_T * _LIM_N_HEAD, dtype=torch.float16)
+    indexer.wk_weights_proj = MagicMock(return_value=(torch.zeros((_LIM_T, _LIM_HEAD_DIM + _LIM_N_HEAD)), None))
+    indexer.wq_b = MagicMock(return_value=(q_li.reshape(_LIM_T, _LIM_N_HEAD * _LIM_HEAD_DIM), None))
+    captured = {}
+
+    def _selector(query, weights, backend, metadata, query_scale=None):
+        captured["query_scale"] = query_scale
+        captured["q_li"] = query
+        return query
+
+    metadata = SimpleNamespace(
+        topk_selector=_selector,
+        actual_seq_lengths_query=torch.tensor([_LIM_T], dtype=torch.int32),
+        actual_seq_lengths_key=torch.tensor([128], dtype=torch.int32),
+        cos=torch.zeros((_LIM_T, 64), dtype=torch.bfloat16),
+        sin=torch.zeros((_LIM_T, 64), dtype=torch.bfloat16),
+    )
+    hidden = torch.zeros((_LIM_T, 16))
+    with (
+        patch("vllm_ascend.attention.indexer.HAS_TRITON", True),
+        patch("vllm_ascend.attention.indexer.rope_forward_triton_siso", lambda *a, **k: a[0]),
+        patch(
+            "vllm_ascend.attention.indexer.torch_npu.npu_dynamic_quant",
+            return_value=(q_li.reshape(-1, _LIM_HEAD_DIM).to(torch.int8), q_li_scale),
+        ),
+        patch.object(AscendSFAIndexerBackend, "q_hadamard", torch.eye(_LIM_HEAD_DIM, dtype=torch.bfloat16)),
+    ):
+        indexer.forward(
+            hidden,
+            hidden,
+            hidden,
+            metadata,
+            compute_topk=True,
+        )
+
+    assert captured["query_scale"] is not None
+    assert captured["query_scale"].dtype == torch.float16
+    assert captured["q_li"].dtype == torch.int8

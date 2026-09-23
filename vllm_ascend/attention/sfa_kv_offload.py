@@ -38,6 +38,10 @@ from vllm.v1.utils import CpuGpuBuffer
 
 from vllm_ascend.ascend_config import get_ascend_config
 from vllm_ascend.attention.attention_v1 import AscendAttentionState
+from vllm_ascend.attention.indexer import (
+    INDEXER_K_CACHE_SLOT,
+    INDEXER_SCALE_CACHE_SLOT,
+)
 from vllm_ascend.attention.sfa_v1 import (
     AscendSFAImpl,
     AscendSFAMetadata,
@@ -59,6 +63,8 @@ from vllm_ascend.utils import enable_dsa_cp
 
 M = TypeVar("M", bound=AscendSFAMetadata)
 _FSA_SELECTION_STATUS_ALIGNMENT = 8
+_NANO_C8_HEAD_DIM = 128
+_NANO_C8_SUPPORTED_HEADS = (32, 64)
 
 
 def prepare_copy_sfa_queries(query, query_rope):
@@ -454,8 +460,6 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
         self.nano_indexer_owner = self
         self._nano_metadata = None
         if self.use_nano:
-            if self.enable_sparse_li_c8:
-                raise NotImplementedError("MTP C8 LIM is built but nano C8 serving is not enabled yet")
             self.nano_hot_tokens = offload_cfg.topk_buffer_size
             requests = self.vllm_config.scheduler_config.max_num_seqs + 2
             tokens = self.vllm_config.scheduler_config.max_num_batched_tokens
@@ -484,6 +488,10 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
                 self.nano_reuse_request_count = 0
                 self.nano_query_scale = None
                 self.nano_key_scale = None
+                self.nano_c8_query = None
+                self.nano_c8_query_scale = None
+                self.nano_c8_weights = None
+                self.nano_c8_key_scale = None
             # Descriptor storage belongs to the attention implementation;
             # per-step source/destination geometry is supplied by metadata.
             self.nano_copy_src = torch.empty(requests * 4, dtype=torch.int64, device=device)
@@ -621,41 +629,116 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
             self._nano_select if attn_metadata.nano_enabled and not self.skip_topk else None
         )
 
-    def _nano_select(self, query, weights, indexer, indexer_metadata):
+    def _ensure_nano_c8_buffers(self, n_head: int, device: torch.device, num_blocks: int) -> None:
+        max_tokens = self.nano_topk_src.shape[0]
+        if self.nano_c8_query is None:
+            self.nano_c8_query = torch.empty((max_tokens, n_head, _NANO_C8_HEAD_DIM), dtype=torch.int8, device=device)
+            self.nano_c8_query_scale = torch.empty((max_tokens, n_head), dtype=torch.float16, device=device)
+            self.nano_c8_weights = torch.empty((max_tokens, n_head), dtype=torch.bfloat16, device=device)
+        if self.nano_c8_key_scale is None:
+            self.nano_c8_key_scale = torch.empty((num_blocks, _NANO_C8_HEAD_DIM, 1), dtype=torch.float16, device=device)
+
+    def _view_c8_key_scale(self, key_scale: torch.Tensor, num_blocks: int) -> torch.Tensor:
+        """Fold the live indexer scale cache into the C8 LIM ABI [blocks, 128, 1].
+
+        Lightning squeezes the N=1 axis of the 4-D PA_BSND scale cache. A hard
+        ``view(blocks, 128, 1)`` only works when numel already matches; squeeze
+        then reshape covers both ``[B, S, 1, 1]`` and ``[B, S, 1]`` without
+        copying the paged cache.
+        """
+        if key_scale.dim() == 4:
+            key_scale = key_scale.squeeze(2)
+        expected = (num_blocks, _NANO_C8_HEAD_DIM, 1)
+        if tuple(key_scale.shape) != expected:
+            key_scale = key_scale.reshape(*expected)
+        if key_scale.dtype != torch.float16 or not key_scale.is_contiguous():
+            self.nano_c8_key_scale.copy_(key_scale if key_scale.dtype == torch.float16 else key_scale.to(torch.float16))
+            return self.nano_c8_key_scale
+        return key_scale
+
+    def _nano_select(self, query, weights, indexer, indexer_metadata, query_scale=None):
         metadata = self._nano_metadata
         count = metadata.nano_pool_entries.numel()
         tokens = metadata.num_decode_tokens
         request_state = metadata.nano_request_state
         prefix = metadata.nano_prefix_lens
         cache = metadata.nano_cache_tokens
-        index_cache = indexer.k_cache.kv_cache[0].view(-1, 128, 1, 128)
+        # Keep the paged cache view; do not contiguous() the full key arena.
+        index_cache = indexer.k_cache.kv_cache[INDEXER_K_CACHE_SLOT].view(-1, 128, 1, 128)
         table = indexer_metadata.block_table[:count].contiguous()
-        if self.nano_key_scale is None:
-            self.nano_key_scale = torch.empty(index_cache.shape[:3], dtype=torch.float32, device=query.device)
-            self.nano_query_scale = torch.empty(
-                (self.nano_topk_src.shape[0], query.shape[1]), dtype=torch.float32, device=query.device
+        if self.enable_sparse_li_c8:
+            n_head = indexer.n_head
+            if n_head not in _NANO_C8_SUPPORTED_HEADS:
+                raise RuntimeError(f"nano C8 LIM expects 32 or 64 index heads, got {n_head}")
+            if indexer.head_dim != _NANO_C8_HEAD_DIM:
+                raise RuntimeError(f"nano C8 LIM expects head_dim={_NANO_C8_HEAD_DIM}, got {indexer.head_dim}")
+            if query_scale is None:
+                raise RuntimeError("nano C8 LIM requires query_dequant_scale from the indexer")
+            self._ensure_nano_c8_buffers(n_head, query.device, index_cache.shape[0])
+            # Indexer already Hadamard-rotates and int8-quantizes q. Copy into
+            # graph-fixed buffers so ACLGraph does not capture per-step
+            # contiguous()/to() allocations.
+            self.nano_c8_query[:tokens].copy_(query.view(-1, n_head, _NANO_C8_HEAD_DIM)[:tokens])
+            q_scale = query_scale.view(-1, n_head)[:tokens]
+            if q_scale.dtype != torch.float16:
+                q_scale = q_scale.to(self.c8_k_scale_cache_dtype)
+            self.nano_c8_query_scale[:tokens].copy_(q_scale)
+            w = weights[:tokens]
+            if w.dtype != torch.bfloat16:
+                w = w.to(torch.bfloat16)
+            self.nano_c8_weights[:tokens].copy_(w)
+            key_scale = self._view_c8_key_scale(
+                indexer.k_cache.kv_cache[INDEXER_SCALE_CACHE_SLOT],
+                index_cache.shape[0],
             )
-        torch.ops._C_ascend.npu_fused_li_manage_mtp(
-            weights[:tokens].contiguous(),
-            self.nano_query_scale[:tokens],
-            query[:tokens].contiguous(),
-            self.nano_key_scale,
-            index_cache,
-            table,
-            metadata.nano_query_ends,
-            metadata.nano_seq_lens,
-            prefix,
-            cache,
-            request_state,
-            metadata.nano_pool_entries,
-            self.nano_slot_map,
-            self.nano_topk_src[:tokens],
-            self.nano_topk_dst[:tokens],
-            self.nano_topk_misses[:tokens],
-            self.nano_miss_src[:count],
-            self.nano_miss_dst[:count],
-            self.nano_misses[:count],
-        )
+            torch.ops._C_ascend.npu_fused_li_manage_mtp_c8(
+                self.nano_c8_weights[:tokens],
+                self.nano_c8_query_scale[:tokens],
+                self.nano_c8_query[:tokens],
+                key_scale,
+                index_cache,
+                table,
+                metadata.nano_query_ends,
+                metadata.nano_seq_lens,
+                prefix,
+                cache,
+                request_state,
+                metadata.nano_pool_entries,
+                self.nano_slot_map,
+                self.nano_topk_src[:tokens],
+                self.nano_topk_dst[:tokens],
+                self.nano_topk_misses[:tokens],
+                self.nano_miss_src[:count],
+                self.nano_miss_dst[:count],
+                self.nano_misses[:count],
+            )
+        else:
+            if self.nano_key_scale is None:
+                self.nano_key_scale = torch.empty(index_cache.shape[:3], dtype=torch.float32, device=query.device)
+                self.nano_query_scale = torch.empty(
+                    (self.nano_topk_src.shape[0], query.shape[1]), dtype=torch.float32, device=query.device
+                )
+            torch.ops._C_ascend.npu_fused_li_manage_mtp(
+                weights[:tokens].contiguous(),
+                self.nano_query_scale[:tokens],
+                query[:tokens].contiguous(),
+                self.nano_key_scale,
+                index_cache,
+                table,
+                metadata.nano_query_ends,
+                metadata.nano_seq_lens,
+                prefix,
+                cache,
+                request_state,
+                metadata.nano_pool_entries,
+                self.nano_slot_map,
+                self.nano_topk_src[:tokens],
+                self.nano_topk_dst[:tokens],
+                self.nano_topk_misses[:tokens],
+                self.nano_miss_src[:count],
+                self.nano_miss_dst[:count],
+                self.nano_misses[:count],
+            )
         if metadata.nano_reuse_logical_lens is not None:
             # Only draft step 0 saves the selection for later MTP forwards.
             # Target layers consume their current metadata directly.

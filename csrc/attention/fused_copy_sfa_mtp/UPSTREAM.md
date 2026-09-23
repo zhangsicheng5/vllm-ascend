@@ -27,8 +27,9 @@ block-aligned hot budget to `[Q_max * 2048,16256]`.
 
 Native copy-SFA supports 8, 16, 32, 64 and 128 attention heads. Serving pads
 fewer than eight heads to eight, then compacts the output. MTP C8 LIM is
-registered and built for A3, but is deliberately not selected in serving;
-its runtime correctness is unverified in this port.
+registered and built for A3. When ``enable_sparse_li_c8`` is set, nano
+serving dispatches ``_nano_select`` to ``npu_fused_li_manage_mtp_c8`` with
+the indexer's already-quantized int8 query and fp16 dequant scales.
 
 Build adaptations retain vLLM-Ascend operator names, private copy-SFA tiler
 helper names, and the internal `FirstFillScatterCopy` dependency. The ordered
@@ -44,7 +45,8 @@ four-query, four-key request publishes all four source IDs for every query,
 even though `npu_lightning_indexer` returns one, two, three and four valid IDs.
 The fix uses the existing device-side visible count before publishing both
 source and destination outputs. It does not change the offload states `-2`
-and `-1`. The C8 kernel logic remains unchanged and unverified at runtime.
+and `-1`. The C8 kernel now carries the same `-3` masked-tail rewrite as
+the bf16 LIM (`369618f39`); nano serving selects C8 when LI C8 is enabled.
 
 ## Python integration
 
