@@ -270,6 +270,15 @@ def run_long():
     report("long mixed q=[1,4,7] states=[-3,-2,-1] L=264192 C=14336", errs)
 
 
+# ============================================================= 7. m3tail
+def run_m3tail():
+    """-3 短可见尾部 -1 契约回归（quant_full.run_m3tail 包装）:
+    mtp commit 11a98e560 的修复同步到 c8（2026-09-23）后必须常绿。"""
+    errs = []
+    QF.run_m3tail(errs)
+    report("m3tail -3 短可见尾部契约(vis<2048)", errs)
+
+
 # ============================================================= main
 def main():
     only = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -280,6 +289,7 @@ def main():
         "lifecycle": run_lifecycle,
         "steady_strict": run_steady_strict,
         "long": run_long,
+        "m3tail": run_m3tail,
     }
     QF.warm_operators()
     for name, fn in modes.items():
