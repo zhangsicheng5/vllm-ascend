@@ -11,6 +11,8 @@
   lifecycle  状态链 (-2,-1,-1)/(-3,-1)/(-3,-2,-1) × q=[1,4,7]，逐步 mgmt 精确
   warmfix    热池不动点: 第一次调用后同池二次调用 miss=0 且池零改写
   boundary   乱序 rpe + 随机 block_table + 未参与行零改写
+  m3tail     -3 短可见尾部 -1 契约（vis<2048 时 topk_src/dst 尾部全 -1,
+             前缀集合恰为 [0,vis); 回归 mtp commit 11a98e560 同源修复）
   c0         C=0 双态 safe-failure
   invalid    12 例元数据违例 safe-failure + fp32 scale host 拒绝 + 结构违例探针
              （量化移植, 替代已被清理的 /tmp 诊断脚本）
@@ -357,6 +359,51 @@ def run_boundary(errs):
     q2r = [r for r, qq in enumerate(q) for _ in range(qq)]
     case["route_table"] = bt[torch.tensor(q2r)].contiguous()
     check_case_full(case, "boundary-randbt-rpe413", errs)
+
+
+# ============================================================= mode: m3tail
+def run_m3tail(errs):
+    """-3 短可见尾部 -1 契约（回归 mtp commit 11a98e560 同源修复, 2026-09-23）。
+
+    因果掩码只把分数置 -inf, 共享 chunk 载荷里仍残留后续 route 的源 ID;
+    visible < sparseCount(2048) 时这些位置必须被显式重写为 -1（对齐官方
+    npu_lightning_indexer）, 否则 topk_src/topk_dst 尾部泄漏不存在的 token。
+
+    断言（每 route）: 前缀集合恰为 [0, vis) 全体（vis<2048 时 top-k 必然全收,
+    与量化噪声无关）; [vis, 2048) 尾部 topk_src/topk_dst 全 -1; 走
+    assert_mgmt_exact 的 -3 精确断言（miss=0 / dst 恒等 / 池不动）。
+
+    配置覆盖对齐与标量补写两条路径:
+      q1-al    vis=1024（32B 对齐, 纯 Duplicate 批量填）
+      q4-unal  vis=1149..1152（非对齐, 尾部 ≤7 项标量补写——原缺陷实测泄漏点）
+      q7-cross vis=2042..2048（跨越 sparseCount, 末路 vis=2048 不触发填充）
+      q4-ctrl  vis=4093..4096（vis>2048 对照组: 不触发, 行内无 -1）
+    """
+    for label, q, L in (("q1-al", [1], 896), ("q4-unal", [4], 1024),
+                        ("q7-cross", [7], 1920), ("q4-ctrl", [4], 4096)):
+        case = build_src_case(q, [-3] * len(q), offload_len=L, seed=37)
+        res, old = run_once(case)
+        assert_mgmt_exact(case, res, old, errs, f"m3tail-{label}")
+        actk = case["actual_key"][0]
+        n_route = q[0]                    # 单请求 B=1, 路数 = q_values[0]
+        for t in range(n_route):
+            vis = actk - n_route + t + 1
+            src = res["topk_src"][t, 0]
+            dst = res["topk_dst"][t, 0]
+            if vis >= TOPK:
+                # 对照组: 2048 位全部应为有效源 ID
+                if bool((src == -1).any()):
+                    errs.append(f"[m3tail-{label}] route{t} vis={vis}≥2048 不应有 -1")
+                continue
+            if sorted(src[:vis].tolist()) != list(range(vis)):
+                errs.append(f"[m3tail-{label}] route{t} vis={vis} 前缀集合≠[0,{vis})")
+            leak_src = src[vis:][src[vis:] != -1]
+            leak_dst = dst[vis:][dst[vis:] != -1]
+            if leak_src.numel() or leak_dst.numel():
+                errs.append(f"[m3tail-{label}] route{t} vis={vis} 尾部泄漏 "
+                            f"src={leak_src[:4].tolist()} dst={leak_dst[:4].tolist()}")
+        print(f"  [m3tail-{label}] q={n_route} vis={actk - n_route + 1}..{actk} PASS",
+              flush=True)
 
 
 # ============================================================= mode: c0
@@ -727,6 +774,7 @@ MODES = {
     "lifecycle": run_lifecycle,
     "warmfix": run_warmfix,
     "boundary": run_boundary,
+    "m3tail": run_m3tail,
     "c0": run_c0,
     "invalid": run_invalid,
     "qsweep": run_qsweep,

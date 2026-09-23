@@ -171,7 +171,7 @@ private:
                                              const LocalTensor<int32_t> &scratchLocal,
                                              int64_t outputOffset, bool hasLongIndexTag,
                                              uint32_t batch, uint32_t routeInBatch,
-                                             uint32_t routeCount);
+                                             uint32_t routeCount, int64_t visibleKeyCount);
     __aicore__ inline void SortTopkBySlotIndex(const LocalTensor<float> &pairLocal,
                                                const LocalTensor<float> &workspaceLocal,
                                                bool hasLongIndexTag);
@@ -454,13 +454,35 @@ __aicore__ inline void LIVectorMtpC8<LIT>::DecodeTopkHitMiss(
     const LocalTensor<float> &pairLocal, const LocalTensor<int32_t> &indexLocal,
     const LocalTensor<int32_t> &slotLocal, const LocalTensor<int32_t> &scratchLocal,
     int64_t outputOffset, bool hasLongIndexTag, uint32_t batch,
-    uint32_t routeInBatch, uint32_t routeCount)
+    uint32_t routeInBatch, uint32_t routeCount, int64_t visibleKeyCount)
 {
     const int32_t requestState = batch < batchSize_
         ? requestStateGm.GetValue(batch) : 0;
     ExtractIndex(indexLocal.template ReinterpretCast<uint32_t>(),
                  pairLocal.template ReinterpretCast<uint32_t>(), constInfo_.sparseCount);
     if (requestState == -3) {
+        // Causal masking changes scores to -inf, but the shared chunk
+        // payload still contains later queries' source IDs. When fewer than
+        // TopK keys are visible, those masked positions must be invalid in
+        // both public outputs, matching npu_lightning_indexer.
+        if (visibleKeyCount < static_cast<int64_t>(constInfo_.sparseCount)) {
+            const uint32_t validCount = visibleKeyCount > 0
+                ? static_cast<uint32_t>(visibleKeyCount) : 0U;
+            // VEC addresses must be 32-byte aligned. Fill the aligned
+            // suffix in bulk and its at-most-seven boundary entries with
+            // scalar stores, preserving the preceding valid source IDs.
+            const uint32_t alignedCount = (validCount + 7U) & ~7U;
+            PipeBarrier<PIPE_V>();
+            if (alignedCount < constInfo_.sparseCount) {
+                Duplicate(indexLocal[alignedCount], -1,
+                          constInfo_.sparseCount - alignedCount);
+            }
+            SetWaitFlag<HardEvent::V_S>(HardEvent::V_S);
+            for (uint32_t position = validCount; position < alignedCount; ++position) {
+                indexLocal.SetValue(position, -1);
+            }
+            SetWaitFlag<HardEvent::S_MTE3>(HardEvent::S_MTE3);
+        }
         // Standard payload already is the source ID (including -1 padding).
         // Preserve score order and publish the identity destination directly.
         LIMtpC8ServiceVec::CopyOut(slotOutGm[outputOffset], indexLocal,
@@ -884,7 +906,7 @@ __aicore__ inline void LIVectorMtpC8<LIT>::ProcessVec(const LIMtpC8Common::RunIn
                                       slotLocal, scratchLocal, outputOffset,
                                       hasLongIndexTag,
                                       info.bIdx, static_cast<uint32_t>(cuS1Idx),
-                                      info.actS1Size);
+                                      info.actS1Size, cuRealAcSeq);
                     InitSortOutBuf(globalTopkUb_[innerS1Idx * BASE_TOPK * 2], BASE_TOPK * 2);
                     outQueue_.EnQue<float>(valueULocal);
                     valueULocal = outQueue_.DeQue<float>();
@@ -1170,7 +1192,7 @@ __aicore__ inline void LIVectorMtpC8<LIT>::ProcessLD()
                               s2ActSeq > EXACT_PACKED_SOURCE_TOKENS,
                               static_cast<uint32_t>(bIdx),
                               static_cast<uint32_t>(s1Idx),
-                              static_cast<uint32_t>(routeCount));
+                              static_cast<uint32_t>(routeCount), s2ActSeq);
             SetWaitFlag<HardEvent::V_MTE3>(HardEvent::V_MTE3);
             SetWaitFlag<HardEvent::S_MTE3>(HardEvent::S_MTE3);
             DataCopyPad(indiceOutGm[outOffset], idxULocal1,
