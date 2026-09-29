@@ -46,7 +46,12 @@ def _make_boundary_decode_metadata():
 )
 def test_pd_decode_consumer_is_derived_from_kv_role(kv_transfer_config, expected):
     vllm_config = SimpleNamespace(kv_transfer_config=kv_transfer_config)
-    with patch.object(AscendSFAMetadataBuilder, "__init__", return_value=None) as init:
+    with patch.object(AscendSFAMetadataBuilder, "__init__", return_value=None) as init, patch(
+        "vllm_ascend.attention.sfa_kv_offload.get_ascend_config",
+        return_value=SimpleNamespace(
+            sparse_kv_offload_config=SimpleNamespace(use_fused_copy_sfa=False)
+        ),
+    ):
         builder = AscendSFAKVOffloadMetadataBuilder(
             kv_cache_spec=None,
             layer_names=[],
@@ -421,4 +426,5 @@ def test_c8_quant_lim():
     assert tuple(op_query.shape) == (tokens, n_head, head_dim) and op_query.dtype == torch.int8
     assert tuple(key_scale.shape) == (blocks, head_dim, 1)
     assert index_key.dtype == torch.int8
-    assert result is impl.lim_topk_src[:tokens]
+    assert result.data_ptr() == impl.lim_topk_src.data_ptr()
+    torch.testing.assert_close(result, impl.lim_topk_src[:tokens])
