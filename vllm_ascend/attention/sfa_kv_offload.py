@@ -671,7 +671,7 @@ class AscendSFAKVOffloadImpl(AscendSFAImpl):
         cache = metadata.copy_sfa_cache_tokens
         index_cache = indexer.k_cache.kv_cache[INDEXER_K_CACHE_SLOT].view(-1, 128, 1, 128)
         table = indexer_metadata.block_table[:count].contiguous()
-        if self.enable_sparse_li_c8:
+        if indexer.enable_sparse_li_c8:
             n_head = indexer.n_head
             assert query_scale is not None, "C8 LIM requires query_dequant_scale from the indexer"
             key_scale = indexer.k_cache.kv_cache[INDEXER_SCALE_CACHE_SLOT]

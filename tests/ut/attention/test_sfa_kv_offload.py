@@ -372,7 +372,6 @@ def test_fused_overlap_common_inputs_are_reused_only_within_one_forward():
 def test_c8_quant_lim():
     n_head, head_dim, num_decodes, tokens, blocks = 32, 128, 2, 2, 8
     impl = AscendSFAKVOffloadImpl.__new__(AscendSFAKVOffloadImpl)
-    impl.enable_sparse_li_c8 = True
     impl.lim_slot_map = torch.full((num_decodes * 2, blocks * head_dim), -(1 << 31), dtype=torch.int32)
     impl.lim_topk_src = torch.zeros((tokens, 1, 2048), dtype=torch.int32)
     impl.lim_topk_dst = torch.zeros_like(impl.lim_topk_src)
@@ -395,6 +394,7 @@ def test_c8_quant_lim():
     query_scale = torch.ones(tokens * n_head, dtype=torch.float16)
     weights = torch.randn(tokens, n_head, dtype=torch.bfloat16)
     indexer = SimpleNamespace(
+        enable_sparse_li_c8=True,
         n_head=n_head,
         head_dim=head_dim,
         k_cache=SimpleNamespace(
