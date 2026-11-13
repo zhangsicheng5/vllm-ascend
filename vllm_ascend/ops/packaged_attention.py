@@ -22,8 +22,17 @@ import torch
 @cache
 def _get_dsl_ops(name: str):
     """Load matching compute and metadata APIs from the operator package."""
-    suffix = "_dsl" if name in ("quant_lightning_indexer", "quant_sparse_lightning_indexer") else ""
-    compute = import_module(f"ops.{name}{suffix}")
+    module_name = f"ops.{name}"
+    suffix = ""
+    try:
+        compute = import_module(module_name)
+    except ModuleNotFoundError as error:
+        # Older indexer wheels use *_dsl modules. Only fall back when the
+        # requested module is absent, not when one of its dependencies fails.
+        if error.name != module_name or name not in ("quant_lightning_indexer", "quant_sparse_lightning_indexer"):
+            raise
+        suffix = "_dsl"
+        compute = import_module(f"{module_name}{suffix}")
     metadata = import_module(f"ops.{name}_metadata{suffix}")
     return getattr(compute, name), getattr(metadata, f"{name}_metadata")
 

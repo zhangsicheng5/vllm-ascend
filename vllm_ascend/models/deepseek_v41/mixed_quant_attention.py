@@ -280,8 +280,28 @@ def qsmla(
     else:
         cmp_indices = None
         cmp_lengths = None
-    task_metadata = metadata.swa.smla_metadata
-    wait_for_device_metadata(DeviceMetadataStage.ATTENTION, id(task_metadata))
+    # FA/FD shard boundaries must match the lengths consumed by this call.
+    # CMP lengths only become available after this layer's sparse selection.
+    metadata_cmp_lengths = cmp_lengths
+    if metadata_cmp_lengths is None:
+        metadata_cmp_lengths = (
+            torch.full_like(ori_lengths, cmp_indices.shape[-1]) if has_cmp else torch.zeros_like(ori_lengths)
+        )
+    task_metadata = ops.mixed_quant_sparse_flash_mla_metadata(
+        ori_lengths,
+        metadata_cmp_lengths,
+        cu_seqlens_q=metadata.swa.query_start_loc,
+        seqused_ori_kv=metadata.swa.seq_lens,
+        seqused_cmp_kv=metadata.attention.cache_seq_lens if has_cmp else None,
+        num_heads_q=q.shape[1],
+        num_heads_kv=1,
+        head_dim=q.shape[2],
+        quant_mode=1,
+        layout_q="TND",
+        layout_kv="PA_BBND",
+        has_ori_kv=True,
+        has_cmp_kv=has_cmp,
+    )
     output, _ = ops.mixed_quant_sparse_flash_mla(
         q,
         ori_kv=ori_kv,

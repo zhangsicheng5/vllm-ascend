@@ -3,10 +3,77 @@
 
 """Test packaged operator dispatcher contracts without the DSL compiler."""
 
+from types import SimpleNamespace
+from unittest.mock import Mock, call
+
 import pytest
 import torch
 
 from vllm_ascend.ops import packaged_attention as ops
+
+
+@pytest.fixture
+def dsl_import_mock(monkeypatch):
+    ops._get_dsl_ops.cache_clear()
+    importer = Mock()
+    monkeypatch.setattr(ops, "import_module", importer)
+    yield importer
+    ops._get_dsl_ops.cache_clear()
+
+
+@pytest.mark.parametrize("name", ["quant_lightning_indexer", "quant_sparse_lightning_indexer"])
+@pytest.mark.parametrize("suffix", ["", "_dsl"])
+def test_indexer_module_names(name, suffix, dsl_import_mock):
+    compute, metadata = Mock(), Mock()
+    modules = [SimpleNamespace(**{name: compute}), SimpleNamespace(**{f"{name}_metadata": metadata})]
+    expected = [call(f"ops.{name}{suffix}"), call(f"ops.{name}_metadata{suffix}")]
+    if suffix:
+        modules.insert(0, ModuleNotFoundError(name=f"ops.{name}"))
+        expected.insert(0, call(f"ops.{name}"))
+    dsl_import_mock.side_effect = modules
+    assert ops._get_dsl_ops(name) == (compute, metadata)
+    assert ops._get_dsl_ops(name) == (compute, metadata)
+    assert dsl_import_mock.call_args_list == expected
+
+
+@pytest.mark.parametrize("missing", ["cannbotdsl.internal", "ops"])
+def test_indexer_dependency_error_is_not_hidden(missing, dsl_import_mock):
+    error = ModuleNotFoundError(name=missing)
+    dsl_import_mock.side_effect = error
+    with pytest.raises(ModuleNotFoundError) as caught:
+        ops._get_dsl_ops("quant_lightning_indexer")
+    assert caught.value is error
+    dsl_import_mock.assert_called_once_with("ops.quant_lightning_indexer")
+
+
+def test_indexer_import_error_is_not_hidden(dsl_import_mock):
+    error = ImportError("missing DSL API")
+    dsl_import_mock.side_effect = error
+    with pytest.raises(ImportError) as caught:
+        ops._get_dsl_ops("quant_lightning_indexer")
+    assert caught.value is error
+    dsl_import_mock.assert_called_once_with("ops.quant_lightning_indexer")
+
+
+def test_indexer_does_not_mix_module_families(dsl_import_mock):
+    name = "quant_lightning_indexer"
+    error = ModuleNotFoundError(name=f"ops.{name}_metadata")
+    dsl_import_mock.side_effect = [SimpleNamespace(**{name: Mock()}), error]
+    with pytest.raises(ModuleNotFoundError) as caught:
+        ops._get_dsl_ops(name)
+    assert caught.value is error
+    assert dsl_import_mock.call_args_list == [call(f"ops.{name}"), call(f"ops.{name}_metadata")]
+
+
+def test_mixed_attention_module_names(dsl_import_mock):
+    name = "mixed_quant_sparse_flash_mla"
+    compute, metadata = Mock(), Mock()
+    dsl_import_mock.side_effect = [
+        SimpleNamespace(**{name: compute}),
+        SimpleNamespace(**{f"{name}_metadata": metadata}),
+    ]
+    assert ops._get_dsl_ops(name) == (compute, metadata)
+    assert dsl_import_mock.call_args_list == [call(f"ops.{name}"), call(f"ops.{name}_metadata")]
 
 
 @pytest.mark.parametrize("return_value,candidate_blocks", [(False, -1), (True, 2048)])
