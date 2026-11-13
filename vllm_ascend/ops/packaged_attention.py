@@ -18,10 +18,24 @@ from importlib import import_module
 
 import torch
 
+from vllm_ascend import envs
+
+
+@cache
+def _get_native_bundle(directory: str):
+    # Keep native loading lazy: fake implementations must not load libraries
+    # or a compiler. The configured bundle has an independent worker lifetime.
+    from vllm_ascend.ops.a5_native_bundle import A5NativeBundle
+
+    return A5NativeBundle(directory)
+
 
 @cache
 def _get_dsl_ops(name: str):
     """Load matching compute and metadata APIs from the operator package."""
+    directory = envs.VLLM_ASCEND_A5_ATTENTION_BUNDLE
+    if directory:
+        return _get_native_bundle(directory).get_ops(name)
     suffix = "_dsl" if name in ("quant_lightning_indexer", "quant_sparse_lightning_indexer") else ""
     compute = import_module(f"ops.{name}{suffix}")
     metadata = import_module(f"ops.{name}_metadata{suffix}")

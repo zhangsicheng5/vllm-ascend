@@ -220,6 +220,8 @@ class AscendDSAV41Metadata(AttentionMetadata):
     replay_cache_blocks: torch.Tensor | None = None
     replay_cache_offsets: torch.Tensor | None = None
     smla_metadata: torch.Tensor | None = None
+    # Readiness fence only; A5's actual plan follows index selection in qsmla.
+    a5_smla_inputs_ready: torch.Tensor | None = None
     qli_metadata: torch.Tensor | None = None
     cmp_residual: torch.Tensor | None = None
     c2_ring_metadata: torch.Tensor | None = None
@@ -898,13 +900,11 @@ class AscendDSAV41MetadataBuilder(AttentionMetadataBuilder[AscendDSAV41Metadata]
         if self._supports_device_ops and self._uses_a5_packed_cache and self._cache_kind == "swa":
             self._a5_causal_swa_indices = torch.empty((max_tokens, 1, window_size), dtype=torch.int32, device=device)
             self._a5_causal_swa_lengths = torch.empty((max_tokens, 1), dtype=torch.int32, device=device)
-            self._a5_smla_metadata = torch.empty(V41_METADATA_BUFFER_SIZE, dtype=torch.int32, device=device)
-            self._a5_smla_length_rows = torch.empty((max_tokens, 1), dtype=torch.int32, device=device)
+            self._a5_smla_inputs_ready = torch.empty(0, dtype=torch.uint8, device=device)
         else:
             self._a5_causal_swa_indices = None
             self._a5_causal_swa_lengths = None
-            self._a5_smla_metadata = None
-            self._a5_smla_length_rows = None
+            self._a5_smla_inputs_ready = None
         self._c2_ring_metadata = torch.zeros(5 * compressor_reqs, dtype=torch.int32, device=device)
         self._c2_complete_mask = torch.zeros(compressor_tokens, dtype=torch.bool, device=device)
         self._c2_source_positions = torch.zeros(compressor_tokens, dtype=torch.int64, device=device)
@@ -1504,41 +1504,16 @@ class AscendDSAV41AttentionMetadataBuilder(AscendDSAV41MetadataBuilder):
         head_dim = int(_config_value(text_config, "head_dim"))
         index_topk = int(_config_value(text_config, "index_topk"))
         operator_ratio = 0 if req.cache_kind == "swa" else req.compress_ratio
-        metadata_tokens = req.num_input_tokens if self._device_metadata_in_graph else req.num_actual_tokens
-        if (
-            self._uses_a5_packed_cache
-            and req.cache_kind == "swa"
-            and self._a5_smla_metadata is not None
-            and self._a5_smla_length_rows is not None
-        ):
-
-            def build_a5_smla_metadata() -> None:
-                if metadata_tokens == 0:
-                    self._a5_smla_metadata.zero_()
-                    return
-                length_rows = self._a5_smla_length_rows[:metadata_tokens]
-                assert self._device_backend is not None
-                value = self._device_backend.mixed_quant_sparse_flash_mla_metadata(
-                    length_rows,
-                    length_rows,
-                    cu_seqlens_q=common.query_start_loc[: req.num_reqs + 1].int().contiguous(),
-                    num_heads_q=64,
-                    num_heads_kv=1,
-                    head_dim=512,
-                    quant_mode=1,
-                    layout_q="TND",
-                    layout_kv="PA_BBND",
-                    has_ori_kv=True,
-                    has_cmp_kv=True,
-                )
-                self._a5_smla_metadata.copy_(value)
-
-            req.smla_metadata = self._publish_task(
+        if self._uses_a5_packed_cache and req.cache_kind == "swa" and self._a5_smla_inputs_ready is not None:
+            # Compressed TopK lengths do not exist until the indexer runs.
+            # Publish a distinct readiness frontier, not an uninitialised plan.
+            req.smla_metadata = None
+            req.a5_smla_inputs_ready = self._publish_task(
                 self.common_v41_smla_metadata,
-                "smla:a5",
-                self._a5_smla_metadata,
+                "smla:a5:inputs",
+                self._a5_smla_inputs_ready,
                 DeviceMetadataStage.ATTENTION,
-                build_a5_smla_metadata,
+                lambda: None,
             )
 
         if self._supports_device_ops and not self._uses_a5_packed_cache and req.cache_kind in {"swa", "long_kv"}:

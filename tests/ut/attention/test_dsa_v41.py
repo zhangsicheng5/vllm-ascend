@@ -16,6 +16,91 @@ from vllm_ascend.models.deepseek_v41 import mixed_quant_attention as a5_indexer
 TOKENS, TOPK = 4, 512
 
 
+@pytest.mark.parametrize("heads", [64, 128])
+@pytest.mark.parametrize("has_cmp", [False, True])
+@pytest.mark.parametrize("supply_cmp_lengths", [False, True])
+def test_a5_smla_plans_on_actual_heads_and_selected_lengths(monkeypatch, heads, has_cmp, supply_cmp_lengths):
+    q = torch.empty(3, heads, 512, dtype=torch.bfloat16)
+    ori_lengths = torch.tensor([[4], [6], [9]], dtype=torch.int32)
+    selected = torch.tensor([[5, -1, -1], [2, 3, 4], [-1, -1, -1]], dtype=torch.int32)
+    cmp_lengths = torch.tensor([1, 3, 0], dtype=torch.int32)
+    ori_kv, cmp_kv = object(), object() if has_cmp else None
+    marker = torch.empty(0, dtype=torch.uint8)
+    planned = torch.empty(1024, dtype=torch.int32)
+    output = torch.empty_like(q)
+    metadata = SimpleNamespace(
+        swa=SimpleNamespace(
+            a5_smla_inputs_ready=marker,
+            ori_sparse_indices=torch.zeros(3, 1, 16, dtype=torch.int32),
+            ori_topk_length=ori_lengths,
+            query_start_loc=torch.tensor([0, 1, 3], dtype=torch.int32),
+            seq_lens=torch.tensor([9, 17], dtype=torch.int32),
+            block_table=torch.zeros(2, 1, dtype=torch.int32),
+            # A stale builder plan must never be reused for a new selection.
+            smla_metadata=torch.full((1024,), -1, dtype=torch.int32),
+        ),
+        attention=SimpleNamespace(
+            block_table=torch.ones(2, 1, dtype=torch.int32),
+            cache_seq_lens=torch.tensor([4, 8], dtype=torch.int32),
+        ),
+    )
+    calls = []
+    lengths_seen = []
+
+    def wait(stage, group):
+        assert stage == dsa_v41.DeviceMetadataStage.ATTENTION and group == id(marker)
+        calls.append("ready")
+
+    def plan(ori, cmp, **kwargs):
+        assert calls == ["ready"]
+        assert kwargs["num_heads_q"] == heads
+        assert kwargs["has_cmp_kv"] == has_cmp
+        assert kwargs["cu_seqlens_q"] is metadata.swa.query_start_loc
+        torch.testing.assert_close(ori, ori_lengths)
+        expected_cmp = cmp_lengths[:, None] if has_cmp else torch.zeros_like(ori_lengths)
+        torch.testing.assert_close(cmp, expected_cmp)
+        assert ori.data_ptr() != cmp.data_ptr()
+        lengths_seen.extend((ori, cmp))
+        calls.append("plan")
+        return planned
+
+    def compute(query, **kwargs):
+        assert calls == ["ready", "plan"]
+        assert query is q
+        assert kwargs["metadata"] is planned
+        assert kwargs["ori_topk_length"] is lengths_seen[0]
+        assert kwargs["ori_kv"] is ori_kv
+        assert kwargs["cmp_kv"] is cmp_kv
+        if has_cmp:
+            assert kwargs["cmp_topk_length"] is lengths_seen[1]
+            torch.testing.assert_close(kwargs["cmp_sparse_indices"], selected[:, None])
+            assert kwargs["cmp_block_table"] is metadata.attention.block_table
+        else:
+            assert kwargs["cmp_topk_length"] is None
+            assert kwargs["cmp_sparse_indices"] is None
+            assert kwargs["cmp_block_table"] is None
+        assert kwargs["return_softmax_lse"] is False
+        calls.append("compute")
+        return output, torch.empty(0)
+
+    monkeypatch.setattr(a5_indexer, "wait_for_device_metadata", wait)
+    monkeypatch.setattr(a5_indexer.ops, "mixed_quant_sparse_flash_mla_metadata", plan)
+    monkeypatch.setattr(a5_indexer.ops, "mixed_quant_sparse_flash_mla", compute)
+    result = a5_indexer.qsmla(
+        q,
+        ori_kv,
+        cmp_kv,
+        metadata,
+        selected if has_cmp else None,
+        compressed_lengths=cmp_lengths if has_cmp and supply_cmp_lengths else None,
+        window_size=16,
+        sinks=torch.zeros(heads),
+        softmax_scale=0.125,
+    )
+    assert result is output
+    assert calls == ["ready", "plan", "compute"]
+
+
 @pytest.mark.parametrize("otp_enabled,pcp_sharding", [(False, None), (False, False), (True, False), (False, True)])
 @pytest.mark.parametrize("num_tokens", [0, 1, 7])
 @pytest.mark.parametrize("provide_output", [False, True])

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import torch
 
+from vllm_ascend.models.deepseek_v41.mixed_quant_metadata import prepare_smla_lengths
 from vllm_ascend.ops import packaged_attention as ops
 from vllm_ascend.ops.triton.build_window_indices import (
     build_window_indices_triton,
@@ -232,20 +233,27 @@ def run_a5_indexer(
     )
 
 
-def build_smla_metadata(length_rows: torch.Tensor, cu_seqlens_q: torch.Tensor) -> torch.Tensor:
-    """Build the fixed A5 mixed-quant SMLA launch metadata."""
+def build_smla_metadata(
+    ori_lengths: torch.Tensor,
+    cmp_lengths: torch.Tensor,
+    cu_seqlens_q: torch.Tensor,
+    *,
+    num_heads_q: int,
+    has_cmp_kv: bool,
+) -> torch.Tensor:
+    """Plan from the current selected lengths and actual local query heads."""
     return ops.mixed_quant_sparse_flash_mla_metadata(
-        length_rows,
-        length_rows,
+        ori_lengths,
+        cmp_lengths,
         cu_seqlens_q=cu_seqlens_q,
-        num_heads_q=64,
+        num_heads_q=num_heads_q,
         num_heads_kv=1,
         head_dim=512,
         quant_mode=1,
         layout_q="TND",
         layout_kv="PA_BBND",
         has_ori_kv=True,
-        has_cmp_kv=True,
+        has_cmp_kv=has_cmp_kv,
     )
 
 
@@ -272,16 +280,36 @@ def qsmla(
     softmax_scale,
     compressed_lengths=None,
 ):
+    # Join builder-owned inputs before reading their window tensors. The plan
+    # itself must follow the current index selection, on this consumer stream.
+    inputs_ready = metadata.swa.a5_smla_inputs_ready
+    if inputs_ready is not None:
+        wait_for_device_metadata(DeviceMetadataStage.ATTENTION, id(inputs_ready))
     ori_indices, ori_lengths = _resolve_window_indices(q, metadata, window_size)
     has_cmp = cmp_kv is not None
     if has_cmp:
+        if (
+            compressed_indices is None
+            or compressed_indices.ndim != 2
+            or compressed_indices.shape[0] != q.shape[0]
+            or compressed_indices.dtype not in (torch.int32, torch.int64)
+        ):
+            raise ValueError("compressed KV requires integer selected indices [T,K]")
         cmp_indices = compressed_indices[:, None, :].to(torch.int32).contiguous()
         cmp_lengths = compressed_lengths
     else:
         cmp_indices = None
         cmp_lengths = None
-    task_metadata = metadata.swa.smla_metadata
-    wait_for_device_metadata(DeviceMetadataStage.ATTENTION, id(task_metadata))
+    ori_lengths, plan_cmp_lengths = prepare_smla_lengths(q, ori_lengths, cmp_indices, cmp_lengths)
+    if has_cmp:
+        cmp_lengths = plan_cmp_lengths
+    task_metadata = build_smla_metadata(
+        ori_lengths,
+        plan_cmp_lengths,
+        metadata.swa.query_start_loc,
+        num_heads_q=q.shape[1],
+        has_cmp_kv=has_cmp,
+    )
     output, _ = ops.mixed_quant_sparse_flash_mla(
         q,
         ori_kv=ori_kv,

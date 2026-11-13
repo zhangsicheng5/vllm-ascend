@@ -452,10 +452,9 @@ class TestPCPMetadata:
         _build_planes(owners, _batch(4, 3, "prefill", decode_sharded=True))
         builder = owners["swa"]
         if packed_cache:
-            builder._a5_smla_metadata = torch.ones(dsa_v41.V41_METADATA_BUFFER_SIZE, dtype=torch.int32)
+            builder._a5_smla_inputs_ready = torch.empty(0, dtype=torch.uint8)
+            marker = builder._a5_smla_inputs_ready
         captured = [builder._smla_metadata, builder._qli_metadata]
-        if packed_cache:
-            captured.append(builder._a5_smla_metadata)
         for buffer in captured:
             buffer.fill_(1)
         addresses = [buffer.data_ptr() for buffer in captured]
@@ -478,6 +477,10 @@ class TestPCPMetadata:
         assert [buffer.data_ptr() for buffer in captured] == addresses
         assert all(torch.count_nonzero(buffer) == 0 for buffer in captured)
         assert torch.all(global_metadata == 7)
+        if packed_cache:
+            assert builder._a5_smla_inputs_ready is marker
+            assert result.a5_smla_inputs_ready is None
+            assert result.smla_metadata is None
 
     @pytest.mark.parametrize(
         "world,rank,scenario,decode_sharded",
@@ -629,21 +632,18 @@ class TestPCPMetadata:
         assert builder.take_device_metadata_tasks() == ()
 
     @pytest.mark.parametrize("rank", [0, 1])
-    def test_a5_attention_metadata_has_one_local_owner_across_capture_and_prefill(self, builders, rank):
+    def test_a5_input_frontier_has_one_local_owner_without_an_early_plan(self, builders, rank):
         owners = builders(rank=rank)
         swa_builder = owners["swa"]
-        calls = []
         for owner in (swa_builder, swa_builder._global_builder):
             owner._uses_a5_packed_cache = True
-            owner._a5_smla_metadata = torch.zeros(dsa_v41.V41_METADATA_BUFFER_SIZE, dtype=torch.int32)
-            owner._a5_smla_length_rows = torch.empty(64, 1, dtype=torch.int32)
+            owner._a5_smla_inputs_ready = torch.empty(0, dtype=torch.uint8)
 
             def metadata(*args, **kwargs):
-                calls.append(kwargs["cu_seqlens_q"].clone())
-                return torch.ones(dsa_v41.V41_METADATA_BUFFER_SIZE, dtype=torch.int32)
+                pytest.fail("A5 cannot plan before compressed index selection")
 
             owner._device_backend = SimpleNamespace(mixed_quant_sparse_flash_mla_metadata=metadata)
-        address = swa_builder._a5_smla_metadata.data_ptr()
+        marker = swa_builder._a5_smla_inputs_ready
         for scenario in ("prefill", "dummy", "decode", "mixed", "empty", "prefill"):
             batch = _batch(2, rank, scenario)
             with swa_builder.defer_device_metadata(in_graph=batch.graph):
@@ -653,11 +653,11 @@ class TestPCPMetadata:
             assert len(tasks) == int(bool(batch.local_ids))
             for task in tasks:
                 assert task.stage == dsa_v41.DeviceMetadataStage.ATTENTION
-                assert task.group_id == id(swa_builder._a5_smla_metadata)
+                assert task.group_id == id(marker)
                 task.run()
-                torch.testing.assert_close(calls[-1], result.query_start_loc)
-            assert swa_builder._a5_smla_metadata.data_ptr() == address
-            assert torch.count_nonzero(swa_builder._global_builder._a5_smla_metadata) == 0
+            assert swa_builder._a5_smla_inputs_ready is marker
+            assert result.smla_metadata is None
+            assert result.a5_smla_inputs_ready is (marker if batch.local_ids else None)
 
     def test_rejects_unsupported_context(self, builders):
         with pytest.raises(NotImplementedError, match="DCP=1"):

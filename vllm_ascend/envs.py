@@ -49,6 +49,11 @@ def _bool_env(name: str, default: bool) -> bool:
 
 
 env_variables: dict[str, Callable[[], Any]] = {
+    # Optional task-private precompiled A5 attention bundle directory. Empty
+    # (default) keeps the existing external operator package. A nonempty path
+    # selects that bundle exclusively; missing profiles/errors do not fall back
+    # or trigger compilation. Non-sensitive filesystem path, fixed per worker.
+    "VLLM_ASCEND_A5_ATTENTION_BUNDLE": lambda: os.getenv("VLLM_ASCEND_A5_ATTENTION_BUNDLE", ""),
     # max compile thread number for package building. Usually, it is set to
     # the number of CPU cores. If not set, the default value is None, which
     # means all number of CPU cores will be used.
