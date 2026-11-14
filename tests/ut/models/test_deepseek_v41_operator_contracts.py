@@ -12,10 +12,11 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.mark.parametrize("has_cmp,explicit_cmp_lengths", [(False, False), (True, False), (True, True)])
-def test_a5_attention_metadata_uses_consumed_lengths(monkeypatch, has_cmp, explicit_cmp_lengths):
+@pytest.mark.parametrize("n_heads", [64, 128])
+def test_a5_attention_metadata_uses_consumed_lengths(monkeypatch, has_cmp, explicit_cmp_lengths, n_heads):
     from vllm_ascend.models.deepseek_v41 import mixed_quant_attention as packed
 
-    q = torch.zeros((3, 64, 512), dtype=torch.bfloat16)
+    q = torch.zeros((3, n_heads, 512), dtype=torch.bfloat16)
     ori_lengths = torch.tensor([[1], [2], [3]], dtype=torch.int32)
     cmp_lengths = torch.tensor([[0], [1], [2]], dtype=torch.int32) if explicit_cmp_lengths else None
     indices = torch.zeros((3, 1, 128), dtype=torch.int32)
@@ -44,7 +45,7 @@ def test_a5_attention_metadata_uses_consumed_lengths(monkeypatch, has_cmp, expli
         torch.testing.assert_close(actual_ori, ori_lengths)
         torch.testing.assert_close(actual_cmp, expected_cmp)
         assert kwargs["has_cmp_kv"] == has_cmp
-        assert kwargs["num_heads_q"] == 64
+        assert kwargs["num_heads_q"] == n_heads
         calls.append("metadata")
         return new_metadata
 
@@ -65,12 +66,30 @@ def test_a5_attention_metadata_uses_consumed_lengths(monkeypatch, has_cmp, expli
         metadata,
         torch.zeros((3, 512), dtype=torch.int32),
         window_size=128,
-        sinks=torch.zeros(64),
+        sinks=torch.zeros(n_heads),
         softmax_scale=0.5,
         compressed_lengths=cmp_lengths,
     )
     assert result is q
     assert calls == ["metadata", "compute"]
+
+
+@pytest.mark.parametrize("n_heads", [64, 128])
+def test_a5_smla_metadata_helper_forwards_query_heads(monkeypatch, n_heads):
+    from vllm_ascend.models.deepseek_v41 import mixed_quant_attention as packed
+
+    lengths = torch.ones((2, 1), dtype=torch.int32)
+    cu_q = torch.tensor([0, 2], dtype=torch.int32)
+    expected = torch.zeros(1024, dtype=torch.int32)
+
+    def build(ori, cmp, **kwargs):
+        assert ori is lengths and cmp is lengths
+        assert kwargs["cu_seqlens_q"] is cu_q
+        assert kwargs["num_heads_q"] == n_heads
+        return expected
+
+    monkeypatch.setattr(packed.ops, "mixed_quant_sparse_flash_mla_metadata", build)
+    assert packed.build_smla_metadata(lengths, cu_q, num_heads_q=n_heads) is expected
 
 
 def test_deepseek_v41_model_call_sites_use_compiled_operator_layouts():

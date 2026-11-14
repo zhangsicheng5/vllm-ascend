@@ -232,13 +232,15 @@ def run_a5_indexer(
     )
 
 
-def build_smla_metadata(length_rows: torch.Tensor, cu_seqlens_q: torch.Tensor) -> torch.Tensor:
+def build_smla_metadata(
+    length_rows: torch.Tensor, cu_seqlens_q: torch.Tensor, *, num_heads_q: int
+) -> torch.Tensor:
     """Build the fixed A5 mixed-quant SMLA launch metadata."""
     return ops.mixed_quant_sparse_flash_mla_metadata(
         length_rows,
         length_rows,
         cu_seqlens_q=cu_seqlens_q,
-        num_heads_q=64,
+        num_heads_q=num_heads_q,
         num_heads_kv=1,
         head_dim=512,
         quant_mode=1,
