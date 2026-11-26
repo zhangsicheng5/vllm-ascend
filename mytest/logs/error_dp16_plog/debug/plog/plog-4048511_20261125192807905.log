@@ -1,0 +1,301 @@
+[ERROR] HCCL(4048511,):2026-11-25-19:28:07.744.272 [product_server.c:652][ServerGetRootinfo] NPU phy id 6 ProcessLayer 3 failed, MainBoardId 39
+[ERROR] HCCL(4048511,):2026-11-25-19:28:08.405.882 [product_server.c:652][ServerGetRootinfo] NPU phy id 6 ProcessLayer 3 failed, MainBoardId 39
+[ERROR] HCCL(4048511,):2026-11-25-19:31:58.742.666 [product_server.c:652][ServerGetRootinfo] NPU phy id 6 ProcessLayer 3 failed, MainBoardId 39
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.721.423 [task_recycle_cqrpt_base.cc:91]4049786 PrintTaskErrorMsg:Task run failed, stream_id=61, pos=735, task_sn=578471, sqe_type=1(aiv), errType=0x1(task exception), sqSwStatus=0.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.155 [device_error_proc_c.cc:573]4049786 ProcessCoreErrorClass:comm_flag=AIX_S_ERROR(4)
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.259 [device_error_proc_c.cc:530]4049786 SetDeviceFaultTypeByAixErrClass:software error, stream_id=61, task_id=735.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.275 [device_error_proc_c.cc:642]4049786 AddExceptionRegInfo:add error register: core_id=0, stream_id=61, task_sn=578471
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.291 [device_error_proc_c.cc:720]4049786 PrintDavidCoreInfo:An error occurs on the device(chipId:0, dieId:0), the serial number is 45, the error is aivec error, core id is 0, error code = 341, dump info: pc start: 0x120ebfcb6400, current: 0x120ebfcb7280, sc error info: 0xffffffffffff, su error info: 0x2000bfc0000,0xff3df43318001240, mte error info: 0x9edc650d00076ef7, vec error info: 0xbfcb74200031dc87, cube error info: 0, l1 error info: 0, aic error mask: 0x80395856, para base: 0x12004bf5ba80, mte error: 0, aic cond: 0. The extend info: errcode:(341) errorStr: The address for VEC to access UB is out of bounds. subErrType: 0x4. For details, see the troubleshooting document on the Ascend official website. Search for the keyword "AI Core Error".
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.333 [device_error_proc_c.cc:642]4049786 AddExceptionRegInfo:add error register: core_id=1, stream_id=61, task_sn=578471
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.338 [device_error_proc_c.cc:720]4049786 PrintDavidCoreInfo:An error occurs on the device(chipId:0, dieId:0), the serial number is 45, the error is aivec error, core id is 1, error code = 341, dump info: pc start: 0x120ebfcb6400, current: 0x120ebfcb72b8, sc error info: 0xffffffffffff, su error info: 0x800002000ffe0000,0x3ff6ff5318001240, mte error info: 0xecc602ce0007ddfe, vec error info: 0xbfcb74200031dc87, cube error info: 0, l1 error info: 0, aic error mask: 0x80395856, para base: 0x12004bf5ba80, mte error: 0, aic cond: 0. The extend info: errcode:(341) errorStr: The address for VEC to access UB is out of bounds. subErrType: 0x4. For details, see the troubleshooting document on the Ascend official website. Search for the keyword "AI Core Error".
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.346 [device_error_proc_c.cc:642]4049786 AddExceptionRegInfo:add error register: core_id=2, stream_id=61, task_sn=578471
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.351 [device_error_proc_c.cc:720]4049786 PrintDavidCoreInfo:An error occurs on the device(chipId:0, dieId:0), the serial number is 45, the error is aivec error, core id is 2, error code = 341, dump info: pc start: 0x120ebfcb6400, current: 0x120ebfcb7280, sc error info: 0xffffffffffff, su error info: 0x4c671580266a0000,0xfffdc5df180011fd, mte error info: 0xffbe9fd60006fffd, vec error info: 0xbfcb74200031dc87, cube error info: 0, l1 error info: 0, aic error mask: 0x80395856, para base: 0x12004bf5ba80, mte error: 0, aic cond: 0. The extend info: errcode:(341) errorStr: The address for VEC to access UB is out of bounds. subErrType: 0x4. For details, see the troubleshooting document on the Ascend official website. Search for the keyword "AI Core Error".
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.357 [device_error_proc_c.cc:642]4049786 AddExceptionRegInfo:add error register: core_id=3, stream_id=61, task_sn=578471
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.361 [device_error_proc_c.cc:720]4049786 PrintDavidCoreInfo:An error occurs on the device(chipId:0, dieId:0), the serial number is 45, the error is aivec error, core id is 3, error code = 341, dump info: pc start: 0x120ebfcb6400, current: 0x120ebfcb7280, sc error info: 0xffffffffffff, su error info: 0xdc673ef51bacffbf,0xf39f8ed9b0007255, mte error info: 0xcaf6b38e0006b5fb, vec error info: 0xbfcb74200031dc87, cube error info: 0, l1 error info: 0, aic error mask: 0x80395856, para base: 0x12004bf5ba80, mte error: 0, aic cond: 0. The extend info: errcode:(341) errorStr: The address for VEC to access UB is out of bounds. subErrType: 0x4. For details, see the troubleshooting document on the Ascend official website. Search for the keyword "AI Core Error".
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.378 [davinci_kernel_task_v200_base.cc:245]4049786 SetStarsResultByErrorType:Vector Core kernel execution failed, retCode=0x31.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.382 [davinci_kernel_task.cc:1030]4049786 PreCheckTaskErr:An error occurred in the kernel task, retCode=0x31, [vector core exception].
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.440 [davinci_kernel_task.cc:839]4049786 GetArgsInfo:[AIC_INFO] args(0 to 19) after execute:0x401a42af2c00, 0x12004bf5bac0, 0x12004bf5bae0, 0x12004bf5bb00, 0x401a41dff800, 0x400d738c4000, 0x12004bf5bb40, 0, 0x1, 0, 0, 0, 0x880, 0x10, 0, 0, 0x20, 0x100000002, 0x880, 0x10.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.445 [davinci_kernel_task.cc:839]4049786 GetArgsInfo:[AIC_INFO] args(20 to 39) after execute:0x401a41f36400, 0x8800, 0x1, 0x1000000, 0, 0, 0, 0x100000000, 0, 0, 0, 0xe000000000, 0x4000000001, 0x220, 0x1, 0x220, 0x1, 0x220, 0x1, 0x380.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.447 [davinci_kernel_task.cc:839]4049786 GetArgsInfo:[AIC_INFO] args(40 to 47) after execute:0xf700, 0xf700, 0x3dc0, 0xe0, 0xa5a5a5a50d03920f, 0, 0, 0.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.450 [davinci_kernel_task.cc:847]4049786 GetArgsInfo:tilingKey = 0, print 3 Times totalLen=(48*8), argsSize=384, schemMode=0, blockDim=64, gridDim3=[0,0,0], blockDim3=[0,0,0]
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.730.462 [davinci_kernel_task.cc:935]4049786 PrintErrorInfoForDavinciTask:[AIC_INFO] after execute:args print end
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.733.210 [davinci_kernel_task.cc:972]4049786 PrintErrorInfoForDavinciTask:[DFX_INFO]AI Core kernel execution failed, device_id=6, stream_id=61, report_stream_id=61, task_id=735, flip_num=195, fault kernel_name=Index_int32_int32_high_performance_260, fault kernel info ext=none, program id=120, hash=11123341430388816675.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.733.296 [exception_dumper.cpp:191][tid:4049786] [Dump][Exception] Begin to dump exception. dumpScene=aic_err_brief_dump, deviceId=6, streamId=61, taskId=578471, exceptionType=2(aicore), kernelName=Index_int32_int32_high_performance_260.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.734.056 [kernel_info_collector.cpp:296][tid:4049786] [Dump][Exception] dump host kernel to file, file: /home/z00911889/mytest/extra-info/data-dump/6/Index_int32_int32_high_performance_260_host.o
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.742 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=0, coreType=1, SU_ERR_INFO_T0_0=0xbfc0000 SU_ERR_INFO_T0_1=0x200 SU_ERR_INFO_T0_2=0x18001240 SU_ERR_INFO_T0_3=0xff3df433 MTE_ERR_INFO_T0_0=0x76ef7 MTE_ERR_INFO_T0_1=0x9edc650d MTE_ERR_INFO_T0_2=0x498 MTE_ERR_INFO_T1_0=0x0 MTE_ERR_INFO_T1_1=0x0 MTE_ERR_INFO_T1_2=0x0 VEC_ERR_INFO_T0_0=0x31dc87 VEC_ERR_INFO_T0_1=0xbfcb7420 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.746 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=0, coreType=1, VEC_ERR_INFO_T0_2=0x120e VEC_ERR_INFO_T0_3=0x4f710 VEC_ERR_INFO_T0_4=0x0 VEC_ERR_INFO_T0_5=0x0 CUBE_ERR_INFO_T0_0=0x0 CUBE_ERR_INFO_T0_1=0x0 L1_ERR_INFO_T0_0=0x0 L1_ERR_INFO_T0_1=0x0 SC_ERROR_T0_0=0x0 SU_ERROR_T0_0=0x0 MTE_ERROR_T0_0=0x0 MTE_ERROR_T1_0=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.748 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=0, coreType=1, VEC_ERROR_T0_0=0x200000 VEC_ERROR_T0_2=0x0 CUBE_ERROR_T0_0=0x0 CUBE_ERROR_T0_1=0x0 L1_ERROR_T0_0=0x0 L1_ERROR_T0_1=0x0 SC_ERR_INFO_T0_0=0xffffffff SC_ERR_INFO_T0_1=0xffff SU_SPR_CONDITION_0=0x0 SU_SPR_CONDITION_1=0x0 SU_ERR_INFO_T0_4=0x0 SU_ERR_INFO_T0_5=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.751 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=0, coreType=1, SU_ERR_INFO_T0_6=0x0 SU_ERR_INFO_T0_7=0x0 VEC_ERR_INFO_T0_6=0x0 SU_ERROR_T0_1=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.755 [kernel_pc_fixer.cpp:102][tid:4049786] [Dump][Exception] Fix PC with module=VEC, originalPC=0x120ebfcb7280, fixedPC=0x120ebfcb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.757 [kernel_symbol_locator.cpp:725][tid:4049786] [Dump][Exception] Error PC information. coreId=0, coreType=1, originalStartPC=0x120ebfcb6400, fixedStartPC=0x120ebfc00000, originalCurrentPC=0x120ebfcb7280, fixedCurrentPC=0x120ebfcb7420, fixedPCOffset=0xb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.765 [kernel_symbol_locator.cpp:755][tid:4049786] [Dump][Exception] Not found error symbol information. coreId=0, coreType=1, symbolCount=881, hasSymbolRange=1, minSymbolOffset=0x0, maxSymbolEnd=0x315190.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.776 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=1, coreType=1, SU_ERR_INFO_T0_0=0xffe0000 SU_ERR_INFO_T0_1=0x80000200 SU_ERR_INFO_T0_2=0x18001240 SU_ERR_INFO_T0_3=0x3ff6ff53 MTE_ERR_INFO_T0_0=0x7ddfe MTE_ERR_INFO_T0_1=0xecc602ce MTE_ERR_INFO_T0_2=0x597 MTE_ERR_INFO_T1_0=0x0 MTE_ERR_INFO_T1_1=0x0 MTE_ERR_INFO_T1_2=0x0 VEC_ERR_INFO_T0_0=0x31dc87 VEC_ERR_INFO_T0_1=0xbfcb7420 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.777 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=1, coreType=1, VEC_ERR_INFO_T0_2=0x120e VEC_ERR_INFO_T0_3=0x4f714 VEC_ERR_INFO_T0_4=0x0 VEC_ERR_INFO_T0_5=0x0 CUBE_ERR_INFO_T0_0=0x0 CUBE_ERR_INFO_T0_1=0x0 L1_ERR_INFO_T0_0=0x0 L1_ERR_INFO_T0_1=0x0 SC_ERROR_T0_0=0x0 SU_ERROR_T0_0=0x0 MTE_ERROR_T0_0=0x0 MTE_ERROR_T1_0=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.779 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=1, coreType=1, VEC_ERROR_T0_0=0x200000 VEC_ERROR_T0_2=0x0 CUBE_ERROR_T0_0=0x0 CUBE_ERROR_T0_1=0x0 L1_ERROR_T0_0=0x0 L1_ERROR_T0_1=0x0 SC_ERR_INFO_T0_0=0xffffffff SC_ERR_INFO_T0_1=0xffff SU_SPR_CONDITION_0=0x0 SU_SPR_CONDITION_1=0x0 SU_ERR_INFO_T0_4=0x0 SU_ERR_INFO_T0_5=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.780 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=1, coreType=1, SU_ERR_INFO_T0_6=0x0 SU_ERR_INFO_T0_7=0x0 VEC_ERR_INFO_T0_6=0x0 SU_ERROR_T0_1=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.783 [kernel_pc_fixer.cpp:102][tid:4049786] [Dump][Exception] Fix PC with module=VEC, originalPC=0x120ebfcb72b8, fixedPC=0x120ebfcb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.784 [kernel_symbol_locator.cpp:725][tid:4049786] [Dump][Exception] Error PC information. coreId=1, coreType=1, originalStartPC=0x120ebfcb6400, fixedStartPC=0x120ebfc00000, originalCurrentPC=0x120ebfcb72b8, fixedCurrentPC=0x120ebfcb7420, fixedPCOffset=0xb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.791 [kernel_symbol_locator.cpp:755][tid:4049786] [Dump][Exception] Not found error symbol information. coreId=1, coreType=1, symbolCount=881, hasSymbolRange=1, minSymbolOffset=0x0, maxSymbolEnd=0x315190.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.799 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=2, coreType=1, SU_ERR_INFO_T0_0=0x266a0000 SU_ERR_INFO_T0_1=0x4c671580 SU_ERR_INFO_T0_2=0x180011fd SU_ERR_INFO_T0_3=0xfffdc5df MTE_ERR_INFO_T0_0=0x6fffd MTE_ERR_INFO_T0_1=0xffbe9fd6 MTE_ERR_INFO_T0_2=0x53f MTE_ERR_INFO_T1_0=0x0 MTE_ERR_INFO_T1_1=0x0 MTE_ERR_INFO_T1_2=0x0 VEC_ERR_INFO_T0_0=0x31dc87 VEC_ERR_INFO_T0_1=0xbfcb7420 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.801 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=2, coreType=1, VEC_ERR_INFO_T0_2=0x120e VEC_ERR_INFO_T0_3=0x4f710 VEC_ERR_INFO_T0_4=0x0 VEC_ERR_INFO_T0_5=0x0 CUBE_ERR_INFO_T0_0=0x0 CUBE_ERR_INFO_T0_1=0x0 L1_ERR_INFO_T0_0=0x0 L1_ERR_INFO_T0_1=0x0 SC_ERROR_T0_0=0x0 SU_ERROR_T0_0=0x0 MTE_ERROR_T0_0=0x0 MTE_ERROR_T1_0=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.804 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=2, coreType=1, VEC_ERROR_T0_0=0x200000 VEC_ERROR_T0_2=0x0 CUBE_ERROR_T0_0=0x0 CUBE_ERROR_T0_1=0x0 L1_ERROR_T0_0=0x0 L1_ERROR_T0_1=0x0 SC_ERR_INFO_T0_0=0xffffffff SC_ERR_INFO_T0_1=0xffff SU_SPR_CONDITION_0=0x0 SU_SPR_CONDITION_1=0x0 SU_ERR_INFO_T0_4=0x0 SU_ERR_INFO_T0_5=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.805 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=2, coreType=1, SU_ERR_INFO_T0_6=0x0 SU_ERR_INFO_T0_7=0x0 VEC_ERR_INFO_T0_6=0x0 SU_ERROR_T0_1=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.808 [kernel_pc_fixer.cpp:102][tid:4049786] [Dump][Exception] Fix PC with module=VEC, originalPC=0x120ebfcb7280, fixedPC=0x120ebfcb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.809 [kernel_symbol_locator.cpp:725][tid:4049786] [Dump][Exception] Error PC information. coreId=2, coreType=1, originalStartPC=0x120ebfcb6400, fixedStartPC=0x120ebfc00000, originalCurrentPC=0x120ebfcb7280, fixedCurrentPC=0x120ebfcb7420, fixedPCOffset=0xb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.816 [kernel_symbol_locator.cpp:755][tid:4049786] [Dump][Exception] Not found error symbol information. coreId=2, coreType=1, symbolCount=881, hasSymbolRange=1, minSymbolOffset=0x0, maxSymbolEnd=0x315190.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.823 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=3, coreType=1, SU_ERR_INFO_T0_0=0x1bacffbf SU_ERR_INFO_T0_1=0xdc673ef5 SU_ERR_INFO_T0_2=0xb0007255 SU_ERR_INFO_T0_3=0xf39f8ed9 MTE_ERR_INFO_T0_0=0x6b5fb MTE_ERR_INFO_T0_1=0xcaf6b38e MTE_ERR_INFO_T0_2=0x479 MTE_ERR_INFO_T1_0=0x0 MTE_ERR_INFO_T1_1=0x0 MTE_ERR_INFO_T1_2=0x0 VEC_ERR_INFO_T0_0=0x31dc87 VEC_ERR_INFO_T0_1=0xbfcb7420 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.825 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=3, coreType=1, VEC_ERR_INFO_T0_2=0x120e VEC_ERR_INFO_T0_3=0x4f710 VEC_ERR_INFO_T0_4=0x0 VEC_ERR_INFO_T0_5=0x0 CUBE_ERR_INFO_T0_0=0x0 CUBE_ERR_INFO_T0_1=0x0 L1_ERR_INFO_T0_0=0x0 L1_ERR_INFO_T0_1=0x0 SC_ERROR_T0_0=0x0 SU_ERROR_T0_0=0x0 MTE_ERROR_T0_0=0x0 MTE_ERROR_T1_0=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.826 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=3, coreType=1, VEC_ERROR_T0_0=0x200000 VEC_ERROR_T0_2=0x0 CUBE_ERROR_T0_0=0x0 CUBE_ERROR_T0_1=0x0 L1_ERROR_T0_0=0x0 L1_ERROR_T0_1=0x0 SC_ERR_INFO_T0_0=0xffffffff SC_ERR_INFO_T0_1=0xffff SU_SPR_CONDITION_0=0x0 SU_SPR_CONDITION_1=0x0 SU_ERR_INFO_T0_4=0x0 SU_ERR_INFO_T0_5=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.828 [kernel_symbol_locator.cpp:688][tid:4049786] [Dump][Exception] Error register information. coreId=3, coreType=1, SU_ERR_INFO_T0_6=0x0 SU_ERR_INFO_T0_7=0x0 VEC_ERR_INFO_T0_6=0x0 SU_ERROR_T0_1=0x0 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.830 [kernel_pc_fixer.cpp:102][tid:4049786] [Dump][Exception] Fix PC with module=VEC, originalPC=0x120ebfcb7280, fixedPC=0x120ebfcb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.832 [kernel_symbol_locator.cpp:725][tid:4049786] [Dump][Exception] Error PC information. coreId=3, coreType=1, originalStartPC=0x120ebfcb6400, fixedStartPC=0x120ebfc00000, originalCurrentPC=0x120ebfcb7280, fixedCurrentPC=0x120ebfcb7420, fixedPCOffset=0xb7420.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.838 [kernel_symbol_locator.cpp:755][tid:4049786] [Dump][Exception] Not found error symbol information. coreId=3, coreType=1, symbolCount=881, hasSymbolRange=1, minSymbolOffset=0x0, maxSymbolEnd=0x315190.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.947 [kernel_symbol_locator.cpp:845][tid:4049786] [Dump][Exception][Symbolize] classification summary. cores=4, groups=1.
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.959 [kernel_symbol_locator.cpp:520][tid:4049786] [Dump][Exception][Symbolize] Group[0] summary (cores=4):
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.962 [kernel_symbol_locator.cpp:522][tid:4049786] Group[0] oFile=unknown fixedPCOffset=0xb7420 symbol=unknown
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.963 [kernel_symbol_locator.cpp:522][tid:4049786] Group[0] outerSrc=unknown innerSrc=unknown
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.737.964 [kernel_symbol_locator.cpp:522][tid:4049786] Group[0] cores=[{id=0,type=1},{id=1,type=1},{id=2,type=1},{id=3,type=1}]
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.096 [dfx_args_parser.cpp:98][tid:4049786] [AIC_INFO] args(0 to 20) after execute:0x401a42af2c00, 0x12004bf5bac0, 0x12004bf5bae0, 0x12004bf5bb00, 0x401a41dff800, 0x400d738c4000, 0x12004bf5bb40, 0, 0x1, 0, 0, 0, 0x880, 0x10, 0, 0, 0x20, 0x100000002, 0x880, 0x10, 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.101 [dfx_args_parser.cpp:98][tid:4049786] [AIC_INFO] args(20 to 40) after execute:0x401a41f36400, 0x8800, 0x1, 0x1000000, 0, 0, 0, 0x100000000, 0, 0, 0, 0xe000000000, 0x4000000001, 0x220, 0x1, 0x220, 0x1, 0x220, 0x1, 0x380, 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.103 [dfx_args_parser.cpp:98][tid:4049786] [AIC_INFO] args(40 to 48) after execute:0xf700, 0xf700, 0x3dc0, 0xe0, 0xa5a5a5a50d03920f, 0, 0, 0, 
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.105 [dfx_args_parser.cpp:93][tid:4049786] [AIC_INFO] after execute:args print end
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.181 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load normal tensor, index:0, tensor type:2(INPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.184 [dfx_args_parser.cpp:370][tid:4049786] [Dump][Exception] tensor type:2(INPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.186 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump args data, addr:0x401a42af2c00; size:896 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.188 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load normal tensor, index:0
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.195 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load normal tensor, index:1, tensor type:2(INPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.196 [dfx_args_parser.cpp:370][tid:4049786] [Dump][Exception] tensor type:2(INPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.198 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump args data, addr:0x12004bf5bac0; size:32 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.199 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load normal tensor, index:1
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.205 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load normal tensor, index:2, tensor type:2(INPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.207 [dfx_args_parser.cpp:370][tid:4049786] [Dump][Exception] tensor type:2(INPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.209 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump args data, addr:0x12004bf5bae0; size:32 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.210 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load normal tensor, index:2
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.215 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load normal tensor, index:3, tensor type:2(INPUT_TENSOR), pointer type:3(L2_POINTER_WITH_SHAPE)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.368 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump args data, addr:0x401a41f36400; size:139264 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.370 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load normal tensor, index:3
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.375 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load normal tensor, index:4, tensor type:3(OUTPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.378 [dfx_args_parser.cpp:370][tid:4049786] [Dump][Exception] tensor type:3(OUTPUT_TENSOR), pointer type:1(L1_POINTER)
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.379 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump args data, addr:0x401a41dff800; size:139264 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.381 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load normal tensor, index:4
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.384 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load workspace, index:5
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.386 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump workspace data, addr:0x400d738c4000; size:16777216 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.387 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load workspace, index:5
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.390 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] begin to load tiling data, index:6
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.392 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] exception info dump tiling data, addr:0x12004bf5bb40; size:168 bytes
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.738.394 [dfx_args_parser.cpp:98][tid:4049786] [Dump][Exception] end to load tiling data, index:6
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:46.741.348 [dump_args.cpp:494][tid:4049786] [Dump][Exception] dump exception to file, file: /home/z00911889/mytest/extra-info/data-dump/6/exception_info.61.578471.20261125193546738
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.198 [stream.cc:1834]4049786 GetError:Stream Synchronize failed, stream_id=61, retCode=0x31, [vector core exception].
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.203 [stream.cc:1837]4049786 GetError:Vector Core kernel execution failed, retCode=0x31.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.229 [stream.cc:1837]4049786 GetError:[AIC_INFO] after execute:args print end
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.235 [stream.cc:1837]4049786 GetError:[DFX_INFO]AI Core kernel execution failed, device_id=6, stream_id=61, report_stream_id=61, task_id=735, flip_num=195, fault kernel_name=Index_int32_int32_high_performance_260, fault kernel info ext=none, program id=120, hash=11123341430388816675.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.241 [stream.cc:4536]4049786 EnterFailureAbort:stream_id=61 enter failure abort.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.274 [task_david.cc:440]4051744 AllocTaskInfo:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.282 [event_c.cc:201]4051744 EvtWait:Failed to allocate task, stream_id=61, retCode=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.286 [stream.cc:2005]4056334 SynchronizeExecutedTask:Context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.293 [stream.cc:2066]4056334 SynchronizeImpl:failed, stream_id=59, error=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.297 [api_impl.cc:2484]4056334 EventSynchronize:Synchronize event failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.308 [api_c.cc:799]4056334 rtEventSynchronize:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.312 [error_message_manage.cc:76]4056334 FuncErrorReason:rtEventSynchronize execution failed, reason=vector core exception
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.312 [api_impl_david.cc:742]4051744 StreamWaitEvent:Stream wait event failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.321 [api_c_stream.cc:143]4051744 rtStreamWaitEvent:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.324 [error_message_manage.cc:76]4051744 FuncErrorReason:rtStreamWaitEvent execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.742.497 4051744 OpParamMaker.cpp:WaitEventFunc:701: "[PTA]:aclrtStreamWaitEvent error! ret = 507035, eventAllocatorType = -1"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.742.507 4051744 NPUQueue.cpp:ReadQueue:459: "[PTA]:---Thread---281451370770688: device = 6, write_idx = 1521, read_idx = 1438, status = 1, ret = 507035"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.742.541 [task_recycle_cqrpt_base.cc:210]4049786 StarsResumeRtsq:stop scheduling in abort failure mode: stream_id=61, sq_id=2, sq_head=735, task_id=735, taskType=KERNEL_AIVEC(66).
+[ERROR] APP(4048511,):2026-11-25-19:35:46.742.869 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.742.882 4048511 NPUQueue.cpp:MakeSureQueueEmpty:351: "[PTA]:runtime_error: The Inner error is reported as above. The process exits for this inner error, and the current working event is 0xaaab03d328e8.
+Since the operator is called asynchronously, the stacktrace may be inaccurate. If you want to get the accurate stacktrace, please set the environment variable ASCEND_LAUNCH_BLOCKING=1.
+Note: ASCEND_LAUNCH_BLOCKING=1 will force ops to run in synchronous mode, resulting in performance degradation. Please unset ASCEND_LAUNCH_BLOCKING in time after debugging.
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed.
+EZ9999: Internal error!
+EZ9999[PID: 4048511] 2026-11-25-19:35:46.730.298 (EZ9999):  An error occurs on the device(chipId:0, dieId:0), the serial number is 45, the error is aivec error, core id is 0, error code = 341, dump info: pc start: 0x120ebfcb6400, current: 0x120ebfcb7280, sc error info: 0xffffffffffff, su error info
+[ERROR] APP(4048511,):2026-11-25-19:35:46.744.758 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.744.766 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.744.771 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.744.818 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.744.843 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.744.865 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.766.830 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.766.893 [context.cc:1253]4048511 Synchronize:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.766.902 [api_error.cc:3683]4048511 DeviceSynchronize:Device synchronize failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.766.912 [api_c_device.cc:224]4048511 rtDeviceSynchronizeWithTimeout:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.766.916 [error_message_manage.cc:76]4048511 FuncErrorReason:rtDeviceSynchronizeWithTimeout execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.767.010 4056334 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.767.101 4056334 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.767.105 4056334 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.788.096 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.788.112 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.788.118 4048511 NPUQueue.cpp:Enqueue:544: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] APP(4048511,):2026-11-25-19:35:46.804.115 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.804.357 [context.cc:1253]4048511 Synchronize:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.804.366 [api_error.cc:3683]4048511 DeviceSynchronize:Device synchronize failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.804.376 [api_c_device.cc:224]4048511 rtDeviceSynchronizeWithTimeout:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.804.382 [error_message_manage.cc:76]4048511 FuncErrorReason:rtDeviceSynchronizeWithTimeout execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.805.318 4048511 InitNpuBindings.cpp:THPModule_npu_shutdown_synchronize:137: "[PTA]:npuSynchronizeDevice failed err=:SynchronizeUsedDevices:../torch_npu/csrc/core/npu/NPUFunctions.cpp:350 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.804.387 (EE9999):  rtDeviceSynchronizeWithTimeout execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from SynchronizeUsedDevices at ../torch_npu/csrc/core/npu/NPUFunctions.cpp:350 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >)
+[ERROR] APP(4048511,):2026-11-25-19:35:46.805.326 4048511 InitNpuBindings.cpp:THPModule_npu_shutdown_synchronize:144: "[PTA]:NPU shutdown synchronize device failed."
+[ERROR] APP(4048511,):2026-11-25-19:35:46.805.697 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.805.710 [api_impl.cc:1728]4048511 StreamSynchronize:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.805.714 [api_error.cc:1490]4048511 StreamSynchronize:Stream synchronize failed, stream_id=54, timeout=-1ms.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.805.718 [api_c_stream.cc:202]4048511 rtStreamSynchronizeWithTimeout:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.805.721 [error_message_manage.cc:76]4048511 FuncErrorReason:rtStreamSynchronizeWithTimeout execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.807.851 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.807.866 [api_impl.cc:1728]4048511 StreamSynchronize:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.807.869 [api_error.cc:1490]4048511 StreamSynchronize:Stream synchronize failed, stream_id=55, timeout=-1ms.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.807.874 [api_c_stream.cc:202]4048511 rtStreamSynchronizeWithTimeout:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.807.876 [error_message_manage.cc:76]4048511 FuncErrorReason:rtStreamSynchronizeWithTimeout execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.860.387 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.860.403 [api_impl.cc:1728]4048511 StreamSynchronize:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.860.407 [api_error.cc:1490]4048511 StreamSynchronize:Stream synchronize failed, stream_id=48, timeout=-1ms.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.860.413 [api_c_stream.cc:202]4048511 rtStreamSynchronizeWithTimeout:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.860.417 [error_message_manage.cc:76]4048511 FuncErrorReason:rtStreamSynchronizeWithTimeout execution failed, reason=vector core exception
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.862.312 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.862.319 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.862.322 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.863.100 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.862.326 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.863.112 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.863.115 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.863.117 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.863.761 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.863.120 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.863.771 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.863.774 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.863.776 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.864.366 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.863.779 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.864.375 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.864.378 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.864.380 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.864.939 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.864.382 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.864.947 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.864.950 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.864.952 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.865.514 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.864.955 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.865.523 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.865.526 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.865.528 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.866.066 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.865.531 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.075 [api_impl_event_common.cc:78]4048511 EventQueryStatus:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.078 [api_c.cc:838]4048511 rtEventQueryStatus:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.079 [error_message_manage.cc:76]4048511 FuncErrorReason:rtEventQueryStatus execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.866.594 4048511 CachingHostAllocator.cpp:query_event:341: "[PTA]:query_event() failed, runtime error: query:../torch_npu/csrc/core/npu/NPUEvent.cpp:95 NPU function error: device error type 3, error code is 507035
+[ERROR] 2026-11-25-19:35:46 (PID:4048511, Device:6, RankID:-1) ERR00100 PTA call acl api failed
+[Error]: The vector core execution is abnormal. 
+        Rectify the fault based on the error information in the ascend log.
+EE9999: Internal error!
+EE9999[PID: 4048511] 2026-11-25-19:35:46.866.082 (EE9999):  rtEventQueryStatus execution failed, reason=vector core exception[FUNC:FuncErrorReason][FILE:error_message_manage.cc][LINE:76]
+TraceBack (most recent call last):
+
+Exception raised from query at ../torch_npu/csrc/core/npu/NPUEvent.cpp:95 (most recent call first):
+frame #0: c10::Error::Error(c10::SourceLocation, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >) + 0xc8 (0xffff84f55978 in /usr/local/python3.12.16/lib/python3.12/sit
+[ERROR] APP(4048511,):2026-11-25-19:35:46.866.916 4048511 NPUQueue.cpp:MakeSureQueueEmpty:348: "[PTA]:Inner error happened with CAN_EXIT status, detail: the current working event is 0xaaab03d328e8"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.945 [context.cc:1253]4048511 Synchronize:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.950 [api_error.cc:3683]4048511 DeviceSynchronize:Device synchronize failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.954 [api_c_device.cc:224]4048511 rtDeviceSynchronizeWithTimeout:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.866.957 [error_message_manage.cc:76]4048511 FuncErrorReason:rtDeviceSynchronizeWithTimeout execution failed, reason=vector core exception
+[ERROR] APP(4048511,):2026-11-25-19:35:46.867.178 4048511 InitNpuBindings.cpp:THPModule_npu_shutdown:94: "[PTA]:NPUCachingAllocator::emptyCache failed"
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.882.138 [task_david.cc:656]4048511 CheckTaskCanSend:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.882.144 [aicpu_starsv2.cc:344]4048511 StreamLaunchCpuKernelExWithArgs:The current stream status does not meet the conditions for sending the task, stream_id=186, retCode=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.882.165 [api_impl_david.cc:184]4048511 CpuKernelLaunchExAll:Cpu kernel launch ex with args failed, check and start tsd open aicpu sd error=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.882.173 [api_error.cc:1086]4048511 LaunchKernelV2:LaunchKernel failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.882.179 [api_c_kernel.cc:134]4048511 rtsLaunchKernelWithConfig:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:46.882.182 [error_message_manage.cc:76]4048511 FuncErrorReason:rtsLaunchKernelWithConfig execution failed, reason=vector core exception
+[ERROR] HCCL(4048511,):2026-11-25-19:35:46.882.306 [aicpu_task_cache_clear.cc:36] [4048511][LaunchKernelAndSyncStream_][aclrtLaunchKernelWithConfig]errNo[0x000000000007bc9b] launch kernel failed
+[ERROR] HCCL(4048511,):2026-11-25-19:35:46.885.237 [aicpu_task_cache_clear.cc:110] [4048511][AicpuTaskCacheCommStateCallback]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:46.885.242 [op_base.cc:5841] [4048511][HcclCommStateNotify]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:46.885.245 [op_base.cc:3993] [4048511][operator()]call trace: hcclRet -> 15
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:47.591.786 [task_david.cc:656]4048511 CheckTaskCanSend:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:47.591.793 [aicpu_starsv2.cc:344]4048511 StreamLaunchCpuKernelExWithArgs:The current stream status does not meet the conditions for sending the task, stream_id=186, retCode=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:47.591.887 [api_impl_david.cc:184]4048511 CpuKernelLaunchExAll:Cpu kernel launch ex with args failed, check and start tsd open aicpu sd error=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:47.591.895 [api_error.cc:1086]4048511 LaunchKernelV2:LaunchKernel failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:47.591.905 [api_c_kernel.cc:134]4048511 rtsLaunchKernelWithConfig:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:47.591.908 [error_message_manage.cc:76]4048511 FuncErrorReason:rtsLaunchKernelWithConfig execution failed, reason=vector core exception
+[ERROR] HCCL(4048511,):2026-11-25-19:35:47.592.040 [aicpu_task_cache_clear.cc:36] [4048511][LaunchKernelAndSyncStream_][aclrtLaunchKernelWithConfig]errNo[0x000000000007bc9b] launch kernel failed
+[ERROR] HCCL(4048511,):2026-11-25-19:35:47.594.927 [aicpu_task_cache_clear.cc:110] [4048511][AicpuTaskCacheCommStateCallback]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:47.594.932 [op_base.cc:5841] [4048511][HcclCommStateNotify]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:47.594.935 [op_base.cc:3993] [4048511][operator()]call trace: hcclRet -> 15
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:47.800.853 [kernel_info_collector.cpp:392][tid:4071732] [Dump][Exception] dump kernel json to file, file: /home/z00911889/mytest/extra-info/data-dump/6/Index_int32_int32_high_performance.json
+[ERROR] IDEDD(4048511,):2026-11-25-19:35:47.814.354 [kernel_info_collector.cpp:405][tid:4071732] [Dump][Exception] dump kernel to file, file: /home/z00911889/mytest/extra-info/data-dump/6/Index_int32_int32_high_performance.o
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.282.648 [task_david.cc:656]4048511 CheckTaskCanSend:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.282.656 [aicpu_starsv2.cc:344]4048511 StreamLaunchCpuKernelExWithArgs:The current stream status does not meet the conditions for sending the task, stream_id=27, retCode=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.282.694 [api_impl_david.cc:184]4048511 CpuKernelLaunchExAll:Cpu kernel launch ex with args failed, check and start tsd open aicpu sd error=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.282.702 [api_error.cc:1086]4048511 LaunchKernelV2:LaunchKernel failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.282.711 [api_c_kernel.cc:134]4048511 rtsLaunchKernelWithConfig:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.282.715 [error_message_manage.cc:76]4048511 FuncErrorReason:rtsLaunchKernelWithConfig execution failed, reason=vector core exception
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.282.875 [launch_aicpu.cc:173] [4048511][aclrtLaunchKernelWithConfig]errNo[0x0000000000000000] launch kernel failed
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.282.878 [aicpu_launch_manager.cc:44] [4048511][KernelLaunchAicpuCustom]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.282.881 [aicpu_launch_manager.cc:268] [4048511][AicpuLaunchMgr][ThreadKernelLaunchDestroy] KernelLaunch failed, return [15].
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.291.979 [thread.cc:389] [4048511][FreeThreads]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.299.365 [thread_manager.cc:105] [4048511][~ThreadMgr] engineToThreads free failed, engine[2] type[0] ret[15]
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.299.369 [thread_manager.cc:45] [4048511][~ThreadMgr] FreeEngineToThreads incomplete, ret[15], commId[group_name_135].
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.302.397 [task_david.cc:656]4048511 CheckTaskCanSend:context is abort, status=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.302.402 [aicpu_starsv2.cc:344]4048511 StreamLaunchCpuKernelExWithArgs:The current stream status does not meet the conditions for sending the task, stream_id=27, retCode=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.302.427 [api_impl_david.cc:184]4048511 CpuKernelLaunchExAll:Cpu kernel launch ex with args failed, check and start tsd open aicpu sd error=0x715005e.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.302.433 [api_error.cc:1086]4048511 LaunchKernelV2:LaunchKernel failed.
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.302.439 [api_c_kernel.cc:134]4048511 rtsLaunchKernelWithConfig:ErrCode=507035, desc=[vector core exception], InnerCode=0x715005e
+[ERROR] RUNTIME(4048511,):2026-11-25-19:35:48.302.442 [error_message_manage.cc:76]4048511 FuncErrorReason:rtsLaunchKernelWithConfig execution failed, reason=vector core exception
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.302.574 [aicpu_task_cache_clear.cc:36] [4048511][LaunchKernelAndSyncStream_][aclrtLaunchKernelWithConfig]errNo[0x000000000007bc9b] launch kernel failed
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.305.322 [aicpu_task_cache_clear.cc:110] [4048511][AicpuTaskCacheCommStateCallback]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.305.327 [op_base.cc:5841] [4048511][HcclCommStateNotify]call trace: hcclRet -> 15
+[ERROR] HCCL(4048511,):2026-11-25-19:35:48.305.330 [op_base.cc:3993] [4048511][operator()]call trace: hcclRet -> 15

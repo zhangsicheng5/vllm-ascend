@@ -1,0 +1,3 @@
+[ERROR] HCCL(4048505,):2026-11-25-19:28:07.656.653 [product_server.c:652][ServerGetRootinfo] NPU phy id 5 ProcessLayer 3 failed, MainBoardId 39
+[ERROR] HCCL(4048505,):2026-11-25-19:28:08.404.835 [product_server.c:652][ServerGetRootinfo] NPU phy id 5 ProcessLayer 3 failed, MainBoardId 39
+[ERROR] HCCL(4048505,):2026-11-25-19:31:58.336.062 [product_server.c:652][ServerGetRootinfo] NPU phy id 5 ProcessLayer 3 failed, MainBoardId 39

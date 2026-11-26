@@ -1,0 +1,811 @@
+[INFO] RUNTIME(4048511,python3.12):2026-11-25-19:27:29.187.622 [task_fail_callback_data_manager.cc:89] 4048511 TaskFailCallBackManager: Constructor.
+[INFO] RUNTIME(4048511,python3.12):2026-11-25-19:27:29.187.717 [xpu_task_fail_callback_data_manager.cc:59] 4048511 XpuTaskFailCallBackManager: XpuTaskFailCallBackManager Constructor.
+[INFO] TDT(4048511,python3.12):2026-11-25-19:27:29.191.804 [package_worker_factory.cpp:38][RegisterPackageWorkerCreator][tid:4048511] Register[2] package worker was created successfully
+[INFO] TDT(4048511,python3.12):2026-11-25-19:27:29.191.811 [package_worker_factory.cpp:38][RegisterPackageWorkerCreator][tid:4048511] Register[3] package worker was created successfully
+[INFO] HCCL(4048511,python3.12):2026-11-25-19:27:29.285.329 [adapter_rts.cc:3089] [4048511][adapter_rts.cc][CallBackInitRts] g_deviceType [9] g_deviceLogicId [-1] g_devicePhyId [-1]
+[INFO] HCCL(4048511,python3.12):2026-11-25-19:27:29.332.001 [aicpu_task_cache.cc:24] [4048511][AicpuTaskCache][AicpuTaskCache] create aicpu task cache at 0x0000ffff4ba81300: maxCacheBytes[10485760]
+[INFO] HCCL(4048511,python3.12):2026-11-25-19:27:29.342.639 [op_base.cc:5820] [4048511][HcclCommRegCommStateCallback]Register commStateCallBack success, regName[aicpu_task_cache_callback], args[0xffff4cf8c478].
+[INFO] PROFILING(4048511,python3.12):2026-11-25-19:27:31.339.541 [prof_cann_plugin.cpp:256] (tid:4048511) RegisterProfileCallback, callback type is 12
+[INFO] PROFILING(4048511,python3.12):2026-11-25-19:27:31.339.558 [prof_cann_plugin.cpp:256] (tid:4048511) RegisterProfileCallback, callback type is 11
+[INFO] RUNTIME(4048511,python3.12):2026-11-25-19:27:36.404.041 [runtime_keeper.cc:209] 4048511 CreateRuntimeImpl: Open libruntime_v200.so successfully
+[INFO] RUNTIME(4048511,python3.12):2026-11-25-19:27:36.405.190 [runtime.cc:5030] 4048511 GetVisibleDevices: ASCEND_RT_VISIBLE_DEVICES param was not set
+[INFO] GE(4048511,python3.12):2026-11-25-19:27:42.536.020 [op_tiling_manager.cc:109]4048511 ~FuncPerfScope:[GEPERFTRACE] The time cost of OpTilingManager::LoadSo is [5583] micro seconds.
+[INFO] IDEDD(4048511,python3.12):2026-11-25-19:27:42.559.223 [adx_dump_record.cpp:688][tid:4049297] start dump thread, remote dump record temp path : /home/z00911889/mytest/.
+[INFO] IDEDD(4048511,python3.12):2026-11-25-19:27:42.562.978 [dump_manager.cpp:247][tid:4048511] Set aic_err_brief_dump[3] dump setting, status: on, dump switch: 3
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.564.683 [acl_op_resource_manager.cpp:60]4048511 GetRuntimeV2Env: runtime v2 flag : model flag = 1, singleOp flag = 1
+[INFO] PROFILING(4048511,python3.12):2026-11-25-19:27:42.567.584 [platform.cpp:54] (tid:4048511) Profiling platform version: 1.0.
+[INFO] PROFILING(4048511,python3.12):2026-11-25-19:27:42.567.605 [platform.cpp:288] (tid:4048511) Succeeded to DrvGetApiVersion version: 0x7241a
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.567.946 [acl.cpp:370]4048511 GetAllPackageVersion: Version of runtime package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.567.970 [acl.cpp:370]4048511 GetAllPackageVersion: Version of runtime package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.567.992 [acl.cpp:370]4048511 GetAllPackageVersion: Version of bisheng-compiler package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.568.012 [acl.cpp:370]4048511 GetAllPackageVersion: Version of hccl package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.568.040 [acl.cpp:370]4048511 GetAllPackageVersion: Version of oam-tools package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.568.067 [acl.cpp:370]4048511 GetAllPackageVersion: Version of ops-legacy package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.568.088 [acl.cpp:370]4048511 GetAllPackageVersion: Version of ops-legacy package is 9.2.1
+[INFO] ASCENDCL(4048511,python3.12):2026-11-25-19:27:42.568.093 [acl.cpp:372]4048511 GetAllPackageVersion: Version of driver package is not found
+[INFO] DRV(4048511,):2026-11-25-19:27:43.538.910 [hdc_ub_common.c:242][ascend][curpid:4048511,4048511][drv][hdc][hdc_get_urma_init_time_cost]hdc urma_cost info (us).(dev_id=6; l_id=163; unique_val=2166102989; type=5; ctx_c=0; get_token=94; attr_c:0; dev_info=138876; urma_ctx=2851; alloc_id=0; share_seg=0; lock_wait=0; urma_init=141729; own_reg_re=0; alloc_tid=2208; own_reg(new)=32; reg_dmp=0; jfc=267; jfs=95; jfr:111; post_wr=1; res_init=2719; get_tp=22; import=860)
+[INFO] ATRACE(4048511,):2026-11-25-19:27:43.546.707 [atrace_client_core.c:162](tid:4048511) start to receive device[6] trace log.
+[INFO] ASCENDCL(4048511,):2026-11-25-19:27:43.546.747 [acl_resource_manager.cpp:128]4048511 GetRuntimeV2Env: runtime v2 flag : model flag = 1, singleOp flag = 1
+[INFO] TDT(4048511,):2026-11-25-19:27:43.546.784 [client_manager.cpp:148][GetInstance][tid:4048511] [ClientManager] Current mode:1
+[INFO] TDT(4048511,):2026-11-25-19:27:43.546.893 [process_mode_manager.cpp:168][GetLogLevel][tid:4048511] [TsdClient] get ASCEND_GLOBAL_LOG_LEVEL [] ASCEND_GLOBAL_EVENT_ENABLE [] ASCEND_MODULE_LOG_LEVEL []
+[INFO] TDT(4048511,):2026-11-25-19:27:43.546.942 [tsd_process_controller.cpp:58][OpenProcess][tid:4048511] [ProcessModeManager] enter into open process deviceId[6] rankSize[0]
+[INFO] TDT(4048511,):2026-11-25-19:27:43.546.996 [capability_manager.cpp:401][IsSupportCommonSink][tid:4048511] mutexFile[/usr/local/Ascend/driver/lib64/driver/sink_file_mutex_0.cfg] found means supporting common sink
+[INFO] TDT(4048511,):2026-11-25-19:27:43.547.177 [device_comm_agent.cpp:41][InitTsdClient][tid:4048511] [TsdClient] deviceId[6] begin to init hdc client
+[INFO] TDT(4048511,):2026-11-25-19:27:43.558.147 [version_verify.cpp:39][SetVersionInfo][tid:4048511] VersionVerify: send client version to server
+[INFO] TDT(4048511,):2026-11-25-19:27:43.560.357 [version_verify.cpp:71][PeerVersionCheck][tid:4048511] VersionVerify: Check client version info, server[1230], client[1230]
+[INFO] TDT(4048511,):2026-11-25-19:27:43.560.372 [version_verify.cpp:92][ParseVersionInfo][tid:4048511] VersionVerify: pass client version info success
+[INFO] TDT(4048511,):2026-11-25-19:27:43.560.375 [hdc_client.cpp:243][CheckHdcConnection][tid:4048511] Service create hdc successfully.
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.192 [package_env_info.cpp:130][GetShortSocVersion][tid:4048511] get short_soc_version:Ascend950
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.316 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:Ascend-aicpu_legacy.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.327 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:Ascend910-aicpu_legacy.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.334 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:Ascend310P-aicpu_legacy.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.351 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:aicpu_hccl.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.360 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:mc2_server.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.368 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:aicpu_hcomm.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.376 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:cann-hixl-compat.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.386 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:cann-hcomm-compat.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.393 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:cann-hccd-compat.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.400 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:cann-udf-compat.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.407 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:cann-tsch-compat.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.434 [package_process_config.cpp:265][SetConfigDataOnHost][tid:4048511] insert package:cann-hybm-compat.tar.gz config
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.462 [package_process_config.cpp:331][RefreshHostPluginVersions][tid:4048511] host plugin pkg:cann-hcomm-compat.tar.gz ini parsed, version:9.2.1 timestamp:20261026_000125081
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.474 [package_process_config.cpp:331][RefreshHostPluginVersions][tid:4048511] host plugin pkg:cann-tsch-compat.tar.gz ini parsed, version:9.2.1 timestamp:20261026_000125081
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.477 [hdc_message_builder.cpp:54][SetProcSignPid][tid:4048511] [HdcMessageBuilder] tsd get process sign successfully, procpid[3339588]
+[INFO] TDT(4048511,):2026-11-25-19:27:43.562.509 [version_verify.cpp:117][SpecialFeatureCheck][tid:4048511] VersionVerify: previous type[69], supported
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.532 [plugin_version_manager.cpp:111][HandleDevicePluginVersionRsp][tid:4048511] device plugin pkg:cann-hcomm-compat.tar.gz version:9.2.1 timestamp:20261026_000125081
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.539 [plugin_version_manager.cpp:114][HandleDevicePluginVersionRsp][tid:4048511] device plugin info rsp, pkgCount:1
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.545 [package_loader.cpp:427][LoadPackageConfigInfoToDevice][tid:4048511] Receive load package config response result:0
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.585 [capability_manager.cpp:401][IsSupportCommonSink][tid:4048511] mutexFile[/usr/local/Ascend/driver/lib64/driver/sink_file_mutex_0.cfg] found means supporting common sink
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.589 [package_loader.cpp:133][ShouldLoadLegacyPackage][tid:4048511] [TsdClient][logicDeviceId_=6] use legacy package
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.727 [package_env_info.cpp:221][CheckPackageExistsOnce][tid:4048511] [TsdClient][deviceId=6] pkg size[0] in path[/usr/local/Ascend/cann-9.2.1/opp/built-in/] must be only one, skip send package, packageType[6]
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.730 [package_loader.cpp:102][LoadSysOpKernel][tid:4048511] [TsdClient][logicDeviceId_=6] cannot find aicpu packages
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.743 [capability_manager.cpp:401][IsSupportCommonSink][tid:4048511] mutexFile[/usr/local/Ascend/driver/lib64/driver/sink_file_mutex_0.cfg] found means supporting common sink
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.766 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:Ascend-aicpu_legacy.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.571.792 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/opp/Ascend/aicpu/Ascend-aicpu_legacy.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_Ascend-aicpu_legacy.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.513 [package_loader.cpp:491][LoadSinglePackageToDevice][tid:4048511] current package:Ascend-aicpu_legacy.tar.gz is same as device, skip load
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.529 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:Ascend310P-aicpu_legacy.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.534 [package_loader.cpp:481][LoadSinglePackageToDevice][tid:4048511] cannot find package:Ascend310P-aicpu_legacy.tar.gz, optional is true skip
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.536 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:Ascend910-aicpu_legacy.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.539 [package_loader.cpp:481][LoadSinglePackageToDevice][tid:4048511] cannot find package:Ascend910-aicpu_legacy.tar.gz, optional is true skip
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.541 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:aicpu_hccl.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.661.545 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/opp/built-in/op_impl/aicpu/kernel/aicpu_hccl.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_aicpu_hccl.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.664.446 [package_loader.cpp:491][LoadSinglePackageToDevice][tid:4048511] current package:aicpu_hccl.tar.gz is same as device, skip load
+[INFO] TDT(4048511,):2026-11-25-19:27:43.664.453 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:aicpu_hcomm.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.664.463 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/opp/built-in/op_impl/aicpu/kernel/aicpu_hcomm.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_aicpu_hcomm.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.674.625 [package_loader.cpp:491][LoadSinglePackageToDevice][tid:4048511] current package:aicpu_hcomm.tar.gz is same as device, skip load
+[INFO] TDT(4048511,):2026-11-25-19:27:43.674.633 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:cann-hccd-compat.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.674.637 [package_loader.cpp:467][LoadSinglePackageToDevice][tid:4048511] current package:cann-hccd-compat.tar.gz does not need to load to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.674.639 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:cann-hcomm-compat.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.674.644 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/compat/cann-hcomm-compat.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_cann-hcomm-compat.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.355 [plugin_version_manager.cpp:51][GetPluginUpdateStrategy][tid:4048511] [TsdClient][deviceId=6] plugin update strategy from DRV = 1
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.361 [plugin_version_manager.cpp:64][ShouldLoadCompatPluginPkg][tid:4048511] plugin update strategy is PLUGIN_FORCE_UPDATE, fallback to checkcode compare pkg:cann-hcomm-compat.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.365 [package_loader.cpp:487][LoadSinglePackageToDevice][tid:4048511] skip load compat plugin package:cann-hcomm-compat.tar.gz by version/strategy check
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.368 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:cann-hixl-compat.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.395 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/opp/built-in/op_impl/aicpu/kernel/cann-hixl-compat.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_cann-hixl-compat.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.528 [package_loader.cpp:491][LoadSinglePackageToDevice][tid:4048511] current package:cann-hixl-compat.tar.gz is same as device, skip load
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.536 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:cann-hybm-compat.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.540 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/opp/vendors/cust/op_impl/aicpu/hybm/kernel/cann-hybm-compat.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_cann-hybm-compat.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.610 [package_loader.cpp:491][LoadSinglePackageToDevice][tid:4048511] current package:cann-hybm-compat.tar.gz is same as device, skip load
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.611 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:cann-tsch-compat.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.613 [package_loader.cpp:454][SupportLoadPkg][tid:4048511] current device chip:15 does not support package:cann-tsch-compat.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.615 [package_loader.cpp:467][LoadSinglePackageToDevice][tid:4048511] current package:cann-tsch-compat.tar.gz does not need to load to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.616 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:cann-udf-compat.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.618 [package_loader.cpp:467][LoadSinglePackageToDevice][tid:4048511] current package:cann-udf-compat.tar.gz does not need to load to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.620 [package_loader.cpp:464][LoadSinglePackageToDevice][tid:4048511] begin to load package:mc2_server.tar.gz to device:6
+[INFO] TDT(4048511,):2026-11-25-19:27:43.679.630 [package_process_config.cpp:396][GetPkgHostAndDeviceDstPath][tid:4048511] get orgFile:/usr/local/Ascend/cann-9.2.1/opp/built-in/op_impl/aicpu/kernel/mc2_server.tar.gz, dstFile:/home/HwHiAiUser/hdcd/device0/aicpu/3339588_mc2_server.tar.gz
+[INFO] TDT(4048511,):2026-11-25-19:27:43.680.594 [package_loader.cpp:491][LoadSinglePackageToDevice][tid:4048511] current package:mc2_server.tar.gz is same as device, skip load
+[INFO] TDT(4048511,):2026-11-25-19:27:43.680.609 [hdc_message_builder.cpp:54][SetProcSignPid][tid:4048511] [HdcMessageBuilder] tsd get process sign successfully, procpid[3339588]
+[INFO] TDT(4048511,):2026-11-25-19:27:43.680.623 [version_verify.cpp:117][SpecialFeatureCheck][tid:4048511] VersionVerify: previous type[6], supported
+[INFO] TDT(4048511,):2026-11-25-19:27:43.680.679 [tsd_process_controller.cpp:110][WaitOpenRsp][tid:4048511] [ProcessModeManager] deviceId[6] sessionId[1] rankSize[0], wait subprocess start response
+[INFO] TDT(4048511,):2026-11-25-19:27:44.086.546 [tsd_process_controller.cpp:473][ProcessQueueForAdc][tid:4048511] [TsdClient] it is unnecessary for current mode[0] to grant queue auth to aicpusd
+[INFO] TDT(4048511,):2026-11-25-19:27:44.086.551 [tsd_process_controller.cpp:133][LogOpenProcessDuration][tid:4048511] [TsdClient][deviceId=6] [sessionId=1] start hccp and computer process success,phase4:[133]ms send open message to device,phase5:[405]ms receive open message to device,phase6:[0]ms process for adc on host,whole duration:[539]ms
+[INFO] DRV(4048511,):2026-11-25-19:27:44.086.732 [event_sched.c:1499][ascend][curpid:4048511,4048511][drv][event-sche][esched_device_open]The dev_id has opened. (dev_id=6)
+[INFO] DRV(4048511,):2026-11-25-19:27:44.090.621 [drv_share_log.c:215][ascend][curpid:4048511,4048511][drv][devmm][share_log_read_in_single_module]Open. (udevid=65; tgid=3339588)
+[INFO] DRV(4048511,):2026-11-25-19:27:44.155.730 [va_dev_default_allocator.c:87][ascend][curpid:4048511,4048511][drv][devmm][va_dev_default_host_va_expand_with_retry]Reserve va success. (va=0x100000000000; size=2199023255552)
+[INFO] DRV(4048511,):2026-11-25-19:27:44.156.124 [drv_share_log.c:215][ascend][curpid:4048511,4048511][drv][devmm][share_log_read_in_single_module]Open. (udevid=6; tgid=3339588)
+[INFO] DRV(4048511,):2026-11-25-19:27:44.833.702 [svm_urma_chan.c:217][ascend][curpid:4048511,4048511][drv][devmm][svm_urma_chan_init]Urma chan init ok. (devid=6; local=118112641 ns; remote=4374142 ns)
+[INFO] DRV(4048511,):2026-11-25-19:27:44.834.693 [svm_urma_adapt_master_init.c:205][ascend][curpid:4048511,4048511][drv][devmm][_svm_urma_master_dev_init]Urma master dev init ok. (devid=6; ub init=125263727 ns; va reserve=421512 ns)
+[INFO] DRV(4048511,):2026-11-25-19:27:44.865.922 [queue_interface.c:931][ascend][curpid:4048511,4048511][drv][queuemng][queue_device_open]queue open finish. (dev_id=6)
+[INFO] RUNTIME(4048511,):2026-11-25-19:27:44.866.084 [raw_device.cc:623] 4048511 Init: isAddrFlat:0
+[INFO] TDT(4048511,):2026-11-25-19:27:44.870.532 [tsd_client.cpp:189][TsdCapabilityGet][tid:4048511] TsdCapabilityGet Begin.
+[INFO] TDT(4048511,):2026-11-25-19:27:44.870.548 [capability_manager.cpp:489][CapabilityGet][tid:4048511] [CapabilityManager] enter into CapabilityGet process deviceId[6] type[0].
+[INFO] TDT(4048511,):2026-11-25-19:27:44.870.558 [hdc_message_builder.cpp:54][SetProcSignPid][tid:4048511] [HdcMessageBuilder] tsd get process sign successfully, procpid[3339588]
+[INFO] TDT(4048511,):2026-11-25-19:27:44.870.568 [version_verify.cpp:117][SpecialFeatureCheck][tid:4048511] VersionVerify: previous type[38], supported
+[INFO] TDT(4048511,):2026-11-25-19:27:44.870.640 [capability_manager.cpp:514][CapabilityGet][tid:4048511] [CapabilityManager][deviceId=6] [sessionId=1] [type=0]send capability successfully.
+[INFO] TDT(4048511,):2026-11-25-19:27:44.874.032 [capability_manager.cpp:564][HandlePidQosRsp][tid:4048511] [TsdClient] PidQosMsgProc recvMsg realDeviceId[6] msgType[39] localDevId[6] rspCode[0],pidqos[1]
+[INFO] TDT(4048511,):2026-11-25-19:27:44.874.036 [capability_manager.cpp:520][CapabilityGet][tid:4048511] [CapabilityManager][logicDeviceId_=6][type=0][pidQos=1][ret=0]recv capability response finished.
+[INFO] RUNTIME(4048511,):2026-11-25-19:27:44.874.052 [engine.cc:99] 4048511 Engine: Constructor.
+[INFO] RUNTIME(4048511,):2026-11-25-19:27:44.874.057 [stars_engine.cc:53] 4048511 StarsEngine: Constructor.
+[INFO] RUNTIME(4048511,):2026-11-25-19:27:44.956.763 [runtime.cc:5574] 4048511 CreateReportRasThread: Start report ras thread success!
+[INFO] RUNTIME(4048511,):2026-11-25-19:27:44.956.935 [npu_driver_res.cc:389] 4049784 GetDeviceStatus: GetDeviceStatus status=1.
+[INFO] ATRACE(4048511,):2026-11-25-19:27:44.963.255 [tracer_mgr_operate.c:67](tid:4048511) create object RUNTIME_ATRACE_DEV6_TS0 successfully, exitSave(false), noLock(false).
+[INFO] TDT(4048511,):2026-11-25-19:27:44.963.288 [client_manager.cpp:202][SetProfilingCallback][tid:4048511] [TsdClient] set profiling callback successfully
+[INFO] RUNTIME(4048511,):2026-11-25-19:27:45.965.244 [runtime.cc:5780] 4049785 ReportPageFaultProc: pageFaultSupportFlag_=0.
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.012 [op_base_v2.cc:1947][4048511]Entry-HcclCommInitRootInfoConfig V950: nRanks[16], rank[6], commEngine[HcclAccelerator::DEFAULT]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.036 [op_base_v2.cc:1965][4048511]Entry-HcclCommInitRootInfoConfigV2:ranks[16], rank[6], rootinfo: host ip[141.61.45.118] port[50000] netMode[HrtNetworkMode::HDC] rootHandle.identifier[141.61.45.118_50000_0_1795606087518064], identifier[group_name_137]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.222 [root_info_detect_provider.cc:87] [4048511][DetectRankTableImpl] nRanks[16], rank[6] entry flat topo detect, rootinfo: host ip[141.61.45.118] port[50000] netMode[HrtNetworkMode::HDC] identifier[141.61.45.118_50000_0_1795606087518064], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.312 [base_config_legacy.cc:24][4048511][HCCL_ENV] HCCL_IF_IP set by environment to [IpAddress[0000:0000:0000:0000:0000:0000:8d3d:2d76, AF=IPv4, addr=141.61.45.118]]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.322 [base_config_legacy.cc:27][4048511][HCCL_ENV] HCCL_IF_BASE_PORT set by environment to [50000]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.336 [base_config_legacy.cc:32][4048511][HCCL_ENV] HCCL_SOCKET_IFNAME set by environment to [data0.3001]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.339 [base_config_legacy.cc:36][4048511][HCCL_ENV] HCCL_WHITELIST_DISABLE set by default to [1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.343 [base_config_legacy.cc:52][4048511][HCCL_ENV] HCCL_HOST_SOCKET_PORT_RANGE set by default to 
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.345 [base_config_legacy.cc:61][4048511][HCCL_ENV] HCCL_NPU_SOCKET_PORT_RANGE set by default to 
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.347 [base_config_legacy.cc:89][4048511][HCCL_ENV] HCCL_SOCKET_FAMILY set by default to [-1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.349 [base_config_legacy.cc:92][4048511][HCCL_ENV] HCCL_CONNECT_TIMEOUT set by default to [120]s
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.352 [base_config_legacy.cc:105][4048511][HCCL_ENV] HCCL_EXEC_TIMEOUT set by default to [1836]s
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.355 [base_config_legacy.cc:117][4048511][HCCL_ENV] HCCL_RDMA_TC set by default to [132]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.357 [base_config_legacy.cc:120][4048511][HCCL_ENV] HCCL_RDMA_SL set by default to [4]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.358 [base_config_legacy.cc:123][4048511][HCCL_ENV] HCCL_RDMA_TIMEOUT set by default to [20]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.360 [base_config_legacy.cc:126][4048511][HCCL_ENV] HCCL_RDMA_RETRY_CNT set by default to [7]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.362 [base_config_legacy.cc:129][4048511][HCCL_ENV] HCCL_RDMA_QPS_PER_CONNECTION set by default to [1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.363 [base_config_legacy.cc:134][4048511][HCCL_ENV] HCCL_MULTI_QP_THRESHOLD set by default to [524288]B
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.366 [base_config_legacy.cc:139][4048511][HCCL_ENV] HCCL_RDMA_QP_PORT_CONFIG_PATH set by default to []
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.368 [base_config_legacy.cc:377][4048511][HCCL_ENV] PRIM_QUEUE_GEN_NAME set by default to []
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.372 [base_config_legacy.cc:380][4048511][HCCL_ENV] HCCL_BUFFSIZE set by environment to [536870912]B
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.375 [base_config_legacy.cc:385][4048511][HCCL_ENV] HCCL_OP_EXPANSION_MODE set by default to [HcclAccelerator::AICPU_TS]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.377 [base_config_legacy.cc:405][4048511][HCCL_ENV] HCCL_ENTRY_LOG_ENABLE set by default to [0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.417 [base_config_legacy.cc:408][4048511][HCCL_ENV] LD_LIBRARY_PATH set by environment to []
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.420 [base_config_legacy.cc:415][4048511][HCCL_ENV] HCCL_DFS_CONFIG task_exception set by default to [1], cluster_heartbeat set by default to [1], rankConsistentState set by default to [0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.615.434 [base_config_legacy.cc:430][4048511][HCCL_ENV] HCCL_DETOUR set by default to [HcclDetourType::HCCL_DETOUR_DISABLE]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.615.447 [ra_init.c:165]tid:4048511,RaInit: Input parameters: phyId[6], nicPosition:[0] hdcType:[18] enableHdcAsync[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.615.667 [rs.c:2250]tid:4048511,RsGetProductType: [Get][ChipInfo]chip name is 950DT_9582, type:4
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.615.730 [rs_tls.c:1951]tid:4048511,rs_ssl_init: TLS SWITCH (0)
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.615.897 [rs_epoll.c:551]tid:4052082,RsEpollHandle: pthread[epoll_pthread] is alive!
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.615.913 [rs_epoll.c:680]tid:4052083,RsConnectHandle: pthread[connect_pthread] is alive!
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.617.514 [rs.c:450]tid:4048511,RsInit: rs init success, chipId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.617.542 [plf_debug_config.cc:80] [4048511][HCCL_ENV] plfDebugConfig set to [0x0]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.617.546 [ra_init.c:253]tid:4048511,RaSetDebugConfig: Input parameters: phyId[6], nicPosition:[0], debugConfig[0x0]
+[INFO] TDT(4048511,):2026-11-25-19:28:07.617.573 [sub_process_controller.cpp:120][OpenSubProc][tid:4048511] enter into ProcessOpenSubProc subtype:0
+[INFO] TDT(4048511,):2026-11-25-19:28:07.617.582 [package_env_info.cpp:74][GetAscendLatestIntallPath][tid:4048511] latest install path:/usr/local/Ascend/cann-9.2.1
+[INFO] TDT(4048511,):2026-11-25-19:28:07.617.584 [sub_process_controller.cpp:85][ConstructCommonOpenMsg][tid:4048511] runtimePkgPath:/usr/local/Ascend/cann-9.2.1
+[INFO] TDT(4048511,):2026-11-25-19:28:07.617.589 [hdc_message_builder.cpp:54][SetProcSignPid][tid:4048511] [HdcMessageBuilder] tsd get process sign successfully, procpid[3339588]
+[INFO] TDT(4048511,):2026-11-25-19:28:07.617.597 [version_verify.cpp:117][SpecialFeatureCheck][tid:4048511] VersionVerify: previous type[48], supported
+[INFO] TDT(4048511,):2026-11-25-19:28:07.671.069 [sub_process_controller.cpp:143][OpenSubProc][tid:4048511] OpenSubProc success type:0, pid:2325
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.671.081 [ra_init.c:165]tid:4048511,RaInit: Input parameters: phyId[6], nicPosition:[1] hdcType:[18] enableHdcAsync[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.671.111 [ra_hdc.c:794]tid:4048511,RaHdcInit: hdc init start! logic id is 6, phy id is 6, hdcType is 18
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.677.954 [ra_hdc.c:830]tid:4048511,RaHdcInit: hdc init OK! phyId[6]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.687.197 [ra_init.c:253]tid:4048511,RaSetDebugConfig: Input parameters: phyId[6], nicPosition:[1], debugConfig[0x0]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.687.517 [ra_host.c:1744]tid:4048511,RaGetIfnum: Input parameters: phyId[6], nicPosition:[0], isAll:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.687.538 [orion_adapter_hccp.cc:1122][4048511][Get][HostIf]hrtGetIfNum success. ifAddrNum[36].
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.687.543 [ra_host.c:1796]tid:4048511,RaGetIfaddrs: Input parameters: phyId[6], nicPosition:[0], isAll[0], interface num[36]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.687.577 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=0 phyId=6 family=2 ip=141.61.45.118
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.247 [xml_parser.c:191][ParseXmlTags] ParseXmlTags: cannot open /var/run/ascend-topologyd/virtualTopology.xml
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.256 [npu_nic_affinity.c:722][BuildAffinity] BuildAffinity: XML unavailable (ret=10), fallback to driver topo interface
+[WARNING] HCCL(4048511,):2026-11-25-19:28:07.744.264 [npu_nic_affinity.c:398][EnumerateNicNames] EnumerateNicNames: opendir(/sys/class/infiniband) failed, errno=2(No such file or directory)
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.266 [npu_nic_affinity.c:432][BuildAffinityFromDriver] BuildAffinityFromDriver: failed to enumerate HCAs, ret=8
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.268 [npu_nic_affinity.c:433][BuildAffinityFromDriver] [perf] BuildAffinityFromDriver took 9300 ns
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.269 [rank_info_types.c:297][ProcessLayerRoce] ProcessLayerRoce: GetRoceIpFromXml failed for npu_id=6, ret=8
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.271 [rank_info_types.c:298][ProcessLayerRoce] [perf] ProcessLayerRoce took 39110 ns
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.498 [topo_addr_info.c:190][TopoAddrInfoGet] [perf] TopoAddrInfoGet took 56806890 ns
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.744.751 [ra_common.c:42]tid:4048511,RaGetTlsEnable: Input parameters: phyId[6], nicPosition:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.744.899 [ra_common.c:42]tid:4048511,RaGetTlsEnable: Input parameters: phyId[6], nicPosition:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.744.930 [socket_manager.cc:211][4048511][SocketManager::ServerInitAll] socket port range not configured.
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.746.037 [ra_host.c:731]tid:4048511,RaSocketBatchConnect: Input parameters: [0]th, phyId[6], localIp[141.61.45.118], remoteIp[141.61.45.118], port[50000], tag[rank_info_detect_default_tag_141.61.45.118_50000_0_1795606087518064_50000], cnt[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.506 [root_info_detect_provider.cc:99] [4048511][DetectRankTableImpl] end.
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.877 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 0 (localId: 0), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.882 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 1 (localId: 1), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.884 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 2 (localId: 2), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.886 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 3 (localId: 3), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.888 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 4 (localId: 4), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.890 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 5 (localId: 5), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.891 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 6 (localId: 6), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.893 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 7 (localId: 7), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.811.950 [rank_graph_builder.cc:145] [4048511][RankGraphBuilder][AddPeer2NetLink] Add Peer2NetLink Net2PeerLink success. level[1] netInstId[sp_0] rankId[6] planeId[plane_clos_0] AddrStr[IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0]],topoInstId[0],topoType[3714511104]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.812.010 [rank_graph_builder.cc:145] [4048511][RankGraphBuilder][AddPeer2NetLink] Add Peer2NetLink Net2PeerLink success. level[2] netInstId[cluster] rankId[6] planeId[plane_uboe] AddrStr[IpAddress[0000:0000:0000:0000:0000:0000:1400:f018, AF=IPv4, addr=20.0.240.24]],topoInstId[0],topoType[3714511104]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.812.360 [communicator_impl.cc:1476][4048511][CommunicatorImpl::InitRankGraph] rankTableInfo: RankTableInfo[version=2.0, rankCount=16, ranks size=16]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.812.365 [communicator_impl.cc:1477][4048511][CommunicatorImpl][InitRankGraph] topoInfo[TopoInfo{version=2.0, peer_count=8, edge_count=52, Peers.size=8, Edges.size=4}]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.812.370 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.815.300 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.297 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=15, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:eb07, AF=IPv6, addr=::3f:300:10:0:df27:eb07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.302 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=14, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:cb07, AF=IPv6, addr=::3f:300:10:0:df27:cb07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.307 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0044:0500:0010:0000:df21:d506, AF=IPv6, addr=::44:500:10:0:df21:d506, scopeId=0x0], remoteRankId=0, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:1300, AF=IPv6, addr=::42:500:10:0:df21:1300, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.311 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0043:0500:0010:0000:df21:d406, AF=IPv6, addr=::43:500:10:0:df21:d406, scopeId=0x0], remoteRankId=1, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:3301, AF=IPv6, addr=::42:500:10:0:df21:3301, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.315 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0041:0500:0010:0000:df21:d206, AF=IPv6, addr=::41:500:10:0:df21:d206, scopeId=0x0], remoteRankId=3, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:7303, AF=IPv6, addr=::42:500:10:0:df21:7303, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.320 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0046:0500:0010:0000:df21:d706, AF=IPv6, addr=::46:500:10:0:df21:d706, scopeId=0x0], remoteRankId=4, remoteAddr=IpAddress[0000:0000:0046:0500:0010:0000:df21:9704, AF=IPv6, addr=::46:500:10:0:df21:9704, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.324 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0045:0500:0010:0000:df21:d606, AF=IPv6, addr=::45:500:10:0:df21:d606, scopeId=0x0], remoteRankId=5, remoteAddr=IpAddress[0000:0000:0045:0500:0010:0000:df21:b605, AF=IPv6, addr=::45:500:10:0:df21:b605, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.330 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:d306, AF=IPv6, addr=::42:500:10:0:df21:d306, scopeId=0x0], remoteRankId=2, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:5302, AF=IPv6, addr=::42:500:10:0:df21:5302, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.334 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0047:0500:0010:0000:df21:d806, AF=IPv6, addr=::47:500:10:0:df21:d806, scopeId=0x0], remoteRankId=7, remoteAddr=IpAddress[0000:0000:0047:0500:0010:0000:df21:f807, AF=IPv6, addr=::47:500:10:0:df21:f807, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.338 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=8, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:0b07, AF=IPv6, addr=::3f:300:10:0:df27:b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.342 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=9, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:2b07, AF=IPv6, addr=::3f:300:10:0:df27:2b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.347 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=10, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:4b07, AF=IPv6, addr=::3f:300:10:0:df27:4b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.351 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=11, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:6b07, AF=IPv6, addr=::3f:300:10:0:df27:6b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.355 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=12, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:8b07, AF=IPv6, addr=::3f:300:10:0:df27:8b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:07.834.359 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=13, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:ab07, AF=IPv6, addr=::3f:300:10:0:df27:ab07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.834.432 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.839.180 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.859.470 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.893.245 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.896.079 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.909.911 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.915.255 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.917.956 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.935.259 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.940.397 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.943.254 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.957.226 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.961.835 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.964.647 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.978.738 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.983.334 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:07.986.040 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.000.182 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.004.945 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.007.774 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.021.904 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.039.648 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.042.455 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.059.497 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.065.502 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.074.047 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.094.677 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.097.436 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.111.593 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.116.726 [ra_ctx.c:284]tid:4048511,RaGetEidByIp: Input parameters: phyId:6, devIndex:0x90103 num:1
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.117.564 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.120.480 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.135.033 [ra_ctx.c:181]tid:4048511,RaCtxInit: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.141.615 [communicator_impl.cc:1510][4048511][CommunicatorImpl][InitDataBufferManager] cclBuffer create, commId[group_name_137], addr[19797144240128], size[400]M
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.144.634 [ra_common.c:149]tid:4048511,RaGetSecRandom: Input parameters: phy_id[6], nic_position:[1]
+[INFO] ATRACE(4048511,):2026-11-25-19:28:08.153.226 [tracer_mgr_operate.c:67](tid:4048511) create object HCCL_4048511_6 successfully, exitSave(true), noLock(false).
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.155.155 [communicator_impl.cc:2905][4048511][CommunicatorImpl][SetAccelerator] env OpExpansionMode is [HcclAccelerator::AICPU_TS]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.155.184 [op_base_v2.cc:1130][4048511]Entry-HcclGetRankSize V950, commId[group_name_137], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.155.187 [op_base_v2.cc:1139][4048511]Entry-HcclGetRankSize V950 success, comm[group_name_137], rankSizePtr[0xffffdd66fd24], rankSize[16]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.155.204 [op_base_v2.cc:2013][4048511]HcclCommInitRootInfoConfigV2 success, take time [540222]us, rankNum[16], rank[6], identifier[group_name_137]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.155.213 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[141.61.45.118], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.155.291 [ra_host.c:369]tid:4048511,RaSocketDeinit: Input parameters: phyId[6] family[2] local_ip[141.61.45.118]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.155.299 [rs.c:1702]tid:4048511,RsSocketDeinit: socket deinit success, phyId:6, localIp:141.61.45.118
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.155.475 [ra_init.c:221]tid:4052139,RaDeinit: Input parameters: phyId[6], nicPosition:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.155.512 [op_base_v2.cc:1130][4048511]Entry-HcclGetRankSize V950, commId[group_name_137], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.155.515 [op_base_v2.cc:1139][4048511]Entry-HcclGetRankSize V950 success, comm[group_name_137], rankSizePtr[0xffffdd6702a8], rankSize[16]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.156.631 [env_ub_config.cc:32] [4048511][HCCL_ENV] HCCL_UB_MULTI_CHANNEL_NUM set by default to [1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.156.635 [host_multi_qp_config.cc:277] [4048511][HCCL_ENV] HCCL_HOST_RDMA_UDP_PORTS_LIST set by default, device config count[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.156.730 [my_rank.cc:450] [4048511][MyRank][Init] set op expansion mode by env[HcclAccelerator::AICPU_TS].
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.156.757 [coll_comm.cc:230] [4048511][Communicator Key Info]identifier[group_name_137] rankSize[16] comm[0xaaaafed98200]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.156.765 [coll_comm.cc:231] [4048511][LocalRank Key Info]userRank[6] deviceLogicId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.157.125 [coll_comm.cc:238] [4048511][CollComm][InitSymmetricMemory] commId[group_name_137], rank[6], rankSize[16].
+[INFO] RUNTIME(4048511,):2026-11-25-19:28:08.157.293 [task_fail_callback_data_manager.cc:62] 4048511 RegTaskFailCallback: Unregister task fail callback finish, name:__ACLRT_EXCEPTION_CALLBACK_REGISTER__:ASCENDCL:281471805495984.
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.157.296 [hcclCommTaskException.cc:139] [4048511][Register]aclrtExceptionInfoCallbackRegister set ProcessCallback success and unregister legacy TaskExceptionHandler::Process callback
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.157.308 [hccl_comm_host.cc:394] [4048511][InitCollComm]success, commId[group_name_137], deviceLogicId[6], devicePhyId[6], devType[6], userRank[6], userRankSize[16], opExpansionMode[2], taskExceptionEnable[1], notifyWaitTimeout[1836], plfDebugConfig[0x0].
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.157.351 [hcom_common.cc:171] [4048511][Hcom][HcomSetGroupTopoInfo] store groupRankNumMap, group:group_name_137, rankNum:16
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.157.353 [op_base.cc:508] [4048511][HcclCommInitCollComm] success, take time [1846]us.
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.175.570 [rs.c:1899]tid:4052139,RsDeinit: rs_deinit chipId[6] ok
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.339.863 [op_base_v2.cc:1947][4048511]Entry-HcclCommInitRootInfoConfig V950: nRanks[16], rank[6], commEngine[HcclAccelerator::DEFAULT]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.339.878 [op_base_v2.cc:1965][4048511]Entry-HcclCommInitRootInfoConfigV2:ranks[16], rank[6], rootinfo: host ip[141.61.45.118] port[50000] netMode[HrtNetworkMode::HDC] rootHandle.identifier[141.61.45.118_50000_0_1795606088339121], identifier[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.339.907 [root_info_detect_provider.cc:87] [4048511][DetectRankTableImpl] nRanks[16], rank[6] entry flat topo detect, rootinfo: host ip[141.61.45.118] port[50000] netMode[HrtNetworkMode::HDC] identifier[141.61.45.118_50000_0_1795606088339121], userDevId[6], devPhyId[6]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.339.933 [ra_init.c:165]tid:4048511,RaInit: Input parameters: phyId[6], nicPosition:[0] hdcType:[18] enableHdcAsync[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.340.121 [rs_tls.c:1951]tid:4048511,rs_ssl_init: TLS SWITCH (0)
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.340.257 [rs_epoll.c:551]tid:4052190,RsEpollHandle: pthread[epoll_pthread] is alive!
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.340.294 [rs_epoll.c:680]tid:4052192,RsConnectHandle: pthread[connect_pthread] is alive!
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.347.447 [rs.c:450]tid:4048511,RsInit: rs init success, chipId[6]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.347.459 [ra_init.c:253]tid:4048511,RaSetDebugConfig: Input parameters: phyId[6], nicPosition:[0], debugConfig[0x0]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.347.476 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=0 phyId=6 family=2 ip=141.61.45.118
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.405.855 [xml_parser.c:191][ParseXmlTags] ParseXmlTags: cannot open /var/run/ascend-topologyd/virtualTopology.xml
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.405.860 [npu_nic_affinity.c:722][BuildAffinity] BuildAffinity: XML unavailable (ret=10), fallback to driver topo interface
+[WARNING] HCCL(4048511,):2026-11-25-19:28:08.405.875 [npu_nic_affinity.c:398][EnumerateNicNames] EnumerateNicNames: opendir(/sys/class/infiniband) failed, errno=2(No such file or directory)
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.405.876 [npu_nic_affinity.c:432][BuildAffinityFromDriver] BuildAffinityFromDriver: failed to enumerate HCAs, ret=8
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.405.878 [npu_nic_affinity.c:433][BuildAffinityFromDriver] [perf] BuildAffinityFromDriver took 15360 ns
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.405.879 [rank_info_types.c:297][ProcessLayerRoce] ProcessLayerRoce: GetRoceIpFromXml failed for npu_id=6, ret=8
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.405.880 [rank_info_types.c:298][ProcessLayerRoce] [perf] ProcessLayerRoce took 36890 ns
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.406.142 [topo_addr_info.c:190][TopoAddrInfoGet] [perf] TopoAddrInfoGet took 58599510 ns
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.406.422 [ra_common.c:42]tid:4048511,RaGetTlsEnable: Input parameters: phyId[6], nicPosition:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.406.687 [ra_common.c:42]tid:4048511,RaGetTlsEnable: Input parameters: phyId[6], nicPosition:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.406.900 [socket_manager.cc:211][4048511][SocketManager::ServerInitAll] socket port range not configured.
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.407.127 [ra_host.c:731]tid:4048511,RaSocketBatchConnect: Input parameters: [0]th, phyId[6], localIp[141.61.45.118], remoteIp[141.61.45.118], port[50000], tag[rank_info_detect_default_tag_141.61.45.118_50000_0_1795606088339121_50000], cnt[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.517.911 [root_info_detect_provider.cc:99] [4048511][DetectRankTableImpl] end.
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.362 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 0 (localId: 0), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.368 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 1 (localId: 1), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.371 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 2 (localId: 2), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.373 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 3 (localId: 3), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.375 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 4 (localId: 4), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.377 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 5 (localId: 5), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.379 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 6 (localId: 6), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.381 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 7 (localId: 7), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.487 [rank_graph_builder.cc:145] [4048511][RankGraphBuilder][AddPeer2NetLink] Add Peer2NetLink Net2PeerLink success. level[1] netInstId[sp_0] rankId[6] planeId[plane_clos_0] AddrStr[IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0]],topoInstId[0],topoType[3714511104]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.518.592 [rank_graph_builder.cc:145] [4048511][RankGraphBuilder][AddPeer2NetLink] Add Peer2NetLink Net2PeerLink success. level[2] netInstId[cluster] rankId[6] planeId[plane_uboe] AddrStr[IpAddress[0000:0000:0000:0000:0000:0000:1400:f018, AF=IPv4, addr=20.0.240.24]],topoInstId[0],topoType[3714511104]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.519.475 [communicator_impl.cc:1476][4048511][CommunicatorImpl::InitRankGraph] rankTableInfo: RankTableInfo[version=2.0, rankCount=16, ranks size=16]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.519.482 [communicator_impl.cc:1477][4048511][CommunicatorImpl][InitRankGraph] topoInfo[TopoInfo{version=2.0, peer_count=8, edge_count=52, Peers.size=8, Edges.size=4}]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.519.485 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.522.756 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.394 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=15, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:eb07, AF=IPv6, addr=::3f:300:10:0:df27:eb07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.399 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=14, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:cb07, AF=IPv6, addr=::3f:300:10:0:df27:cb07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.404 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0044:0500:0010:0000:df21:d506, AF=IPv6, addr=::44:500:10:0:df21:d506, scopeId=0x0], remoteRankId=0, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:1300, AF=IPv6, addr=::42:500:10:0:df21:1300, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.408 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0043:0500:0010:0000:df21:d406, AF=IPv6, addr=::43:500:10:0:df21:d406, scopeId=0x0], remoteRankId=1, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:3301, AF=IPv6, addr=::42:500:10:0:df21:3301, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.412 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0041:0500:0010:0000:df21:d206, AF=IPv6, addr=::41:500:10:0:df21:d206, scopeId=0x0], remoteRankId=3, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:7303, AF=IPv6, addr=::42:500:10:0:df21:7303, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.416 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0046:0500:0010:0000:df21:d706, AF=IPv6, addr=::46:500:10:0:df21:d706, scopeId=0x0], remoteRankId=4, remoteAddr=IpAddress[0000:0000:0046:0500:0010:0000:df21:9704, AF=IPv6, addr=::46:500:10:0:df21:9704, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.420 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0045:0500:0010:0000:df21:d606, AF=IPv6, addr=::45:500:10:0:df21:d606, scopeId=0x0], remoteRankId=5, remoteAddr=IpAddress[0000:0000:0045:0500:0010:0000:df21:b605, AF=IPv6, addr=::45:500:10:0:df21:b605, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.424 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:d306, AF=IPv6, addr=::42:500:10:0:df21:d306, scopeId=0x0], remoteRankId=2, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:5302, AF=IPv6, addr=::42:500:10:0:df21:5302, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.428 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0047:0500:0010:0000:df21:d806, AF=IPv6, addr=::47:500:10:0:df21:d806, scopeId=0x0], remoteRankId=7, remoteAddr=IpAddress[0000:0000:0047:0500:0010:0000:df21:f807, AF=IPv6, addr=::47:500:10:0:df21:f807, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.432 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=8, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:0b07, AF=IPv6, addr=::3f:300:10:0:df27:b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.436 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=9, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:2b07, AF=IPv6, addr=::3f:300:10:0:df27:2b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.440 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=10, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:4b07, AF=IPv6, addr=::3f:300:10:0:df27:4b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.444 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=11, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:6b07, AF=IPv6, addr=::3f:300:10:0:df27:6b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.448 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=12, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:8b07, AF=IPv6, addr=::3f:300:10:0:df27:8b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.537.452 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=13, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:ab07, AF=IPv6, addr=::3f:300:10:0:df27:ab07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.539.867 [communicator_impl.cc:1510][4048511][CommunicatorImpl][InitDataBufferManager] cclBuffer create, commId[group_name_139], addr[19797651750912], size[1024]M
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.543.651 [communicator_impl.cc:2905][4048511][CommunicatorImpl][SetAccelerator] env OpExpansionMode is [HcclAccelerator::AICPU_TS]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.543.673 [op_base_v2.cc:1130][4048511]Entry-HcclGetRankSize V950, commId[group_name_139], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.543.676 [op_base_v2.cc:1139][4048511]Entry-HcclGetRankSize V950 success, comm[group_name_139], rankSizePtr[0xffffdd66fd24], rankSize[16]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.543.681 [op_base_v2.cc:2013][4048511]HcclCommInitRootInfoConfigV2 success, take time [203837]us, rankNum[16], rank[6], identifier[group_name_139]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.543.688 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[141.61.45.118], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.559.835 [ra_host.c:369]tid:4048511,RaSocketDeinit: Input parameters: phyId[6] family[2] local_ip[141.61.45.118]
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.559.842 [rs.c:1702]tid:4048511,RsSocketDeinit: socket deinit success, phyId:6, localIp:141.61.45.118
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.560.004 [ra_init.c:221]tid:4052200,RaDeinit: Input parameters: phyId[6], nicPosition:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.560.113 [op_base_v2.cc:1130][4048511]Entry-HcclGetRankSize V950, commId[group_name_139], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.560.117 [op_base_v2.cc:1139][4048511]Entry-HcclGetRankSize V950 success, comm[group_name_139], rankSizePtr[0xffffdd6702a8], rankSize[16]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.560.776 [my_rank.cc:450] [4048511][MyRank][Init] set op expansion mode by env[HcclAccelerator::AICPU_TS].
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.560.782 [coll_comm.cc:230] [4048511][Communicator Key Info]identifier[group_name_139] rankSize[16] comm[0xaaaaff0ae5d0]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.560.785 [coll_comm.cc:231] [4048511][LocalRank Key Info]userRank[6] deviceLogicId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.561.126 [coll_comm.cc:238] [4048511][CollComm][InitSymmetricMemory] commId[group_name_139], rank[6], rankSize[16].
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.561.276 [hccl_comm_host.cc:394] [4048511][InitCollComm]success, commId[group_name_139], deviceLogicId[6], devicePhyId[6], devType[6], userRank[6], userRankSize[16], opExpansionMode[2], taskExceptionEnable[1], notifyWaitTimeout[1836], plfDebugConfig[0x0].
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.561.310 [hcom_common.cc:171] [4048511][Hcom][HcomSetGroupTopoInfo] store groupRankNumMap, group:group_name_139, rankNum:16
+[INFO] HCCL(4048511,):2026-11-25-19:28:08.561.312 [op_base.cc:508] [4048511][HcclCommInitCollComm] success, take time [1206]us.
+[INFO] HCCP(4048511,):2026-11-25-19:28:08.620.170 [rs.c:1899]tid:4052200,RsDeinit: rs_deinit chipId[6] ok
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.362.481 [engine_ctx_c_adpt.cc:65] [4048511]Entry-HcclEngineCtxCreate:comm[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.362.568 [engine_ctx_c_adpt.cc:65] [4048511]HcclEngineCtxCreate success, ctxTag[group_name_139moe_distribute_v2], engine[AIV], size[16400], ctx[0x12000006f000], group[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.362.625 [coll_comm_res_c_adpt.cc:791] [4048511]Entry-HcclChannelAcquire channelNum[15], engine[AIV] group[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.362.725 [config_log.cc:27] [4048511]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.363.124 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::47:500:10:0:df21:d806
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.363.142 [ra_host.c:848]tid:4048511,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::47:500:10:0:df21:d806], port[16666]
+[INFO] DRV(4048511,):2026-11-25-19:31:44.363.201 [hdc_ub_common.c:514][ascend][curpid:4048511,4048511][drv][hdc][hdc_get_send_time_cost]hdc send exceed 10 us.(dev_id=6; l_id=167; unique_val=2166104844; type='service_rdma_v2'; jfs_id=31653; jfc_s=32673; find_block:0; memcpy=0; post_jfs_wr=3; wait_jfc=27; poll_jfc:1; ack_rearm_jfc=1; send=32; exceed_times=199
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.363.915 [socket_manager.cc:197][4048511][SocketManager::ServerInit] Local PortData[rankId=6, type=PortDeploymentType::DEV_NET, id=0, addr=IpAddress[0000:0000:0047:0500:0010:0000:df21:d806, AF=IPv6, addr=::47:500:10:0:df21:d806, scopeId=0x0]] listen the port 16666 success
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.363.927 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::3f:300:10:0:df21:cb01
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.363.930 [ra_host.c:848]tid:4048511,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.364.284 [socket_manager.cc:197][4048511][SocketManager::ServerInit] Local PortData[rankId=6, type=PortDeploymentType::DEV_NET, id=0, addr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0]] listen the port 16666 success
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.323 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::44:500:10:0:df21:d506
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.329 [ra_socket.c:65]tid:4048511,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::44:500:10:0:df21:d506], remoteIp[::42:500:10:0:df21:1300], port[16666], tag[group_name_139_engine_4_protocol_6_0_6_3_5], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.369 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::43:500:10:0:df21:d406
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.372 [ra_socket.c:65]tid:4048511,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::43:500:10:0:df21:d406], remoteIp[::42:500:10:0:df21:3301], port[16666], tag[group_name_139_engine_4_protocol_6_1_6_3_4], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.399 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::42:500:10:0:df21:d306
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.401 [ra_socket.c:65]tid:4048511,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::42:500:10:0:df21:d306], remoteIp[::42:500:10:0:df21:5302], port[16666], tag[group_name_139_engine_4_protocol_6_2_6_3_3], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.429 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::41:500:10:0:df21:d206
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.431 [ra_socket.c:65]tid:4048511,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::41:500:10:0:df21:d206], remoteIp[::42:500:10:0:df21:7303], port[16666], tag[group_name_139_engine_4_protocol_6_3_6_3_2], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.457 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::46:500:10:0:df21:d706
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.461 [ra_socket.c:65]tid:4048511,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::46:500:10:0:df21:d706], remoteIp[::46:500:10:0:df21:9704], port[16666], tag[group_name_139_engine_4_protocol_6_4_6_7_7], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.486 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=1 phyId=6 family=10 ip=::45:500:10:0:df21:d606
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.364.489 [ra_socket.c:65]tid:4048511,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::45:500:10:0:df21:d606], remoteIp[::45:500:10:0:df21:b605], port[16666], tag[group_name_139_engine_4_protocol_6_5_6_6_6], cnt[0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.366.938 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[0] localProtocol[6] remoteProtocol[6] engine[AIV] channel[1/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.250 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[1] localProtocol[6] remoteProtocol[6] engine[AIV] channel[2/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.305 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[2] localProtocol[6] remoteProtocol[6] engine[AIV] channel[3/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.347 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[3] localProtocol[6] remoteProtocol[6] engine[AIV] channel[4/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.385 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[4] localProtocol[6] remoteProtocol[6] engine[AIV] channel[5/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.424 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[5] localProtocol[6] remoteProtocol[6] engine[AIV] channel[6/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.463 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[7] localProtocol[6] remoteProtocol[6] engine[AIV] channel[7/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.501 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[8] localProtocol[6] remoteProtocol[6] engine[AIV] channel[8/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.539 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[9] localProtocol[6] remoteProtocol[6] engine[AIV] channel[9/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.544 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[10] localProtocol[6] remoteProtocol[6] engine[AIV] channel[10/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.549 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[11] localProtocol[6] remoteProtocol[6] engine[AIV] channel[11/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.554 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[12] localProtocol[6] remoteProtocol[6] engine[AIV] channel[12/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.559 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[13] localProtocol[6] remoteProtocol[6] engine[AIV] channel[13/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.564 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[14] localProtocol[6] remoteProtocol[6] engine[AIV] channel[14/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.367.571 [my_rank.cc:811] [4048511][LinkInfo]userRank[6] remoteRank[15] localProtocol[6] remoteProtocol[6] engine[AIV] channel[15/15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.384.265 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.385.108 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.385.710 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.386.716 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.387.507 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.388.865 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.389.612 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.391.583 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.393.532 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.394.125 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.394.727 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.395.245 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.395.710 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.396.189 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.396.953 [remote_rma_buffer.cc:85][4048511][GetRuntimeVersion] rts version is 90201000 pathMode is 0.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.397.400 [my_rank.cc:1390] [4048511][MyRank][CreateChannels] CreateChannels Time Elapsed [34358]us, channelNum [15]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.410.783 [coll_comm_res_c_adpt.cc:881] [4048511][HcclChannelAcquire] acquire channel success, group[group_name_139], engine[AIV], channelNum[15], take time [48165]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.410.807 [engine_ctx_c_adpt.cc:182] [4048511]Entry-operator():comm[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.410.873 [engine_ctx_c_adpt.cc:182] [4048511][operator()] success, ctxTag[group_name_139moe_distribute_v2], engine[AIV], srcCtx[0xffffdd66b358], size[16400], dstCtxOffset[0], group[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.413.413 [socket_process.cc:231] [4056366][SocketProcess][Init] initialized successfully. deviceLogicId: 6, devicePhyId: 6, this: 0xffff4bad6128
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.413.423 [socket_process.cc:98] [4056366][GetSocket][GetSocket] initialized. devicePhyId: 6, this: 0xffff4bad6128
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.413.603 [ra_socket.c:65]tid:4056366,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::45:500:10:0:df21:d606], remoteIp[::45:500:10:0:df21:b605], port[16666], tag[HeartBeat_sp_0_srv_17/6_to_sp_0_srv_17/5_::45:500:10:0:df21:b605_::45:500:10:0:df21:d606], cnt[1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.413.661 [socket_process.cc:98] [4056367][GetSocket][GetSocket] initialized. devicePhyId: 6, this: 0xffff4bad6128
+[INFO] HCCL(4048511,):2026-11-25-19:31:44.413.668 [socket_process.cc:98] [4056368][GetSocket][GetSocket] initialized. devicePhyId: 6, this: 0xffff4bad6128
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.413.687 [ra_host.c:848]tid:4056367,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::47:500:10:0:df21:d806], port[16666]
+[INFO] HCCP(4048511,):2026-11-25-19:31:44.414.856 [ra_host.c:848]tid:4056368,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:45.414.022 [cluster_monitor.cc:467] [4056366]commId:[group_name_139], establish rank[sp_0_srv_17/6] to rank[sp_0_srv_17/5] heartbeat connection success.
+[INFO] HCCL(4048511,):2026-11-25-19:31:45.415.189 [cluster_monitor.cc:467] [4056367]commId:[group_name_139], establish rank[sp_0_srv_17/6] to rank[sp_0_srv_17/7] heartbeat connection success.
+[INFO] HCCL(4048511,):2026-11-25-19:31:45.415.497 [cluster_monitor.cc:467] [4056368]commId:[group_name_139], establish rank[sp_0_srv_17/6] to rank[sp_0_srv_23/6] heartbeat connection success.
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.683.951 [op_base_v2.cc:1947][4048511]Entry-HcclCommInitRootInfoConfig V950: nRanks[16], rank[6], commEngine[HcclAccelerator::DEFAULT]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.683.969 [op_base_v2.cc:1965][4048511]Entry-HcclCommInitRootInfoConfigV2:ranks[16], rank[6], rootinfo: host ip[141.61.45.118] port[50000] netMode[HrtNetworkMode::HDC] rootHandle.identifier[141.61.45.118_50000_0_1795606318273621], identifier[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.684.010 [root_info_detect_provider.cc:87] [4048511][DetectRankTableImpl] nRanks[16], rank[6] entry flat topo detect, rootinfo: host ip[141.61.45.118] port[50000] netMode[HrtNetworkMode::HDC] identifier[141.61.45.118_50000_0_1795606318273621], userDevId[6], devPhyId[6]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.684.034 [ra_init.c:165]tid:4048511,RaInit: Input parameters: phyId[6], nicPosition:[0] hdcType:[18] enableHdcAsync[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.684.321 [rs_tls.c:1951]tid:4048511,rs_ssl_init: TLS SWITCH (0)
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.684.562 [rs_epoll.c:551]tid:4059982,RsEpollHandle: pthread[epoll_pthread] is alive!
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.684.608 [rs_epoll.c:680]tid:4059983,RsConnectHandle: pthread[connect_pthread] is alive!
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.686.384 [rs.c:450]tid:4048511,RsInit: rs init success, chipId[6]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.686.398 [ra_init.c:253]tid:4048511,RaSetDebugConfig: Input parameters: phyId[6], nicPosition:[0], debugConfig[0x0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.686.419 [ra_host.c:245]tid:4048511,RaSocketInit: socket init:mode=0 phyId=6 family=2 ip=141.61.45.118
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.638 [xml_parser.c:191][ParseXmlTags] ParseXmlTags: cannot open /var/run/ascend-topologyd/virtualTopology.xml
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.648 [npu_nic_affinity.c:722][BuildAffinity] BuildAffinity: XML unavailable (ret=10), fallback to driver topo interface
+[WARNING] HCCL(4048511,):2026-11-25-19:31:58.742.658 [npu_nic_affinity.c:398][EnumerateNicNames] EnumerateNicNames: opendir(/sys/class/infiniband) failed, errno=2(No such file or directory)
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.660 [npu_nic_affinity.c:432][BuildAffinityFromDriver] BuildAffinityFromDriver: failed to enumerate HCAs, ret=8
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.662 [npu_nic_affinity.c:433][BuildAffinityFromDriver] [perf] BuildAffinityFromDriver took 10940 ns
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.663 [rank_info_types.c:297][ProcessLayerRoce] ProcessLayerRoce: GetRoceIpFromXml failed for npu_id=6, ret=8
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.665 [rank_info_types.c:298][ProcessLayerRoce] [perf] ProcessLayerRoce took 50410 ns
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.742.725 [topo_addr_info.c:190][TopoAddrInfoGet] [perf] TopoAddrInfoGet took 56238170 ns
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.743.370 [ra_common.c:42]tid:4048511,RaGetTlsEnable: Input parameters: phyId[6], nicPosition:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.743.967 [ra_common.c:42]tid:4048511,RaGetTlsEnable: Input parameters: phyId[6], nicPosition:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.744.041 [socket_manager.cc:211][4048511][SocketManager::ServerInitAll] socket port range not configured.
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.744.176 [ra_host.c:731]tid:4048511,RaSocketBatchConnect: Input parameters: [0]th, phyId[6], localIp[141.61.45.118], remoteIp[141.61.45.118], port[50000], tag[rank_info_detect_default_tag_141.61.45.118_50000_0_1795606318273621_50000], cnt[0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.166 [root_info_detect_provider.cc:99] [4048511][DetectRankTableImpl] end.
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.657 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 0 (localId: 0), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.662 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 1 (localId: 1), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.666 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 2 (localId: 2), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.668 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 3 (localId: 3), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.670 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 4 (localId: 4), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.672 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 5 (localId: 5), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.674 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 6 (localId: 6), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.675 [rank_graph_builder.cc:243] [4048511][RankGraphBuilder][AddTopoDescFabricInfo] Processing rank 7 (localId: 7), found 0 peer2net edges
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.802 [rank_graph_builder.cc:145] [4048511][RankGraphBuilder][AddPeer2NetLink] Add Peer2NetLink Net2PeerLink success. level[1] netInstId[sp_0] rankId[6] planeId[plane_clos_0] AddrStr[IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0]],topoInstId[0],topoType[205459968]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.809.950 [rank_graph_builder.cc:145] [4048511][RankGraphBuilder][AddPeer2NetLink] Add Peer2NetLink Net2PeerLink success. level[2] netInstId[cluster] rankId[6] planeId[plane_uboe] AddrStr[IpAddress[0000:0000:0000:0000:0000:0000:1400:f018, AF=IPv4, addr=20.0.240.24]],topoInstId[0],topoType[205459968]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.810.969 [communicator_impl.cc:1476][4048511][CommunicatorImpl::InitRankGraph] rankTableInfo: RankTableInfo[version=2.0, rankCount=16, ranks size=16]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.810.977 [communicator_impl.cc:1477][4048511][CommunicatorImpl][InitRankGraph] topoInfo[TopoInfo{version=2.0, peer_count=8, edge_count=52, Peers.size=8, Edges.size=4}]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.810.982 [ra_ctx.c:91]tid:4048511,RaGetDevEidInfoNum: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.814.114 [ra_ctx.c:120]tid:4048511,RaGetDevEidInfoList: Input parameters: phy_id[6], nic_position:[1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.795 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=15, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:eb07, AF=IPv6, addr=::3f:300:10:0:df27:eb07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.801 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=14, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:cb07, AF=IPv6, addr=::3f:300:10:0:df27:cb07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.805 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0044:0500:0010:0000:df21:d506, AF=IPv6, addr=::44:500:10:0:df21:d506, scopeId=0x0], remoteRankId=0, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:1300, AF=IPv6, addr=::42:500:10:0:df21:1300, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.810 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0043:0500:0010:0000:df21:d406, AF=IPv6, addr=::43:500:10:0:df21:d406, scopeId=0x0], remoteRankId=1, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:3301, AF=IPv6, addr=::42:500:10:0:df21:3301, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.814 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0041:0500:0010:0000:df21:d206, AF=IPv6, addr=::41:500:10:0:df21:d206, scopeId=0x0], remoteRankId=3, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:7303, AF=IPv6, addr=::42:500:10:0:df21:7303, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.818 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0046:0500:0010:0000:df21:d706, AF=IPv6, addr=::46:500:10:0:df21:d706, scopeId=0x0], remoteRankId=4, remoteAddr=IpAddress[0000:0000:0046:0500:0010:0000:df21:9704, AF=IPv6, addr=::46:500:10:0:df21:9704, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.822 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0045:0500:0010:0000:df21:d606, AF=IPv6, addr=::45:500:10:0:df21:d606, scopeId=0x0], remoteRankId=5, remoteAddr=IpAddress[0000:0000:0045:0500:0010:0000:df21:b605, AF=IPv6, addr=::45:500:10:0:df21:b605, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.828 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:d306, AF=IPv6, addr=::42:500:10:0:df21:d306, scopeId=0x0], remoteRankId=2, remoteAddr=IpAddress[0000:0000:0042:0500:0010:0000:df21:5302, AF=IPv6, addr=::42:500:10:0:df21:5302, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.832 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:0047:0500:0010:0000:df21:d806, AF=IPv6, addr=::47:500:10:0:df21:d806, scopeId=0x0], remoteRankId=7, remoteAddr=IpAddress[0000:0000:0047:0500:0010:0000:df21:f807, AF=IPv6, addr=::47:500:10:0:df21:f807, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.836 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=8, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:0b07, AF=IPv6, addr=::3f:300:10:0:df27:b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.840 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=9, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:2b07, AF=IPv6, addr=::3f:300:10:0:df27:2b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.844 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=10, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:4b07, AF=IPv6, addr=::3f:300:10:0:df27:4b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.848 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=11, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:6b07, AF=IPv6, addr=::3f:300:10:0:df27:6b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.852 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=12, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:8b07, AF=IPv6, addr=::3f:300:10:0:df27:8b07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.830.856 [communicator_impl.cc:1482][4048511][CommunicatorImpl][InitRankGraph] link[LinkData:type=PortDeploymentType::DEV_NET, protocol=LinkProtocol::UB_CTP, localRankId=6, localAddr=IpAddress[0000:0000:003f:0300:0010:0000:df21:cb01, AF=IPv6, addr=::3f:300:10:0:df21:cb01, scopeId=0x0], remoteRankId=13, remoteAddr=IpAddress[0000:0000:003f:0300:0010:0000:df27:ab07, AF=IPv6, addr=::3f:300:10:0:df27:ab07, scopeId=0x0], reuseIdx=0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.832.725 [communicator_impl.cc:1510][4048511][CommunicatorImpl][InitDataBufferManager] cclBuffer create, commId[group_name_135], addr[19844034461696], size[100]M
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.837.820 [communicator_impl.cc:2905][4048511][CommunicatorImpl][SetAccelerator] env OpExpansionMode is [HcclAccelerator::AICPU_TS]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.837.846 [op_base_v2.cc:1130][4048511]Entry-HcclGetRankSize V950, commId[group_name_135], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.837.848 [op_base_v2.cc:1139][4048511]Entry-HcclGetRankSize V950 success, comm[group_name_135], rankSizePtr[0xffffdd66b9f4], rankSize[16]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.837.854 [op_base_v2.cc:2013][4048511]HcclCommInitRootInfoConfigV2 success, take time [153921]us, rankNum[16], rank[6], identifier[group_name_135]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.837.861 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[141.61.45.118], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.837.934 [ra_host.c:369]tid:4048511,RaSocketDeinit: Input parameters: phyId[6] family[2] local_ip[141.61.45.118]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.837.942 [rs.c:1702]tid:4048511,RsSocketDeinit: socket deinit success, phyId:6, localIp:141.61.45.118
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.838.173 [ra_init.c:221]tid:4059985,RaDeinit: Input parameters: phyId[6], nicPosition:[0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.838.292 [op_base_v2.cc:1130][4048511]Entry-HcclGetRankSize V950, commId[group_name_135], userDevId[6], devPhyId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.838.295 [op_base_v2.cc:1139][4048511]Entry-HcclGetRankSize V950 success, comm[group_name_135], rankSizePtr[0xffffdd66bf78], rankSize[16]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.838.988 [my_rank.cc:450] [4048511][MyRank][Init] set op expansion mode by env[HcclAccelerator::AICPU_TS].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.838.996 [coll_comm.cc:230] [4048511][Communicator Key Info]identifier[group_name_135] rankSize[16] comm[0xaaab08286ed0]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.839.000 [coll_comm.cc:231] [4048511][LocalRank Key Info]userRank[6] deviceLogicId[6]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.839.380 [coll_comm.cc:238] [4048511][CollComm][InitSymmetricMemory] commId[group_name_135], rank[6], rankSize[16].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.839.512 [hccl_comm_host.cc:394] [4048511][InitCollComm]success, commId[group_name_135], deviceLogicId[6], devicePhyId[6], devType[6], userRank[6], userRankSize[16], opExpansionMode[2], taskExceptionEnable[1], notifyWaitTimeout[1836], plfDebugConfig[0x0].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.839.540 [hcom_common.cc:171] [4048511][Hcom][HcomSetGroupTopoInfo] store groupRankNumMap, group:group_name_135, rankNum:16
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.839.543 [op_base.cc:508] [4048511][HcclCommInitCollComm] success, take time [1257]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.840.399 [alg_env_config.cc:189] [4051744][InitEnvConfig] initialized: deviceType[6], aicpuUnfold[0], aicpuCacheEnable[1], aivMode[0], ccuMSMode[0], ccuSchedMode[0], enableFfts[1], deterministic[0], entryLog[0], debugConfig[0x0].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.840.408 [alg_env_config.cc:212] [4051744][InitEnvConfig] initialized: execTimeoutSet[0], execTimeoutSec[0.00], splitRatioSet[0], splitRatio[0], intraLinkConfigSupported[0], intraRoce[0], a3ConfigSupported[0], interHccsDisable[0], retryMask[0x0], inconsistentCheck[0], taskException[1], algoConfig[deferred-to-costmodel].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.054 [physical_level_build.cc:484] [4051744][PhysicalLevel][Build] rank[6] built [3] physical levels
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.066 [physical_level_build.cc:489] [4051744][PhysicalLevel][Build] rank[6] level[0/3] rankNum[8] ranks[0..7] view[1] instSizeListByLayer[8,8] ref[layer 0 inst 0] hasTopoInst[1] topoType[1] locType[0] protocolNum[2] portNums[1,1,1,1,1,1,1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.071 [physical_level_build.cc:489] [4051744][PhysicalLevel][Build] rank[6] level[1/3] rankNum[16] ranks[0..15] view[1] instSizeListByLayer[16] ref[layer 1 inst 0] hasTopoInst[1] topoType[0] locType[0] protocolNum[2] portNums[8]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.074 [physical_level_build.cc:489] [4051744][PhysicalLevel][Build] rank[6] level[2/3] rankNum[16] ranks[0..15] view[1] instSizeListByLayer[16] ref[layer 2 inst 0] hasTopoInst[1] topoType[0] locType[0] protocolNum[1] portNums[1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.115 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.122 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[AllGather_group_name_135], engine[CPU_TS], size[3703], ctx[0xffca8b1a5b70], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.145 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.841.147 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[tuner_init], engine[CPU], size[1], ctx[0xffca8b1a1360], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.842.378 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.842.384 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[costmodel_AICPU_TS], engine[CPU], size[1696], ctx[0xffca8b1b32d0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.931.824 [hccl_comm_host.cc:519] [4051744][KernelLaunchAicpuCommInit] KernelLaunchAicpuCommInit Success
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.934.902 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b1afbc8], stream id[27]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.945.411 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d2e98], stream id[27]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.945.605 [op_common.cc:1768] [4051744][HcclAllocAlgResourceAICPU] resource calculated: commName[group_name_135], algTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device], algName[AicpuAllGatherParallelMeshNHR], slaveThreadNum[9], notifyNumOnMainThread[2], channelNum[8], channelLevels[2].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.945.610 [op_common.cc:1772] [4051744][HcclAllocAlgResourceAICPU] start allocation: commName[group_name_135], algTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device], algName[AicpuAllGatherParallelMeshNHR]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.945.619 [thread_c_adpt.cc:167] [4051744]Entry-HcclThreadAcquireWithConfig:comm[group_name_135] engine[AICPU] ThreadNum[10].
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.958.546 [rs.c:1899]tid:4059985,RsDeinit: rs_deinit chipId[6] ok
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.965.215 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d9f78], stream id[27]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.965.280 [thread_c_adpt.cc:167] [4051744]Entry-HcclThreadAcquireWithConfig:comm[group_name_135] engine[CPU] ThreadNum[1].
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.610 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.617 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device], engine[CPU_TS], size[12], ctx[0xffca8b2bfab0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.621 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.623 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[group_name_135_unfold], engine[CPU_TS], size[8], ctx[0xffca8b2bfa90], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.666 [coll_comm_res_c_adpt.cc:791] [4051744]Entry-HcclChannelAcquire channelNum[7], engine[AICPU_TS] group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.746 [config_log.cc:27] [4051744]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.979 [cluster_monitor.cc:663] [4051744]commId:[group_name_135], establish rank[sp_0_srv_17/6] to rank[sp_0_srv_17/5] heartbeat connection success.
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.985 [cluster_monitor.cc:663] [4051744]commId:[group_name_135], establish rank[sp_0_srv_17/6] to rank[sp_0_srv_17/7] heartbeat connection success.
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.966.989 [cluster_monitor.cc:663] [4051744]commId:[group_name_135], establish rank[sp_0_srv_17/6] to rank[sp_0_srv_23/6] heartbeat connection success.
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.967.087 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::44:500:10:0:df21:d506], remoteIp[::42:500:10:0:df21:1300], port[16666], tag[group_name_135_engine_3_protocol_4_0_6_3_5], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.967.145 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::43:500:10:0:df21:d406], remoteIp[::42:500:10:0:df21:3301], port[16666], tag[group_name_135_engine_3_protocol_4_1_6_3_4], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.967.181 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::42:500:10:0:df21:d306], remoteIp[::42:500:10:0:df21:5302], port[16666], tag[group_name_135_engine_3_protocol_4_2_6_3_3], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.967.210 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::41:500:10:0:df21:d206], remoteIp[::42:500:10:0:df21:7303], port[16666], tag[group_name_135_engine_3_protocol_4_3_6_3_2], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.967.237 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::46:500:10:0:df21:d706], remoteIp[::46:500:10:0:df21:9704], port[16666], tag[group_name_135_engine_3_protocol_4_4_6_7_7], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.967.264 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::45:500:10:0:df21:d606], remoteIp[::45:500:10:0:df21:b605], port[16666], tag[group_name_135_engine_3_protocol_4_5_6_6_6], cnt[2]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.968.057 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[0] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[1/7]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.968.181 [ra_host.c:848]tid:4051744,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::44:500:10:0:df21:d506], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.970.964 [base_config.cc:41] [4051744][HCCL_ENV] HCOMM_TA_CTP_UB_TIMEOUT set by default to [8]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.970.967 [base_config.cc:45] [4051744][HCCL_ENV] HCOMM_TA_RTP_UB_TIMEOUT set by default to [16]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.970.969 [base_config.cc:50] [4051744][HCCL_ENV] HCOMM_TA_RTP_UBOE_TIMEOUT set by default to [16]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.973.961 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[1] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[2/7]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.973.984 [ra_host.c:848]tid:4051744,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::43:500:10:0:df21:d406], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.977.389 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[2] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[3/7]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.977.406 [ra_host.c:848]tid:4051744,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::42:500:10:0:df21:d306], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.981.155 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[3] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[4/7]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.981.188 [ra_host.c:848]tid:4051744,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::41:500:10:0:df21:d206], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.985.816 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[4] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[5/7]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.985.830 [ra_host.c:848]tid:4051744,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::46:500:10:0:df21:d706], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.989.500 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[5] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[6/7]
+[INFO] HCCP(4048511,):2026-11-25-19:31:58.989.515 [ra_host.c:848]tid:4051744,RaSocketListenStart: Input parameters: [0]th, phyId[6], localIp[::45:500:10:0:df21:d606], port[16666]
+[INFO] HCCL(4048511,):2026-11-25-19:31:58.993.032 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[7] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[7/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.024.722 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbf4c3000. jettyId[11439], jettyHandle[ffca8b35a5d0], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.031.500 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbf2c3000. jettyId[11440], jettyHandle[ffca8b35f6d0], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.035.533 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbf0c3000. jettyId[11441], jettyHandle[ffca8b35fbe0], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.036.766 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbeec3000. jettyId[11442], jettyHandle[ffca8b3600b0], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.038.462 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbecc3000. jettyId[11443], jettyHandle[ffca8b360580], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.044.811 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbeac3000. jettyId[11444], jettyHandle[ffca8b360a50], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.049.349 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbe8c3000. jettyId[11445], jettyHandle[ffca8b360f20], dieId[1], funcId[5]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.079.825 [my_rank.cc:1390] [4051744][MyRank][CreateChannels] CreateChannels Time Elapsed [112820]us, channelNum [7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.112.473 [channel_process.cc:687] [4051744][LaunchChannelKernelCommon] listNum[7], commTag[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.119.278 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b3706b8], stream id[26]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.119.372 [coll_comm_res_c_adpt.cc:881] [4051744][HcclChannelAcquire] acquire channel success, group[group_name_135], engine[AICPU_TS], channelNum[7], take time [152706]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.119.439 [coll_comm_res_c_adpt.cc:791] [4051744]Entry-HcclChannelAcquire channelNum[1], engine[AICPU_TS] group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.119.508 [config_log.cc:27] [4051744]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.119.765 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[14] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[1/1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.126.367 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbe6c3000. jettyId[10508], jettyHandle[ffca8b2e5560], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.141.252 [my_rank.cc:1390] [4051744][MyRank][CreateChannels] CreateChannels Time Elapsed [21727]us, channelNum [1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.146.118 [channel_process.cc:687] [4051744][LaunchChannelKernelCommon] listNum[1], commTag[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.151.983 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b4759d8], stream id[26]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.053 [coll_comm_res_c_adpt.cc:881] [4051744][HcclChannelAcquire] acquire channel success, group[group_name_135], engine[AICPU_TS], channelNum[1], take time [32615]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.119 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.130 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device], engine[AICPU_TS], size[5389], ctx[0x12000012f000], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.133 [engine_ctx_c_adpt.cc:182] [4051744]Entry-operator():comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.168 [engine_ctx_c_adpt.cc:182] [4051744][operator()] success, ctxTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device], engine[AICPU_TS], srcCtx[0xffca8b46fff0], size[5389], dstCtxOffset[0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.182 [op_common.cc:1437] [4051744][HcclGetAlgRes] engine[AICPU_TS], algTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device], resource allocated: thread num[10], channel num per level[level0[7], level1[1]], ccu kernel num[0], commName[group_name_135], userRank[6], ctxSize[5389].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.152.205 [inconsistent_check.cc:66] [4051744][CompareOpExchangeInfos] all exchangeInfos checked successfully. algTag[AllGather_group_name_135_AicpuAllGatherParallelMeshNHR_device]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.079 [op_common.cc:1768] [4051744][HcclAllocAlgResourceAICPU] resource calculated: commName[group_name_135], algTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device], algName[AicpuAllGatherSoleNHR], slaveThreadNum[1], notifyNumOnMainThread[1], channelNum[7], channelLevels[1].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.085 [op_common.cc:1772] [4051744][HcclAllocAlgResourceAICPU] start allocation: commName[group_name_135], algTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device], algName[AicpuAllGatherSoleNHR]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.091 [thread_c_adpt.cc:167] [4051744]Entry-HcclThreadAcquireWithConfig:comm[group_name_135] engine[AICPU] ThreadNum[2].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.106 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.109 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device], engine[CPU_TS], size[12], ctx[0xffca8b1a2ac0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.119 [coll_comm_res_c_adpt.cc:791] [4051744]Entry-HcclChannelAcquire channelNum[7], engine[AICPU_TS] group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.153.199 [config_log.cc:27] [4051744]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCP(4048511,):2026-11-25-19:31:59.153.279 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], remoteIp[::3f:300:10:0:df21:4b01], port[16666], tag[group_name_135_engine_3_protocol_4_2_6_1_1], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:31:59.153.324 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], remoteIp[::3f:300:10:0:df21:8b01], port[16666], tag[group_name_135_engine_3_protocol_4_4_6_1_1], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:31:59.153.351 [ra_socket.c:65]tid:4051744,RaSocketBatchConnectAsync: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], remoteIp[::3f:300:10:0:df21:ab01], port[16666], tag[group_name_135_engine_3_protocol_4_5_6_1_1], cnt[2]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.154.095 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[2] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[1/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.156.245 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[4] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[2/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.158.056 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[5] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[3/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.159.280 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[7] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[4/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.160.630 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[8] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[5/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.161.866 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[10] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[6/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.163.789 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[14] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[7/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.180.861 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbdbf0000. jettyId[10509], jettyHandle[ffca8b4870c0], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.182.564 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbd9f0000. jettyId[10510], jettyHandle[ffca8b487410], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.183.179 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbd7f0000. jettyId[10511], jettyHandle[ffca8b487700], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.214.430 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbd5f0000. jettyId[10512], jettyHandle[ffca8b489e50], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.224.056 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbd3f0000. jettyId[10513], jettyHandle[ffca8b48b3c0], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.230.317 [dev_ub_connection.cc:652][4051744][DevUbConnection][SetJettyInfo] Get sqBuffVa is 3ffbd1f0000. jettyId[10514], jettyHandle[ffca8b48c830], dieId[0], funcId[3]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.248.997 [my_rank.cc:1390] [4051744][MyRank][CreateChannels] CreateChannels Time Elapsed [95785]us, channelNum [7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.270.409 [channel_process.cc:687] [4051744][LaunchChannelKernelCommon] listNum[7], commTag[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.275.902 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b496928], stream id[26]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.275.988 [coll_comm_res_c_adpt.cc:881] [4051744][HcclChannelAcquire] acquire channel success, group[group_name_135], engine[AICPU_TS], channelNum[7], take time [122868]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.276.082 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.276.093 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device], engine[AICPU_TS], size[5121], ctx[0x12000013c000], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.276.096 [engine_ctx_c_adpt.cc:182] [4051744]Entry-operator():comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.276.135 [engine_ctx_c_adpt.cc:182] [4051744][operator()] success, ctxTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device], engine[AICPU_TS], srcCtx[0xffca8b492c60], size[5121], dstCtxOffset[0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.276.148 [op_common.cc:1437] [4051744][HcclGetAlgRes] engine[AICPU_TS], algTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device], resource allocated: thread num[2], channel num per level[level0[7]], ccu kernel num[0], commName[group_name_135], userRank[6], ctxSize[5121].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.276.173 [inconsistent_check.cc:66] [4051744][CompareOpExchangeInfos] all exchangeInfos checked successfully. algTag[AllGather_group_name_135_AicpuAllGatherSoleNHR_device]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.286.812 [physical_level_build.cc:484] [4051744][PhysicalLevel][Build] rank[6] built [3] physical levels
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.286.831 [physical_level_build.cc:489] [4051744][PhysicalLevel][Build] rank[6] level[0/3] rankNum[8] ranks[0..7] view[1] instSizeListByLayer[8,8] ref[layer 0 inst 0] hasTopoInst[1] topoType[1] locType[0] protocolNum[2] portNums[1,1,1,1,1,1,1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.286.836 [physical_level_build.cc:489] [4051744][PhysicalLevel][Build] rank[6] level[1/3] rankNum[16] ranks[0..15] view[1] instSizeListByLayer[16] ref[layer 1 inst 0] hasTopoInst[1] topoType[0] locType[0] protocolNum[2] portNums[8]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.286.840 [physical_level_build.cc:489] [4051744][PhysicalLevel][Build] rank[6] level[2/3] rankNum[16] ranks[0..15] view[1] instSizeListByLayer[16] ref[layer 2 inst 0] hasTopoInst[1] topoType[0] locType[0] protocolNum[1] portNums[1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.286.879 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.286.886 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[ReduceScatter_group_name_135], engine[CPU_TS], size[3703], ctx[0xffca8b3d7470], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.287.088 [op_common.cc:1768] [4051744][HcclAllocAlgResourceAICPU] resource calculated: commName[group_name_135], algTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device], algName[AicpuReduceScatterParallelMeshNHR], slaveThreadNum[9], notifyNumOnMainThread[2], channelNum[8], channelLevels[2].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.287.092 [op_common.cc:1772] [4051744][HcclAllocAlgResourceAICPU] start allocation: commName[group_name_135], algTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device], algName[AicpuReduceScatterParallelMeshNHR]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.287.101 [thread_c_adpt.cc:167] [4051744]Entry-HcclThreadAcquireWithConfig:comm[group_name_135] engine[AICPU] ThreadNum[10].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.292.707 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b3d9d78], stream id[26]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.292.746 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.292.752 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device], engine[CPU_TS], size[12], ctx[0xffca8b3cb3c0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.292.796 [coll_comm_res_c_adpt.cc:791] [4051744]Entry-HcclChannelAcquire channelNum[7], engine[AICPU_TS] group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.292.862 [config_log.cc:27] [4051744]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.292.985 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[0] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[1/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.293.012 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[1] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[2/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.293.019 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[2] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[3/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.293.026 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[3] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[4/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.293.033 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[4] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[5/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.293.039 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[5] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[6/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.293.046 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[7] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[7/7]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.318.292 [channel_process.cc:687] [4051744][LaunchChannelKernelCommon] listNum[7], commTag[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.323.583 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b3e2148], stream id[26]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.323.654 [coll_comm_res_c_adpt.cc:881] [4051744][HcclChannelAcquire] acquire channel success, group[group_name_135], engine[AICPU_TS], channelNum[7], take time [30858]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.323.728 [coll_comm_res_c_adpt.cc:791] [4051744]Entry-HcclChannelAcquire channelNum[1], engine[AICPU_TS] group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.323.780 [config_log.cc:27] [4051744]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.323.819 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[14] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[1/1]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.325.677 [channel_process.cc:687] [4051744][LaunchChannelKernelCommon] listNum[1], commTag[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.117 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b3db9e8], stream id[26]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.181 [coll_comm_res_c_adpt.cc:881] [4051744][HcclChannelAcquire] acquire channel success, group[group_name_135], engine[AICPU_TS], channelNum[1], take time [12453]us.
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.260 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.270 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device], engine[AICPU_TS], size[5389], ctx[0x12000013e000], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.273 [engine_ctx_c_adpt.cc:182] [4051744]Entry-operator():comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.310 [engine_ctx_c_adpt.cc:182] [4051744][operator()] success, ctxTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device], engine[AICPU_TS], srcCtx[0xffca8b3ee650], size[5389], dstCtxOffset[0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.322 [op_common.cc:1437] [4051744][HcclGetAlgRes] engine[AICPU_TS], algTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device], resource allocated: thread num[10], channel num per level[level0[7], level1[1]], ccu kernel num[0], commName[group_name_135], userRank[6], ctxSize[5389].
+[INFO] HCCL(4048511,):2026-11-25-19:31:59.336.341 [inconsistent_check.cc:66] [4051744][CompareOpExchangeInfos] all exchangeInfos checked successfully. algTag[ReduceScatter_group_name_135_AicpuReduceScatterParallelMeshNHR_device]
+[INFO] DRV(4048511,):2026-11-25-19:32:44.379.988 [hdc_ub_common.c:514][ascend][curpid:4048511,4056343][drv][hdc][hdc_get_send_time_cost]hdc send exceed 10 us.(dev_id=6; l_id=167; unique_val=2166104844; type='service_rdma_v2'; jfs_id=31653; jfc_s=32673; find_block:0; memcpy=0; post_jfs_wr=1; wait_jfc=16; poll_jfc:0; ack_rearm_jfc=1; send=19; exceed_times=4667
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:29.703.250 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=63 original stream_id=46, capture stream_id=26, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:30.071.879 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=26, capture model_id=63.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:30.389.998 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=62 original stream_id=46, capture stream_id=21, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:30.648.660 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=21, capture model_id=62.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:31.010.639 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=61 original stream_id=46, capture stream_id=16, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:31.276.880 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=16, capture model_id=61.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:32.937.888 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=60 original stream_id=46, capture stream_id=11, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.265.043 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=11, capture model_id=60.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.361.672 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=59 original stream_id=46, capture stream_id=6, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.390.992 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=6, capture model_id=59.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.439.575 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=58 original stream_id=46, capture stream_id=3, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.468.313 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=3, capture model_id=58.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.529.201 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=57 original stream_id=46, capture stream_id=0, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.558.847 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=0, capture model_id=57.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.616.507 [context_aclgraph.cc:407] 4048511 StreamBeginCapture: capture begin success, device_id=6, model_id=56 original stream_id=46, capture stream_id=189, stream_status=STREAM_CAPTURE_STATUS_ACTIVE(1), isSubmodel=0, parent model_id=4294967295.
+[INFO] RUNTIME(4048511,):2026-11-25-19:33:33.646.094 [context_aclgraph.cc:733] 4048511 StreamEndCapture: capture end success, device_id=6, original stream_id=46, capture stream_id=189, capture model_id=56.
+[INFO] DRV(4048511,):2026-11-25-19:33:44.415.423 [hdc_ub_common.c:514][ascend][curpid:4048511,4056343][drv][hdc][hdc_get_send_time_cost]hdc send exceed 10 us.(dev_id=6; l_id=167; unique_val=2166104844; type='service_rdma_v2'; jfs_id=31653; jfc_s=32673; find_block:0; memcpy=0; post_jfs_wr=0; wait_jfc=13; poll_jfc:0; ack_rearm_jfc=0; send=14; exceed_times=8759
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.835 [op_common.cc:1768] [4051744][HcclAllocAlgResourceAICPU] resource calculated: commName[group_name_135], algTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device], algName[AicpuReduceScatterSoleNHR], slaveThreadNum[0], notifyNumOnMainThread[0], channelNum[7], channelLevels[1].
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.850 [op_common.cc:1772] [4051744][HcclAllocAlgResourceAICPU] start allocation: commName[group_name_135], algTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device], algName[AicpuReduceScatterSoleNHR]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.862 [thread_c_adpt.cc:167] [4051744]Entry-HcclThreadAcquireWithConfig:comm[group_name_135] engine[AICPU] ThreadNum[1].
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.892 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.896 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device], engine[CPU_TS], size[12], ctx[0xffc418808300], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.916 [coll_comm_res_c_adpt.cc:791] [4051744]Entry-HcclChannelAcquire channelNum[7], engine[AICPU_TS] group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.746.997 [config_log.cc:27] [4051744]HCCL_DEBUG_CONFIG is not set, debugConfig set by default to 0x0
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.195 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[2] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[1/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.228 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[4] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[2/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.234 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[5] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[3/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.240 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[7] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[4/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.246 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[8] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[5/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.252 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[10] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[6/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.747.257 [my_rank.cc:811] [4051744][LinkInfo]userRank[6] remoteRank[14] localProtocol[4] remoteProtocol[4] engine[AICPU_TS] channel[7/7]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.805.476 [channel_process.cc:687] [4051744][LaunchChannelKernelCommon] listNum[7], commTag[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.556 [stream.cc:259] [4051744][HCCL_TRACE]StreamDestroy, streamPtr[0xffc418816d38], stream id[186]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.682 [coll_comm_res_c_adpt.cc:881] [4051744][HcclChannelAcquire] acquire channel success, group[group_name_135], engine[AICPU_TS], channelNum[7], take time [64767]us.
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.785 [engine_ctx_c_adpt.cc:65] [4051744]Entry-HcclEngineCtxCreate:comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.801 [engine_ctx_c_adpt.cc:65] [4051744]HcclEngineCtxCreate success, ctxTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device], engine[AICPU_TS], size[5109], ctx[0x120000190000], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.804 [engine_ctx_c_adpt.cc:182] [4051744]Entry-operator():comm[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.845 [engine_ctx_c_adpt.cc:182] [4051744][operator()] success, ctxTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device], engine[AICPU_TS], srcCtx[0xffc418919800], size[5109], dstCtxOffset[0], group[group_name_135]
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.854 [op_common.cc:1437] [4051744][HcclGetAlgRes] engine[AICPU_TS], algTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device], resource allocated: thread num[1], channel num per level[level0[7]], ccu kernel num[0], commName[group_name_135], userRank[6], ctxSize[5109].
+[INFO] HCCL(4048511,):2026-11-25-19:33:50.811.874 [inconsistent_check.cc:66] [4051744][CompareOpExchangeInfos] all exchangeInfos checked successfully. algTag[ReduceScatter_group_name_135_AicpuReduceScatterSoleNHR_device]
+[INFO] DRV(4048511,):2026-11-25-19:34:44.432.004 [hdc_ub_common.c:514][ascend][curpid:4048511,4056343][drv][hdc][hdc_get_send_time_cost]hdc send exceed 10 us.(dev_id=6; l_id=167; unique_val=2166104844; type='service_rdma_v2'; jfs_id=31653; jfc_s=32673; find_block:0; memcpy=0; post_jfs_wr=0; wait_jfc=19; poll_jfc:0; ack_rearm_jfc=0; send=19; exceed_times=12976
+[INFO] DRV(4048511,):2026-11-25-19:35:44.459.960 [hdc_ub_common.c:514][ascend][curpid:4048511,4056343][drv][hdc][hdc_get_send_time_cost]hdc send exceed 10 us.(dev_id=6; l_id=167; unique_val=2166104844; type='service_rdma_v2'; jfs_id=31653; jfc_s=32673; find_block:0; memcpy=0; post_jfs_wr=0; wait_jfc=16; poll_jfc:0; ack_rearm_jfc=0; send=17; exceed_times=17303
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.729.793 [runtime.cc:5420] 4049786 SetWatchDogDevStatus: There is errInfo of devId=6, tsId=0
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.733.240 [hcclCommTaskException.cc:249] [4049786][TaskExceptionHost][Process], taskid[578471], streamid[61], tid[4051744], deviceid[6], retcode[507035], type[2]
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.733.258 [global_mirror_tasks.cc:136][4049786][FindTaskInfo]devId[6] streamId(sqId)[61] not hccl task.
+[WARNING] HCCL(4048511,):2026-11-25-19:35:46.733.261 [hcclCommTaskException.cc:274] [4049786][ProcessHcclTaskException]FindTaskInfo not found, deviceid[6] streamid[61] taskid[578471].
+[INFO] IDEDD(4048511,):2026-11-25-19:35:46.733.263 [dump_manager.cpp:50][tid:4049786] An exception callback message is received.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.742.486 [api_impl.cc:6683] 4051744 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.742.487 [api_impl.cc:6683] 4056334 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.767.104 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.804.595 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.805.933 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.808.039 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.860.552 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.862.467 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.863.233 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.863.888 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.864.485 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.865.056 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.865.635 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.866.175 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:46.867.077 [api_impl.cc:6683] 4048511 PeekLastErr: level=THREAD_LEVEL(0) err=507035.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.867.205 [op_base.cc:3957] [4048511]Entry-HcclCommDestroy: op_base comm destroy begin
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.867.222 [op_base.cc:5840] [4048511][HcclCommStateNotify]comm[0xaaaafec781f0], state[0], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback begin.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.867.230 [op_base.cc:5844] [4048511][HcclCommStateNotify]comm[0xaaaafec781f0], state[0], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback success.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.867.247 [op_base_v2.cc:731][4048511]Entry-HcclCommDestroy V950 comm[group_name_137]
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.869.299 [op_base_v2.cc:767][4048511]Entry-HcclCommDestroy V950 comm[group_name_137] success, take time [2063]us, userDevId[6], devPhyId[6].
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.869.327 [hccl_comm_host.cc:130] [4048511]UnRegistTaskAbortHandler begin, group[group_name_137]
+[WARNING] HCCL(4048511,):2026-11-25-19:35:46.869.387 [coll_comm.cc:1248] [4048511][HcclBinaryUnLoad] binHcclHandle is nullptr
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.869.447 [coll_comm.cc:132] [4048511][CollComm][~CollComm] cclBuffer free, commId[group_name_137].
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.880.361 [op_base.cc:5840] [4048511][HcclCommStateNotify]comm[0xaaaafec781f0], state[1], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback begin.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.885.248 [op_base.cc:3957] [4048511]Entry-HcclCommDestroy: op_base comm destroy begin
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.885.253 [op_base.cc:5840] [4048511][HcclCommStateNotify]comm[0xaaaafed38830], state[0], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback begin.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.885.256 [op_base.cc:5844] [4048511][HcclCommStateNotify]comm[0xaaaafed38830], state[0], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback success.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.885.266 [op_base_v2.cc:731][4048511]Entry-HcclCommDestroy V950 comm[group_name_139]
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.886.737 [op_base_v2.cc:767][4048511]Entry-HcclCommDestroy V950 comm[group_name_139] success, take time [1474]us, userDevId[6], devPhyId[6].
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.886.812 [cluster_monitor.cc:923] [4048511][UnRegisterToClusterMonitor]Entry HeartBeat DeInit.
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.935.363 [hccl_comm_host.cc:130] [4048511]UnRegistTaskAbortHandler begin, group[group_name_139]
+[WARNING] HCCL(4048511,):2026-11-25-19:35:46.935.407 [coll_comm.cc:1248] [4048511][HcclBinaryUnLoad] binHcclHandle is nullptr
+[INFO] HCCL(4048511,):2026-11-25-19:35:46.935.447 [coll_comm.cc:132] [4048511][CollComm][~CollComm] cclBuffer free, commId[group_name_139].
+[INFO] HCCP(4048511,):2026-11-25-19:35:46.937.080 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:46.981.239 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.025.633 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::44:500:10:0:df21:d506], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.070.018 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[2]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.113.128 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::43:500:10:0:df21:d406], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.154.481 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::42:500:10:0:df21:d306], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.197.493 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::41:500:10:0:df21:d206], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.241.469 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::46:500:10:0:df21:d706], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.283.335 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::45:500:10:0:df21:d606], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.328.074 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::47:500:10:0:df21:d806], cnt[0]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.371.961 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[3]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.417.205 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[4]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.459.244 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[5]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.501.047 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[6]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.546.688 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[7]
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.589.429 [op_base.cc:5840] [4048511][HcclCommStateNotify]comm[0xaaaafed38830], state[1], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback begin.
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.594.945 [op_base.cc:3957] [4048511]Entry-HcclCommDestroy: op_base comm destroy begin
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.594.951 [op_base.cc:5840] [4048511][HcclCommStateNotify]comm[0xaaab08263e50], state[0], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback begin.
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.594.954 [op_base.cc:5844] [4048511][HcclCommStateNotify]comm[0xaaab08263e50], state[0], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback success.
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.594.964 [op_base_v2.cc:731][4048511]Entry-HcclCommDestroy V950 comm[group_name_135]
+[INFO] ATRACE(4048511,):2026-11-25-19:35:47.595.029 [tracer_mgr_operate.c:250](tid:4048511) destroy object HCCL_4048511_6, exitSave(true).
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.599.260 [op_base_v2.cc:767][4048511]Entry-HcclCommDestroy V950 comm[group_name_135] success, take time [4300]us, userDevId[6], devPhyId[6].
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.599.344 [cluster_monitor.cc:923] [4048511][UnRegisterToClusterMonitor]Entry HeartBeat DeInit.
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.599.354 [hccl_comm_host.cc:130] [4048511]UnRegistTaskAbortHandler begin, group[group_name_135]
+[INFO] RUNTIME(4048511,):2026-11-25-19:35:47.599.575 [task_fail_callback_data_manager.cc:62] 4048511 RegTaskFailCallback: Unregister task fail callback finish, name:__ACLRT_EXCEPTION_CALLBACK_REGISTER__:ASCENDCL:281471942996752.
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.599.578 [hcclCommTaskException.cc:161] [4048511][UnRegister]aclrtExceptionInfoCallbackUnregister success
+[WARNING] HCCL(4048511,):2026-11-25-19:35:47.599.581 [coll_comm.cc:1248] [4048511][HcclBinaryUnLoad] binHcclHandle is nullptr
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.599.724 [coll_comm.cc:1000] [4048511][DestroyAicpuComm]group[group_name_135] send Hccl::KfcCommand[3] success
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.609.890 [coll_comm.cc:1010] [4048511][DestroyAicpuComm]get Hccl::KfcStatus[3] success
+[INFO] HCCL(4048511,):2026-11-25-19:35:47.609.892 [coll_comm.cc:132] [4048511][CollComm][~CollComm] cclBuffer free, commId[group_name_135].
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.619.257 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[8]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.664.169 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[9]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.712.063 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[10]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.762.249 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::47:500:10:0:df21:d806], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.809.917 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[11]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.854.901 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::45:500:10:0:df21:d606], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.902.449 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[12]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.950.074 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::46:500:10:0:df21:d706], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:47.998.783 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::41:500:10:0:df21:d206], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:48.044.114 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[13]
+[INFO] HCCP(4048511,):2026-11-25-19:35:48.088.267 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::42:500:10:0:df21:d306], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:48.137.154 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::3f:300:10:0:df21:cb01], cnt[14]
+[INFO] HCCP(4048511,):2026-11-25-19:35:48.184.396 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::43:500:10:0:df21:d406], cnt[1]
+[INFO] HCCP(4048511,):2026-11-25-19:35:48.229.283 [ra_host.c:769]tid:4048511,RaSocketBatchClose: Input parameters: [0]th, phyId[6], localIp[::44:500:10:0:df21:d506], cnt[1]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.279.127 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d9f78], stream id[27]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.291.972 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xaaaaff0ef748], stream id[27]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.292.910 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2b1bf8], stream id[126]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.293.750 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2b2c18], stream id[125]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.294.599 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2b3c38], stream id[124]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.295.347 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d2e98], stream id[123]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.296.004 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d3eb8], stream id[122]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.296.647 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d4ed8], stream id[121]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.297.316 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d5ef8], stream id[120]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.297.958 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d6f18], stream id[119]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.298.611 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d7f38], stream id[118]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.299.344 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2d8f58], stream id[117]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.300.028 [stream.cc:259] [4048511][HCCL_TRACE]StreamDestroy, streamPtr[0xffca8b2adf88], stream id[127]
+[INFO] HCCL(4048511,):2026-11-25-19:35:48.300.735 [op_base.cc:5840] [4048511][HcclCommStateNotify]comm[0xaaab08263e50], state[1], regName[aicpu_task_cache_callback], args[0xffff4cf8c478] callback begin.
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.137 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_MALLOC_FREE, applyTotal = 487, applySucc = 366, releaseTotal = 121, releaseSucc = 121
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.144 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_MALLOC_FREE_HOST, applyTotal = 0, applySucc = 0, releaseTotal = 55, releaseSucc = 55
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.146 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_CONTEXT, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.148 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_SET_RESET_DEVICE, applyTotal = 78, applySucc = 78, releaseTotal = 5, releaseSucc = 5
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.150 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_EVENT, applyTotal = 77670, applySucc = 77670, releaseTotal = 77171, releaseSucc = 77171
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.151 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_STREAM, applyTotal = 60, applySucc = 60, releaseTotal = 27, releaseSucc = 27
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.153 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_DVPP_MALLOC_FREE, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.155 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_RECORD_RESET_EVENT, applyTotal = 122035, applySucc = 122035, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.156 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DATA_BUFFER, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.158 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_TENSOR_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.159 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.161 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DATASET, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.162 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_LOAD_UNLOAD_MODEL, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.164 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_AIPP, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.165 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_ATTR, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.166 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_HANDLE, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.168 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_CHANNEL_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.169 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_PIC_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.170 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_ROI_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.173 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_RESIZE_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.174 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_JPEGE_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.175 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_VDEC_CHANNEL_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.177 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_VENC_CHANNEL_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.178 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_STREAM_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.180 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_VDEC_FRAME_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.181 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_VENC_FRAME_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.183 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_CHANNEL, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.184 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_VDEC_CHANNEL, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.185 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_VENC_CHANNEL, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.186 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_DVPP_BATCH_PIC_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.188 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_GROUP_INFO, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.189 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_PROF_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.191 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_PROF_SUB_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.192 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_MODEL_CONFIG, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.193 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_QUEUE_ID, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.195 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_QUEUE_ATTR, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.196 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_QUEUE_ROUTE, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.197 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_QUEUE_ROUTE_LIST, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.199 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_QUEUE_ROUTE_QUERY, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.200 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_MBUF, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.201 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_GRAPH_DUMP_OPTION, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.203 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_ALLOCATOR_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.204 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_CREATE_DESTROY_ALLOCATOR_BINARY_DESC, applyTotal = 0, applySucc = 0, releaseTotal = 0, releaseSucc = 0
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.205 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_RESERVE_RELEASE_MEMORY_ADDRESS, applyTotal = 76, applySucc = 76, releaseTotal = 56, releaseSucc = 56
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.207 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_MALLOC_FREE_PHYSICAL_MEMORY, applyTotal = 4131, applySucc = 4131, releaseTotal = 541, releaseSucc = 541
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.208 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_MAP_UNMAP_MEMORY, applyTotal = 4131, applySucc = 4131, releaseTotal = 541, releaseSucc = 541
+[INFO] ASCENDCL(4048511,):2026-11-25-19:35:48.422.210 [resource_statistics.cpp:113]4048511 TraverseStatistics: The ResourceType:ACL_STATISTICS_LOAD_UNLOAD_BINARY, applyTotal = 0, applySucc = 0, releaseTotal = 6, releaseSucc = 6

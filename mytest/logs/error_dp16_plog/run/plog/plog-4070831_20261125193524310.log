@@ -1,0 +1,18 @@
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:24.310.530 [task_fail_callback_data_manager.cc:89] 4070831 TaskFailCallBackManager: Constructor.
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:24.310.612 [xpu_task_fail_callback_data_manager.cc:59] 4070831 XpuTaskFailCallBackManager: XpuTaskFailCallBackManager Constructor.
+[INFO] TDT(4070831,python3.12):2026-11-25-19:35:24.314.664 [package_worker_factory.cpp:38][RegisterPackageWorkerCreator][tid:4070831] Register[2] package worker was created successfully
+[INFO] TDT(4070831,python3.12):2026-11-25-19:35:24.314.671 [package_worker_factory.cpp:38][RegisterPackageWorkerCreator][tid:4070831] Register[3] package worker was created successfully
+[INFO] HCCL(4070831,python3.12):2026-11-25-19:35:24.404.603 [adapter_rts.cc:3089] [4070831][adapter_rts.cc][CallBackInitRts] g_deviceType [9] g_deviceLogicId [-1] g_devicePhyId [-1]
+[INFO] HCCL(4070831,python3.12):2026-11-25-19:35:24.450.712 [aicpu_task_cache.cc:24] [4070831][AicpuTaskCache][AicpuTaskCache] create aicpu task cache at 0x0000ffff693a1300: maxCacheBytes[10485760]
+[INFO] HCCL(4070831,python3.12):2026-11-25-19:35:24.461.626 [op_base.cc:5820] [4070831][HcclCommRegCommStateCallback]Register commStateCallBack success, regName[aicpu_task_cache_callback], args[0xffff6a99c478].
+[INFO] PROFILING(4070831,python3.12):2026-11-25-19:35:26.256.106 [prof_cann_plugin.cpp:256] (tid:4070831) RegisterProfileCallback, callback type is 12
+[INFO] PROFILING(4070831,python3.12):2026-11-25-19:35:26.256.119 [prof_cann_plugin.cpp:256] (tid:4070831) RegisterProfileCallback, callback type is 11
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:26.844.892 [runtime_keeper.cc:209] 4070831 CreateRuntimeImpl: Open libruntime_v200.so successfully
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:26.845.875 [runtime.cc:5030] 4070831 GetVisibleDevices: ASCEND_RT_VISIBLE_DEVICES param was not set
+[INFO] HCCL(4070831,python3.12):2026-11-25-19:35:49.194.936 [aicpu_task_cache.cc:45] [4070831][AicpuTaskCache][~AicpuTaskCache] release aicpu task cache at 0x0000ffff693a1300: entryCnt[0], cacheBytes_[0]
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:49.264.330 [tprt.cc:21][TPRT]TID[4070831] ~TprtManage: ~TprtManage
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:49.264.350 [runtime_adapt.cc:57] 4070831 ~Runtime: runtime destructor.
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:49.264.358 [runtime.cc:1661] 4070831 WaitMonitorExit: wait monitor success, used count=0.
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:49.308.587 [xpu_task_fail_callback_data_manager.cc:64] 4070831 ~XpuTaskFailCallBackManager: XpuTaskFailCallBackManager Destructor.
+[INFO] RUNTIME(4070831,python3.12):2026-11-25-19:35:49.308.595 [task_fail_callback_data_manager.cc:91] 4070831 ~TaskFailCallBackManager: Destructor.
+[INFO] ATRACE(4070831,python3.12):2026-11-25-19:35:49.394.406 [stacktrace_signal.c:229](tid:4070831) unregister all signal handlers, can not capture signal.

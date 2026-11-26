@@ -1,0 +1,11 @@
+[INFO] RUNTIME(4047565,python3.12):2026-11-25-19:27:01.597.782 [task_fail_callback_data_manager.cc:89] 4047565 TaskFailCallBackManager: Constructor.
+[INFO] RUNTIME(4047565,python3.12):2026-11-25-19:27:01.597.849 [xpu_task_fail_callback_data_manager.cc:59] 4047565 XpuTaskFailCallBackManager: XpuTaskFailCallBackManager Constructor.
+[INFO] TDT(4047565,python3.12):2026-11-25-19:27:01.601.684 [package_worker_factory.cpp:38][RegisterPackageWorkerCreator][tid:4047565] Register[2] package worker was created successfully
+[INFO] TDT(4047565,python3.12):2026-11-25-19:27:01.601.690 [package_worker_factory.cpp:38][RegisterPackageWorkerCreator][tid:4047565] Register[3] package worker was created successfully
+[INFO] HCCL(4047565,python3.12):2026-11-25-19:27:01.689.976 [adapter_rts.cc:3089] [4047565][adapter_rts.cc][CallBackInitRts] g_deviceType [9] g_deviceLogicId [-1] g_devicePhyId [-1]
+[INFO] HCCL(4047565,python3.12):2026-11-25-19:27:01.734.605 [aicpu_task_cache.cc:24] [4047565][AicpuTaskCache][AicpuTaskCache] create aicpu task cache at 0x0000ffff75df1300: maxCacheBytes[10485760]
+[INFO] HCCL(4047565,python3.12):2026-11-25-19:27:01.744.832 [op_base.cc:5820] [4047565][HcclCommRegCommStateCallback]Register commStateCallBack success, regName[aicpu_task_cache_callback], args[0xffff773dc478].
+[INFO] PROFILING(4047565,python3.12):2026-11-25-19:27:03.779.763 [prof_cann_plugin.cpp:256] (tid:4047565) RegisterProfileCallback, callback type is 12
+[INFO] PROFILING(4047565,python3.12):2026-11-25-19:27:03.779.773 [prof_cann_plugin.cpp:256] (tid:4047565) RegisterProfileCallback, callback type is 11
+[INFO] RUNTIME(4047565,python3.12):2026-11-25-19:27:09.390.726 [runtime_keeper.cc:209] 4047565 CreateRuntimeImpl: Open libruntime_v200.so successfully
+[INFO] RUNTIME(4047565,python3.12):2026-11-25-19:27:09.391.672 [runtime.cc:5030] 4047565 GetVisibleDevices: ASCEND_RT_VISIBLE_DEVICES param was not set

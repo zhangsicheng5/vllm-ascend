@@ -1,0 +1,8 @@
+主题：vllm-ascend 适配上游 HiSparse kv offload 方案讨论
+时间：10/27(周二) 15:00-16:00 (UTC+08:00)Beijing
+Host：https://imeeting.huawei.com/meeting/startwelink?id=99193852&pwd=ODkzMjY0&token=PBkBRn4wlxLgOIaSoD44dF3fzubEMVs2m&stype=0
+Internal：https://imeeting.huawei.com/meeting/joinwelink?id=99193852&pwd=NDk3MzQ1&token=ygtUrYpr04z2xBV7UEumNCFZelAQPqfNM&stype=0
+External：https://app.huawei.com/wmeeting/join/99193852/ygtUrYpr04z2xBV7UEumNCFZelAQPqfNM
+会议ID：99193852
+会议密码：497345
+会议链接：https://w3.huawei.com/emeeting/mail/?redirect=https%3A%2F%2Fw3.huawei.com%2Femeeting%2F%23%2FagendaController%2FF01FDFFDA0665568B7EE80BD0DB5D327%2Fmanage%3F&welink_open_uri=aDU6Ly83ODE1NDY1OTM3NTE0OTQvaHRtbC9pbmRleC5odG1sIy9tZWV0aW5nLzIxNjcxMjY4My9hZ2VuZGE/
